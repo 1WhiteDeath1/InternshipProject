@@ -14,3 +14,8 @@ from backend.routers.features import router as features_router
 from backend.routers.import_export import router as import_export_router
 from backend.routers.backup import router as backup_router
 from backend.routers.branding import router as branding_router
+from backend.routers.members import router as members_router
+from backend.routers.attendance import router as attendance_router
+from backend.routers.mess_billing import router as mess_billing_router
+from backend.routers.recipes import router as recipes_router
+from backend.routers.kitchen import router as kitchen_router

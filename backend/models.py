@@ -89,6 +89,42 @@ class AuditAction(str, enum.Enum):
     EXPORT = "export"
     IMPORT = "import"
 
+class MessCategory(str, enum.Enum):
+    OFFICERS = "officers"
+    JCOS = "jcos"
+    ORS = "ors"
+
+class MemberStatus(str, enum.Enum):
+    ACTIVE = "active"
+    TRANSFERRED = "transferred"
+    LEFT = "left"
+
+class ClientCategory(str, enum.Enum):
+    PERMANENT_MEMBER = "permanent_member"
+    NON_MEMBER_CIVILIAN = "non_member_civilian"
+    NON_MEMBER_NON_CIVILIAN = "non_member_non_civilian"
+
+class MealType(str, enum.Enum):
+    BREAKFAST = "breakfast"
+    LUNCH = "lunch"
+    HITEA = "hitea"
+    DINNER = "dinner"
+
+class AttendanceStatus(str, enum.Enum):
+    BOOKED = "booked"
+    ATTENDED = "attended"
+    CANCELLED = "cancelled"
+    EXCLUDED = "excluded"
+
+class LeaveStatus(str, enum.Enum):
+    ACTIVE = "active"
+    CANCELLED = "cancelled"
+
+class MessBillStatus(str, enum.Enum):
+    DRAFT = "draft"
+    ISSUED = "issued"
+    PAID = "paid"
+
 
 # --- Core Models ---
 
@@ -479,10 +515,13 @@ class Booking(Base):
     special_requests = Column(Text)
     total_amount = Column(Numeric(10, 2))
     processed_by = Column(Integer, ForeignKey("users.id"))
+    client_category = Column(Enum(ClientCategory), default=ClientCategory.NON_MEMBER_CIVILIAN)
+    member_id = Column(Integer, ForeignKey("members.id"), nullable=True)  # set when a permanent member occupies a room
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     room = relationship("Room")
+    member = relationship("Member")
 
 
 class GuestMovement(Base):
@@ -581,3 +620,131 @@ class IncidentReport(Base):
     resolution = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     resolved_at = Column(DateTime)
+
+
+# --- Mess Management Models ---
+
+class Member(Base):
+    __tablename__ = "members"
+
+    id = Column(Integer, primary_key=True)
+    service_number = Column(String(50), nullable=False, unique=True)
+    full_name = Column(String(200), nullable=False)
+    rank = Column(String(50), nullable=False)
+    unit = Column(String(100))
+    mess_category = Column(Enum(MessCategory), nullable=False)
+    client_category = Column(Enum(ClientCategory), default=ClientCategory.PERMANENT_MEMBER)
+    custom_discount_rate = Column(Numeric(4, 2), default=0.00)  # per-member override, 0-100
+    phone = Column(String(50))
+    email = Column(String(255))
+    status = Column(Enum(MemberStatus), default=MemberStatus.ACTIVE)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_member_status", "status"),
+        Index("idx_member_category", "mess_category"),
+    )
+
+
+class MemberLeave(Base):
+    __tablename__ = "member_leaves"
+
+    id = Column(Integer, primary_key=True)
+    member_id = Column(Integer, ForeignKey("members.id"), nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    reason = Column(Text)
+    status = Column(Enum(LeaveStatus), default=LeaveStatus.ACTIVE)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    member = relationship("Member")
+
+    __table_args__ = (
+        Index("idx_leave_member", "member_id"),
+        Index("idx_leave_dates", "start_date", "end_date"),
+    )
+
+
+class MealAttendance(Base):
+    """A single consumption/booking record for one meal slot. The consumer is
+    either a Member (member_id) or a non-member hotel guest (booking_id) -
+    exactly one is set, enforced in MealAttendanceCreate. recipe_id optionally
+    records what menu item was consumed, feeding kitchen production planning."""
+    __tablename__ = "meal_attendance"
+
+    id = Column(Integer, primary_key=True)
+    member_id = Column(Integer, ForeignKey("members.id"), nullable=True)
+    booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=True)
+    recipe_id = Column(Integer, ForeignKey("recipes.id"), nullable=True)
+    date = Column(Date, nullable=False)
+    meal_type = Column(Enum(MealType), nullable=False)
+    status = Column(Enum(AttendanceStatus), default=AttendanceStatus.BOOKED)
+    method = Column(String(20), default="manual")  # manual | biometric | qr - recorded only, no hardware integration
+    booked_at = Column(DateTime, default=datetime.utcnow)
+    marked_at = Column(DateTime, nullable=True)
+    marked_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    member = relationship("Member")
+    booking = relationship("Booking")
+    recipe = relationship("Recipe")
+
+    __table_args__ = (
+        Index("idx_attendance_member_date", "member_id", "date"),
+        Index("idx_attendance_date_meal", "date", "meal_type"),
+        Index("uq_attendance_member_date_meal", "member_id", "date", "meal_type", unique=True),
+        Index("uq_attendance_booking_date_meal", "booking_id", "date", "meal_type", unique=True),
+    )
+
+
+class MessBill(Base):
+    __tablename__ = "mess_bills"
+
+    id = Column(Integer, primary_key=True)
+    member_id = Column(Integer, ForeignKey("members.id"), nullable=False)
+    month = Column(Integer, nullable=False)
+    year = Column(Integer, nullable=False)
+    man_days = Column(Integer, nullable=False, default=0)
+    per_head_rate = Column(Numeric(12, 2), nullable=False, default=0)
+    base_menu_amount = Column(Numeric(12, 2), nullable=False, default=0)
+    stay_amount = Column(Numeric(12, 2), default=0)
+    extra_meals_amount = Column(Numeric(12, 2), default=0)
+    applied_discount_rate = Column(Numeric(4, 2), default=0)
+    discount_amount = Column(Numeric(12, 2), default=0)
+    discount_approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    discount_reason = Column(Text, nullable=True)
+    total_amount = Column(Numeric(12, 2), nullable=False, default=0)
+    status = Column(Enum(MessBillStatus), default=MessBillStatus.DRAFT)
+    generated_at = Column(DateTime, default=datetime.utcnow)
+    generated_by = Column(Integer, ForeignKey("users.id"))
+
+    member = relationship("Member")
+
+    __table_args__ = (
+        Index("uq_messbill_period", "member_id", "year", "month", unique=True),
+    )
+
+
+class GuestMealCharge(Base):
+    """Guest meals sponsored by a member, folded into that member's
+    MessBill.extra_meals_amount at generation time. No guest-identity
+    table - Guest Management is out of scope, a free-text guest_name
+    is enough here."""
+    __tablename__ = "guest_meal_charges"
+
+    id = Column(Integer, primary_key=True)
+    sponsor_member_id = Column(Integer, ForeignKey("members.id"), nullable=False)
+    guest_name = Column(String(200), nullable=False)
+    date = Column(Date, nullable=False)
+    meal_type = Column(Enum(MealType), nullable=False)
+    amount = Column(Numeric(12, 2), nullable=False)
+    notes = Column(Text)
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    sponsor = relationship("Member")
+
+    __table_args__ = (
+        Index("idx_guestcharge_sponsor_date", "sponsor_member_id", "date"),
+    )

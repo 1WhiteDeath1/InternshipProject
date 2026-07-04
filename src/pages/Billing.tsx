@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { Search, Plus, FileText, Ban, DollarSign, Receipt, Calendar, Trash2, Wallet } from 'lucide-react';
+import { Search, Plus, FileText, Ban, DollarSign, Receipt, Calendar, Trash2, Wallet, UtensilsCrossed } from 'lucide-react';
 
 interface Invoice {
   id: number;
@@ -33,9 +33,10 @@ interface InvoiceLineItem {
   description: string;
   quantity: number;
   unit_price: number;
+  is_meal_charge: boolean;
 }
 
-const emptyItem: InvoiceLineItem = { description: '', quantity: 1, unit_price: 0 };
+const emptyItem: InvoiceLineItem = { description: '', quantity: 1, unit_price: 0, is_meal_charge: false };
 
 export default function Billing() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -66,9 +67,31 @@ export default function Billing() {
     });
   }, [search]);
 
+  const handlePullRecordedMeals = async () => {
+    if (!form.booking_id) {
+      toast.error('Enter a Booking ID first');
+      return;
+    }
+    try {
+      const res = await api.get(`/attendance?booking_id=${form.booking_id}&status=attended`);
+      const meals = res.data.items as { recipe_name: string | null; meal_type: string; date: string }[];
+      if (meals.length === 0) {
+        toast.info('No recorded meals found for this booking');
+        return;
+      }
+      const mealItems: InvoiceLineItem[] = meals.map(m => ({
+        description: `Meal: ${m.recipe_name || m.meal_type} (${m.meal_type}, ${m.date})`,
+        quantity: 1, unit_price: 0, is_meal_charge: true,
+      }));
+      const existing = form.items.filter(i => i.description.trim() || i.quantity !== 1 || i.unit_price !== 0);
+      setForm({ ...form, items: [...existing, ...mealItems] });
+      toast.success(`Pulled ${meals.length} recorded meal(s) - fill in unit prices`);
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to pull recorded meals')); }
+  };
+
   const addLineItem = () => setForm({ ...form, items: [...form.items, { ...emptyItem }] });
   const removeLineItem = (index: number) => setForm({ ...form, items: form.items.filter((_, i) => i !== index) });
-  const updateLineItem = (index: number, field: keyof InvoiceLineItem, value: string | number) => {
+  const updateLineItem = (index: number, field: keyof InvoiceLineItem, value: string | number | boolean) => {
     const items = [...form.items];
     items[index] = { ...items[index], [field]: value };
     setForm({ ...form, items });
@@ -136,7 +159,12 @@ export default function Billing() {
           <DialogContent className="max-w-xl">
             <DialogHeader><DialogTitle>Create Invoice</DialogTitle></DialogHeader>
             <div className="space-y-3">
-              <Input placeholder="Booking ID" type="number" value={form.booking_id || ''} onChange={e => setForm({...form, booking_id: Number(e.target.value)})} />
+              <div className="flex items-center gap-2">
+                <Input placeholder="Booking ID" type="number" className="flex-1" value={form.booking_id || ''} onChange={e => setForm({...form, booking_id: Number(e.target.value)})} />
+                <Button type="button" variant="outline" size="sm" onClick={handlePullRecordedMeals} title="Pull this guest's recorded meals from the Kitchen module">
+                  <UtensilsCrossed size={14} className="mr-1" /> Pull Recorded Meals
+                </Button>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><Label>Issue Date</Label><Input type="date" value={form.issue_date} onChange={e => setForm({...form, issue_date: e.target.value})} /></div>
                 <div><Label>Due Date</Label><Input type="date" value={form.due_date} onChange={e => setForm({...form, due_date: e.target.value})} /></div>
@@ -165,6 +193,10 @@ export default function Billing() {
                         value={line.unit_price}
                         onChange={e => updateLineItem(i, 'unit_price', Number(e.target.value))}
                       />
+                      <label className="flex items-center gap-1 text-xs text-gray-500 whitespace-nowrap cursor-pointer" title="Scales this item's price by the guest's civilian/non-civilian meal multiplier">
+                        <input type="checkbox" checked={line.is_meal_charge} onChange={e => updateLineItem(i, 'is_meal_charge', e.target.checked)} className="h-4 w-4 rounded border-gray-300" />
+                        Meal
+                      </label>
                       <Button size="sm" variant="ghost" onClick={() => removeLineItem(i)} disabled={form.items.length === 1}>
                         <Trash2 size={16} className="text-red-500" />
                       </Button>

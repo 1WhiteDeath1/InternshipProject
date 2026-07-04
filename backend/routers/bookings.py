@@ -10,6 +10,7 @@ from backend.schemas import BookingCreate, BookingUpdate
 from backend.auth import get_current_user, check_permission
 from backend.audit import log_audit, serialize_model, AuditAction
 from backend.logging_config import get_logger
+from backend.services.mess_billing_calc import get_setting_float
 
 logger = get_logger("app")
 router = APIRouter()
@@ -132,6 +133,8 @@ async def list_bookings(
          "adults": b.adults, "children": b.children,
          "status": b.status.value, "special_requests": b.special_requests,
          "total_amount": float(b.total_amount) if b.total_amount else None,
+         "client_category": b.client_category.value if b.client_category else None,
+         "member_id": b.member_id, "member_name": b.member.full_name if b.member else None,
          "created_at": b.created_at} for b in bookings], "total": total}
 
 
@@ -156,7 +159,13 @@ async def create_booking(data: BookingCreate, request: Request, db: Session = De
         raise HTTPException(status_code=400, detail="Room is not available")
 
     nights = (data.check_out - data.check_in).days
-    total = float(room.base_price) * max(nights, 1)
+    nightly_rate = float(room.base_price)
+    if data.member_id:
+        # Permanent members may have a preferential negotiated room rate.
+        member_rate = get_setting_float(db, "member_room_night_rate", 0.0)
+        if member_rate > 0:
+            nightly_rate = member_rate
+    total = nightly_rate * max(nights, 1)
 
     booking = Booking(
         booking_reference=f"TMP-{uuid.uuid4().hex}", guest_name=data.guest_name, guest_phone=data.guest_phone,
@@ -165,6 +174,7 @@ async def create_booking(data: BookingCreate, request: Request, db: Session = De
         check_in=data.check_in, check_out=data.check_out,
         adults=data.adults, children=data.children,
         status="confirmed", special_requests=data.special_requests,
+        client_category=data.client_category, member_id=data.member_id,
         total_amount=total, processed_by=current_user.id,
     )
     db.add(booking)

@@ -8,7 +8,8 @@ import api from '@/lib/api';
 import {
   LayoutDashboard, Package, ShoppingCart, BedDouble, Receipt,
   Shield, Users, UserCog, ClipboardList, Bell, BarChart3,
-  Settings, FileUp, LogOut, Sun, Moon, ChevronLeft, ChevronRight
+  Settings, FileUp, LogOut, Sun, Moon, ChevronLeft, ChevronRight,
+  IdCard, UtensilsCrossed, Wallet, ChefHat
 } from 'lucide-react';
 
 const navItems = [
@@ -17,6 +18,10 @@ const navItems = [
   { path: '/procurement', label: 'Procurement', icon: ShoppingCart, feature: null },
   { path: '/bookings', label: 'Bookings', icon: BedDouble, feature: null },
   { path: '/billing', label: 'Billing', icon: Receipt, feature: null },
+  { path: '/members', label: 'Members', icon: IdCard, feature: 'mess_members' },
+  { path: '/attendance', label: 'Attendance', icon: UtensilsCrossed, feature: 'mess_attendance' },
+  { path: '/mess-billing', label: 'Mess Billing', icon: Wallet, feature: 'mess_billing' },
+  { path: '/kitchen', label: 'Kitchen', icon: ChefHat, feature: 'kitchen_module' },
   { path: '/security', label: 'Security', icon: Shield, feature: null },
   { path: '/users', label: 'Users', icon: Users, requiresSupervisor: true },
   { path: '/roles', label: 'Roles', icon: UserCog, requiresSupervisor: true },
@@ -30,7 +35,7 @@ const navItems = [
 export default function Layout() {
   const { user, logout, loading } = useAuth();
   const { darkMode, toggleDarkMode } = useTheme();
-  useFeatures();
+  const { isEnabled } = useFeatures();
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
@@ -56,6 +61,7 @@ export default function Layout() {
 
   const filteredNav = navItems.filter(item => {
     if (item.requiresSupervisor && !user.is_supervisor) return false;
+    if (item.feature && !isEnabled(item.feature)) return false;
     return true;
   });
 

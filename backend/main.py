@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from backend.database import engine, Base
 from backend.logging_config import setup_logging
 from backend.branding import create_default_branding_file
+from backend.migrations_manual import run_startup_migrations
 from backend import routers
 
 setup_logging()
@@ -14,6 +15,10 @@ create_default_branding_file()
 
 # Create all tables
 Base.metadata.create_all(bind=engine)
+
+# Patch any tables that existed before a model change (create_all only adds
+# new tables, it never alters existing ones - see migrations_manual.py)
+run_startup_migrations(engine)
 
 app = FastAPI(
     title="SAM Hotel & Mess Management",
@@ -46,6 +51,11 @@ app.include_router(routers.features_router, prefix="/api/features", tags=["Featu
 app.include_router(routers.import_export_router, prefix="/api/import-export", tags=["Import/Export"])
 app.include_router(routers.backup_router, prefix="/api/backup", tags=["Backup"])
 app.include_router(routers.branding_router, prefix="/api/branding", tags=["Branding"])
+app.include_router(routers.members_router, prefix="/api/members", tags=["Members"])
+app.include_router(routers.attendance_router, prefix="/api/attendance", tags=["Attendance"])
+app.include_router(routers.mess_billing_router, prefix="/api/mess-billing", tags=["Mess Billing"])
+app.include_router(routers.recipes_router, prefix="/api/recipes", tags=["Recipes"])
+app.include_router(routers.kitchen_router, prefix="/api/kitchen", tags=["Kitchen"])
 
 # Serve static files (React build)
 dist_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dist")

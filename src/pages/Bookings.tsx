@@ -22,6 +22,8 @@ interface Booking {
   status: string;
   adults: number;
   total_amount: number;
+  client_category: string | null;
+  member_name: string | null;
 }
 
 interface Room {
@@ -34,13 +36,20 @@ interface Room {
   current_guest: string | null;
 }
 
+interface MemberOption {
+  id: number;
+  full_name: string;
+  service_number: string;
+}
+
 export default function Bookings() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [members, setMembers] = useState<MemberOption[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({ guest_name: '', guest_phone: '', room_id: 0, check_in: '', check_out: '', adults: 1, children: 0, special_requests: '' });
+  const [form, setForm] = useState({ guest_name: '', guest_phone: '', room_id: 0, check_in: '', check_out: '', adults: 1, children: 0, special_requests: '', client_category: 'non_member_civilian', member_id: 0 });
 
   const fetchBookings = async () => {
     try {
@@ -56,10 +65,17 @@ export default function Bookings() {
     } catch { toast.error('Failed to load rooms'); }
   };
 
+  const fetchMembers = async () => {
+    try {
+      const res = await api.get('/members?status=active&page_size=100');
+      setMembers(res.data.items);
+    } catch { toast.error('Failed to load members'); }
+  };
+
   useEffect(() => {
     queueMicrotask(() => {
       setLoading(true);
-      Promise.all([fetchBookings(), fetchRooms()]).finally(() => setLoading(false));
+      Promise.all([fetchBookings(), fetchRooms(), fetchMembers()]).finally(() => setLoading(false));
     });
   }, [search]);
 
@@ -73,7 +89,7 @@ export default function Bookings() {
       return;
     }
     try {
-      await api.post('/bookings', form);
+      await api.post('/bookings', { ...form, member_id: form.member_id || null });
       toast.success('Booking created');
       setDialogOpen(false);
       fetchBookings();
@@ -123,6 +139,20 @@ export default function Bookings() {
                 <div><Label>Check In</Label><Input type="date" onChange={e => setForm({...form, check_in: e.target.value})} /></div>
                 <div><Label>Check Out</Label><Input type="date" onChange={e => setForm({...form, check_out: e.target.value})} /></div>
               </div>
+              <div>
+                <Label>Guest Type</Label>
+                <select className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={form.client_category} onChange={e => setForm({...form, client_category: e.target.value})}>
+                  <option value="non_member_civilian">Civilian</option>
+                  <option value="non_member_non_civilian">Non-Civilian</option>
+                </select>
+              </div>
+              <div>
+                <Label>Link to Member (optional, for on-base accommodation)</Label>
+                <select className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={form.member_id} onChange={e => setForm({...form, member_id: Number(e.target.value)})}>
+                  <option value="0">None</option>
+                  {members.map(m => <option key={m.id} value={m.id}>{m.full_name} ({m.service_number})</option>)}
+                </select>
+              </div>
               <Button onClick={handleCreate} className="w-full">Create Booking</Button>
             </div>
           </DialogContent>
@@ -137,13 +167,14 @@ export default function Bookings() {
           <Card>
             <CardContent className="p-0">
               <Table>
-                <TableHeader><TableRow><TableHead>Reference</TableHead><TableHead>Guest</TableHead><TableHead>Room</TableHead><TableHead>Check In</TableHead><TableHead>Check Out</TableHead><TableHead>Status</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead>Reference</TableHead><TableHead>Guest</TableHead><TableHead>Type</TableHead><TableHead>Room</TableHead><TableHead>Check In</TableHead><TableHead>Check Out</TableHead><TableHead>Status</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
                 <TableBody>
-                  {loading && <TableRow><TableCell colSpan={7} className="text-center py-8 text-gray-500">Loading bookings...</TableCell></TableRow>}
+                  {loading && <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">Loading bookings...</TableCell></TableRow>}
                   {!loading && bookings.map(b => (
                     <TableRow key={b.id}>
                       <TableCell className="font-medium">{b.booking_reference}</TableCell>
-                      <TableCell>{b.guest_name}</TableCell>
+                      <TableCell>{b.guest_name}{b.member_name && <span className="block text-xs text-gray-500">Member: {b.member_name}</span>}</TableCell>
+                      <TableCell className="text-xs capitalize text-gray-500">{b.client_category?.replace(/_/g, ' ') || '-'}</TableCell>
                       <TableCell>{b.room_number}</TableCell>
                       <TableCell>{b.check_in}</TableCell>
                       <TableCell>{b.check_out}</TableCell>
@@ -154,7 +185,7 @@ export default function Bookings() {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {!loading && bookings.length === 0 && <TableRow><TableCell colSpan={7} className="text-center py-8 text-gray-500">No bookings found</TableCell></TableRow>}
+                  {!loading && bookings.length === 0 && <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">No bookings found</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </CardContent>

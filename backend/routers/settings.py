@@ -26,6 +26,13 @@ async def list_settings(db: Session = Depends(get_db), current_user=Depends(requ
             SystemSetting(key="waste_threshold_pct", value="5", description="Waste percentage threshold for alerts"),
             SystemSetting(key="low_stock_alert", value="true", description="Enable low stock alerts"),
             SystemSetting(key="auto_backup", value="true", description="Enable automatic backups"),
+            SystemSetting(key="meal_booking_cutoff_minutes", value="120", description="Minutes before meal time after which booking/changes require override"),
+            SystemSetting(key="member_fixed_menu_base_price", value="0.00", description="Optional flat monthly menu rate override for permanent members (0 = use dynamic per-head rate)"),
+            SystemSetting(key="member_room_night_rate", value="0.00", description="Preferential room rate for a permanent member occupying a room, if set (0 = use room's own rate)"),
+            SystemSetting(key="guest_room_night_rate", value="0.00", description="Reference/override room rate for non-member stays (0 = use room's own rate)"),
+            SystemSetting(key="civilian_meal_multiplier", value="1.00", description="Multiplier applied to extra-meal charges for civilian non-members"),
+            SystemSetting(key="non_civilian_meal_multiplier", value="1.00", description="Multiplier applied to extra-meal charges for non-civilian non-members"),
+            SystemSetting(key="default_member_discount_rate", value="0.00", description="Institution-wide baseline member discount percentage, used when a member has no custom rate set"),
         ]
         for d in defaults:
             db.add(d)

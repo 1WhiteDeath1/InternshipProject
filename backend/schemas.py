@@ -267,21 +267,50 @@ class RecipeBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = None
     menu_category: Optional[str] = None
-    portions: int = 1
+    portions: int = Field(1, gt=0)
 
 class RecipeCreate(RecipeBase):
     ingredients: List[RecipeIngredientBase] = []
+
+class RecipeUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    menu_category: Optional[str] = None
+    portions: Optional[int] = Field(None, gt=0)
+    is_active: Optional[bool] = None
+    ingredients: Optional[List[RecipeIngredientBase]] = None  # replaces all existing ingredients when provided
+
+class RecipeIngredientOut(RecipeIngredientBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    item_name: Optional[str] = None
 
 class RecipeOut(RecipeBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
     is_active: bool
-    ingredients: List[Any] = []
+    ingredients: List[RecipeIngredientOut] = []
 
 class KitchenOrderCreate(BaseModel):
     recipe_id: int
-    quantity_ordered: int = 1
+    quantity_ordered: int = Field(1, gt=0)
     notes: Optional[str] = None
+
+class KitchenOrderOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    recipe_id: int
+    recipe_name: Optional[str] = None
+    quantity_ordered: int
+    actual_portions: Optional[int] = None
+    food_cost: Optional[float] = None
+    status: str
+    notes: Optional[str] = None
+    ordered_by: Optional[int] = None
+    created_at: datetime
+
+class KitchenOrderPrepareRequest(BaseModel):
+    actual_portions: Optional[int] = Field(None, gt=0)
 
 
 # --- Vendor Schemas ---
@@ -408,6 +437,8 @@ class BookingBase(BaseModel):
     adults: int = 1
     children: int = 0
     special_requests: Optional[str] = None
+    client_category: str = "non_member_civilian"
+    member_id: Optional[int] = None
 
     @model_validator(mode="after")
     def _check_dates(self):
@@ -443,6 +474,7 @@ class BookingOut(BookingBase):
     processed_by: Optional[int] = None
     created_at: datetime
     room_number: Optional[str] = None
+    member_name: Optional[str] = None
 
 class GuestMovementOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -460,6 +492,7 @@ class InvoiceItemCreate(BaseModel):
     description: str
     quantity: float = Field(1, gt=0)
     unit_price: float = Field(..., ge=0)
+    is_meal_charge: bool = False  # if true, unit_price is scaled by the booking's client_category meal multiplier
 
 class InvoiceBase(BaseModel):
     booking_id: int
@@ -589,3 +622,149 @@ class BrandingConfig(BaseModel):
     splash_title: str = "SAM Hotel & Mess Management"
     splash_subtitle: str = "Developed by SAM Technologies"
     splash_duration_seconds: int = 3
+
+
+# --- Member Schemas ---
+
+class MemberBase(BaseModel):
+    service_number: str = Field(..., min_length=1, max_length=50)
+    full_name: str = Field(..., min_length=1, max_length=200)
+    rank: str = Field(..., min_length=1, max_length=50)
+    unit: Optional[str] = None
+    mess_category: str
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    custom_discount_rate: float = Field(0, ge=0, le=100)
+
+class MemberCreate(MemberBase):
+    pass
+
+class MemberUpdate(BaseModel):
+    full_name: Optional[str] = None
+    rank: Optional[str] = None
+    unit: Optional[str] = None
+    mess_category: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    status: Optional[str] = None
+    custom_discount_rate: Optional[float] = Field(None, ge=0, le=100)
+
+class MemberStatusChange(BaseModel):
+    status: str
+    reason: str = Field(..., min_length=1)
+
+class MemberOut(MemberBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    client_category: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+# --- Meal Attendance & Leave Schemas ---
+
+class MealAttendanceBase(BaseModel):
+    member_id: Optional[int] = None
+    booking_id: Optional[int] = None
+    recipe_id: Optional[int] = None
+    date: date
+    meal_type: str
+    method: str = "manual"
+
+class MealAttendanceCreate(MealAttendanceBase):
+    @model_validator(mode="after")
+    def _exactly_one_consumer(self):
+        if (self.member_id is None) == (self.booking_id is None):
+            raise ValueError("Provide exactly one of member_id or booking_id")
+        return self
+
+class MealAttendanceOut(MealAttendanceBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    status: str
+    booked_at: datetime
+    marked_at: Optional[datetime] = None
+    marked_by: Optional[int] = None
+    member_name: Optional[str] = None
+    guest_name: Optional[str] = None
+    recipe_name: Optional[str] = None
+
+class AttendanceMarkRequest(BaseModel):
+    status: str
+    reason: Optional[str] = None
+
+class BulkAttendanceCreate(BaseModel):
+    member_ids: List[int] = Field(..., min_length=1)
+    date: date
+    meal_type: str
+    method: str = "manual"
+
+class MemberLeaveBase(BaseModel):
+    member_id: int
+    start_date: date
+    end_date: date
+    reason: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _check_dates(self):
+        if self.end_date < self.start_date:
+            raise ValueError("end_date must be on or after start_date")
+        return self
+
+class MemberLeaveCreate(MemberLeaveBase):
+    pass
+
+class MemberLeaveOut(MemberLeaveBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    status: str
+    created_at: datetime
+    member_name: Optional[str] = None
+
+
+# --- Mess Billing Schemas ---
+
+class MessBillOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    member_id: int
+    member_name: Optional[str] = None
+    month: int
+    year: int
+    man_days: int
+    per_head_rate: float
+    base_menu_amount: float
+    stay_amount: float
+    extra_meals_amount: float
+    applied_discount_rate: float
+    discount_amount: float
+    discount_approved_by: Optional[int] = None
+    discount_reason: Optional[str] = None
+    total_amount: float
+    status: str
+    generated_at: datetime
+
+class GuestMealChargeCreate(BaseModel):
+    sponsor_member_id: int
+    guest_name: str = Field(..., min_length=1, max_length=200)
+    date: date
+    meal_type: str
+    amount: float = Field(..., gt=0)
+    notes: Optional[str] = None
+
+class GuestMealChargeOut(GuestMealChargeCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    created_at: datetime
+
+class DiscountApplyRequest(BaseModel):
+    discount_rate: Optional[float] = Field(None, ge=0, le=100)
+    discount_amount: Optional[float] = Field(None, ge=0)
+    reason: str = Field(..., min_length=1)
+
+    @model_validator(mode="after")
+    def _exactly_one(self):
+        if (self.discount_rate is None) == (self.discount_amount is None):
+            raise ValueError("Provide exactly one of discount_rate or discount_amount")
+        return self

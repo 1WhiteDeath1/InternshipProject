@@ -4,11 +4,12 @@ from datetime import datetime, date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from backend.database import get_db
-from backend.models import Invoice, InvoiceItem, InvoicePayment, Booking, InvoiceStatus
-from backend.schemas import InvoiceCreate, PaymentCreate
+from backend.models import Invoice, InvoiceItem, InvoicePayment, Booking, InvoiceStatus, ClientCategory
+from backend.schemas import InvoiceCreate, PaymentCreate, DiscountApplyRequest
 from backend.auth import get_current_user, check_permission
 from backend.audit import log_audit, serialize_model, AuditAction
 from backend.logging_config import get_logger
+from backend.services.mess_billing_calc import get_setting_float
 
 logger = get_logger("app")
 router = APIRouter()
@@ -59,7 +60,17 @@ async def create_invoice(data: InvoiceCreate, request: Request, db: Session = De
     if existing:
         raise HTTPException(status_code=409, detail=f"Invoice already exists: {existing.invoice_number}")
 
-    total = sum(i.unit_price * i.quantity for i in data.items)
+    # Extra-meal line items are scaled by the booking's client-category multiplier
+    # (room-charge line items are left untouched - Room.base_price stays the source
+    # of truth for accommodation).
+    meal_multiplier = 1.0
+    if booking.client_category == ClientCategory.NON_MEMBER_NON_CIVILIAN:
+        meal_multiplier = get_setting_float(db, "non_civilian_meal_multiplier", 1.0)
+    elif booking.client_category == ClientCategory.NON_MEMBER_CIVILIAN:
+        meal_multiplier = get_setting_float(db, "civilian_meal_multiplier", 1.0)
+
+    effective_prices = [(item.unit_price * meal_multiplier if item.is_meal_charge else item.unit_price) for item in data.items]
+    total = sum(price * item.quantity for price, item in zip(effective_prices, data.items))
 
     invoice = Invoice(
         invoice_number=f"TMP-{uuid.uuid4().hex}", booking_id=data.booking_id,
@@ -77,11 +88,11 @@ async def create_invoice(data: InvoiceCreate, request: Request, db: Session = De
     # same invoice number.
     invoice.invoice_number = f"INV-{datetime.utcnow().strftime('%Y%m')}-{invoice.id:05d}"
 
-    for item in data.items:
+    for price, item in zip(effective_prices, data.items):
         ii = InvoiceItem(
             invoice_id=invoice.id, description=item.description,
-            quantity=item.quantity, unit_price=item.unit_price,
-            total_price=item.unit_price * item.quantity,
+            quantity=item.quantity, unit_price=price,
+            total_price=price * item.quantity,
         )
         db.add(ii)
     db.commit()
@@ -154,6 +165,32 @@ async def record_payment(invoice_id: int, data: PaymentCreate, request: Request,
               before_state=before, after_state=serialize_model(inv),
               reason=f"Payment of {data.amount:.2f} recorded", ip_address=request.client.host)
     return {"id": payment.id, "amount_paid": float(inv.amount_paid), "balance_due": float(inv.total_amount) - float(inv.amount_paid), "status": inv.status.value}
+
+
+@router.post("/invoices/{invoice_id}/apply-discount")
+async def apply_invoice_discount(invoice_id: int, data: DiscountApplyRequest, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    # Authorization is derived entirely from the authenticated session, mirroring
+    # mess_billing.py:apply_discount - never a client-supplied id.
+    if not check_permission(current_user, "billing", "approve"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if inv.status in (InvoiceStatus.VOID, InvoiceStatus.PAID):
+        raise HTTPException(status_code=400, detail=f"Cannot discount an invoice with status '{inv.status.value}'")
+
+    before = serialize_model(inv)
+    discount_amount = data.discount_amount if data.discount_amount is not None else float(inv.subtotal) * data.discount_rate / 100
+    if discount_amount > float(inv.subtotal):
+        raise HTTPException(status_code=400, detail="Discount cannot exceed the invoice subtotal")
+
+    inv.discount = discount_amount
+    inv.total_amount = float(inv.subtotal) + float(inv.tax_amount) - discount_amount
+    db.commit()
+    db.refresh(inv)
+
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.OVERRIDE, "invoices", inv.id, before_state=before, after_state=serialize_model(inv), reason=data.reason, ip_address=request.client.host)
+    return {"id": inv.id, "discount": float(inv.discount), "total_amount": float(inv.total_amount)}
 
 
 @router.get("/dashboard-stats")
