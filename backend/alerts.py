@@ -1,0 +1,133 @@
+"""Real-time alert engine."""
+from datetime import datetime, timedelta
+from typing import Optional
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+from backend.models import Alert, AlertSeverity, AlertStatus, StockBatch, InventoryItem, Booking, Invoice
+from backend.logging_config import get_logger
+
+logger = get_logger("app")
+
+
+def create_alert(
+    db: Session,
+    title: str,
+    message: str,
+    severity: AlertSeverity,
+    module: str,
+    entity_type: Optional[str] = None,
+    entity_id: Optional[int] = None,
+) -> Alert:
+    alert = Alert(
+        title=title,
+        message=message,
+        severity=severity,
+        module=module,
+        entity_type=entity_type,
+        entity_id=entity_id,
+    )
+    db.add(alert)
+    db.commit()
+    db.refresh(alert)
+    return alert
+
+
+def check_low_stock(db: Session) -> int:
+    """Check for low stock items and create alerts."""
+    from sqlalchemy import text
+    query = text("""
+        SELECT i.id, i.name, i.reorder_level, COALESCE(SUM(b.quantity), 0) as total
+        FROM inventory_items i
+        LEFT JOIN stock_batches b ON b.item_id = i.id AND b.is_active = 1
+        WHERE i.is_active = 1
+        GROUP BY i.id
+        HAVING total <= i.reorder_level AND i.reorder_level > 0
+    """)
+    results = db.execute(query).fetchall()
+    count = 0
+    for row in results:
+        existing = db.query(Alert).filter(
+            Alert.entity_type == "inventory_item",
+            Alert.entity_id == row.id,
+            Alert.status.in_([AlertStatus.NEW, AlertStatus.ACKNOWLEDGED]),
+            Alert.module == "inventory",
+        ).first()
+        if not existing:
+            create_alert(
+                db,
+                f"Low Stock: {row.name}",
+                f"Current stock: {row.total} {row.name}. Reorder level: {row.reorder_level}",
+                AlertSeverity.HIGH,
+                "inventory",
+                "inventory_item",
+                row.id,
+            )
+            count += 1
+    return count
+
+
+def check_expiring_items(db: Session, days: int = 7) -> int:
+    cutoff = datetime.utcnow().date() + timedelta(days=days)
+    items = db.query(StockBatch).filter(
+        StockBatch.expiry_date <= cutoff,
+        StockBatch.expiry_date >= datetime.utcnow().date(),
+        StockBatch.is_active == True,
+        StockBatch.quantity > 0,
+    ).all()
+    count = 0
+    for batch in items:
+        existing = db.query(Alert).filter(
+            Alert.entity_type == "stock_batch",
+            Alert.entity_id == batch.id,
+            Alert.status.in_([AlertStatus.NEW, AlertStatus.ACKNOWLEDGED]),
+        ).first()
+        if not existing:
+            create_alert(
+                db,
+                f"Expiring Soon: Batch {batch.batch_number}",
+                f"Item expires on {batch.expiry_date}. Quantity: {batch.quantity}",
+                AlertSeverity.MEDIUM,
+                "inventory",
+                "stock_batch",
+                batch.id,
+            )
+            count += 1
+    return count
+
+
+def check_unbilled_stays(db: Session) -> int:
+    today = datetime.utcnow().date()
+    bookings = db.query(Booking).filter(
+        Booking.check_out < today,
+        Booking.status != "checked_out",
+        Booking.status != "cancelled",
+    ).all()
+    count = 0
+    for booking in bookings:
+        existing = db.query(Alert).filter(
+            Alert.entity_type == "booking",
+            Alert.entity_id == booking.id,
+            Alert.status.in_([AlertStatus.NEW, AlertStatus.ACKNOWLEDGED]),
+            Alert.title.contains("Unbilled"),
+        ).first()
+        if not existing:
+            create_alert(
+                db,
+                f"Unbilled Stay: {booking.guest_name}",
+                f"Guest checked out on {booking.check_out} but no invoice generated.",
+                AlertSeverity.HIGH,
+                "billing",
+                "booking",
+                booking.id,
+            )
+            count += 1
+    return count
+
+
+def run_all_checks(db: Session) -> dict:
+    """Run all alert checks and return summary."""
+    return {
+        "low_stock": check_low_stock(db),
+        "expiring_items": check_expiring_items(db),
+        "unbilled_stays": check_unbilled_stays(db),
+    }

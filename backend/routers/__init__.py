@@ -1,0 +1,16 @@
+from backend.routers.auth import router as auth_router
+from backend.routers.users import router as users_router
+from backend.routers.roles import router as roles_router
+from backend.routers.inventory import router as inventory_router
+from backend.routers.procurement import router as procurement_router
+from backend.routers.bookings import router as bookings_router
+from backend.routers.billing import router as billing_router
+from backend.routers.security import router as security_router
+from backend.routers.reports import router as reports_router
+from backend.routers.audit import router as audit_router
+from backend.routers.alerts import router as alerts_router
+from backend.routers.settings import router as settings_router
+from backend.routers.features import router as features_router
+from backend.routers.import_export import router as import_export_router
+from backend.routers.backup import router as backup_router
+from backend.routers.branding import router as branding_router
