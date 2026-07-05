@@ -22,6 +22,21 @@ def _is_feature_enabled(db: Session, key: str) -> bool:
     return bool(flag and flag.enabled)
 
 
+def _aggregate_suggestions(db: Session, order_date: str, meal_type: str):
+    # Member and guest consumption rows combine identically here - the query
+    # never discriminates on member_id vs booking_id - this is what makes the
+    # suggestion reflect everyone eating that meal, not just members. Returns a
+    # list of (recipe_id, headcount) rows.
+    return db.query(
+        MealAttendance.recipe_id, func.count(MealAttendance.id).label("headcount"),
+    ).filter(
+        MealAttendance.date == order_date,
+        MealAttendance.meal_type == meal_type,
+        MealAttendance.status.in_(["booked", "attended"]),
+        MealAttendance.recipe_id.isnot(None),
+    ).group_by(MealAttendance.recipe_id).all()
+
+
 @router.get("/orders")
 async def list_kitchen_orders(
     status: str = "", order_date: str = Query("", alias="date"),
@@ -53,7 +68,7 @@ async def create_kitchen_order(data: KitchenOrderCreate, request: Request, db: S
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
 
-    order = KitchenOrder(recipe_id=data.recipe_id, quantity_ordered=data.quantity_ordered, notes=data.notes, status="pending", ordered_by=current_user.id)
+    order = KitchenOrder(recipe_id=data.recipe_id, quantity_ordered=data.quantity_ordered, notes=data.notes, status="pending", source="manual", ordered_by=current_user.id)
     db.add(order)
     db.commit()
     db.refresh(order)
@@ -67,23 +82,59 @@ async def suggested_orders(
     order_date: str = Query(..., alias="date"), meal_type: str = Query(...),
     db: Session = Depends(get_db), current_user=Depends(get_current_user),
 ):
-    # Member and guest consumption rows combine identically here - the query
-    # never discriminates on member_id vs booking_id - this is what makes the
-    # suggestion reflect everyone eating that meal, not just members.
-    rows = db.query(
-        MealAttendance.recipe_id, func.count(MealAttendance.id).label("headcount"),
-    ).filter(
-        MealAttendance.date == order_date,
-        MealAttendance.meal_type == meal_type,
-        MealAttendance.status.in_(["booked", "attended"]),
-        MealAttendance.recipe_id.isnot(None),
-    ).group_by(MealAttendance.recipe_id).all()
-
+    rows = _aggregate_suggestions(db, order_date, meal_type)
     recipe_ids = [r.recipe_id for r in rows]
     recipes_by_id = {r.id: r for r in db.query(Recipe).filter(Recipe.id.in_(recipe_ids)).all()} if recipe_ids else {}
 
     return [{"recipe_id": r.recipe_id, "recipe_name": recipes_by_id[r.recipe_id].name if r.recipe_id in recipes_by_id else None,
              "suggested_quantity": r.headcount} for r in rows]
+
+
+@router.post("/orders/generate")
+async def generate_orders_from_bookings(
+    order_date: str = Query(..., alias="date"), meal_type: str = Query(...),
+    request: Request = None, db: Session = Depends(get_db), current_user=Depends(get_current_user),
+):
+    """Promote a date/meal's combined member+guest bookings into pending kitchen
+    orders in one shot. Idempotent: a recipe that already has a non-cancelled
+    order for the same meal_date/meal_type is skipped rather than duplicated."""
+    if not check_permission(current_user, "kitchen", "create"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    meal_date = date.fromisoformat(order_date)  # Date column needs a real date, not the raw query string
+
+    rows = _aggregate_suggestions(db, order_date, meal_type)
+    recipe_ids = [r.recipe_id for r in rows]
+    recipes_by_id = {r.id: r for r in db.query(Recipe).filter(Recipe.id.in_(recipe_ids)).all()} if recipe_ids else {}
+
+    # Existing non-cancelled orders already covering this meal_date/meal_type.
+    already_ordered = {
+        o.recipe_id for o in db.query(KitchenOrder).filter(
+            KitchenOrder.meal_date == meal_date,
+            KitchenOrder.meal_type == meal_type,
+            KitchenOrder.status != "cancelled",
+        ).all()
+    }
+
+    created, skipped = [], []
+    for r in rows:
+        recipe_name = recipes_by_id[r.recipe_id].name if r.recipe_id in recipes_by_id else None
+        if r.recipe_id in already_ordered:
+            skipped.append({"recipe_id": r.recipe_id, "recipe_name": recipe_name})
+            continue
+        order = KitchenOrder(
+            recipe_id=r.recipe_id, quantity_ordered=r.headcount, status="pending",
+            meal_date=meal_date, meal_type=meal_type, source="auto_from_bookings",
+            ordered_by=current_user.id,
+        )
+        db.add(order)
+        db.commit()
+        db.refresh(order)
+        created.append({"id": order.id, "recipe_id": r.recipe_id, "recipe_name": recipe_name, "quantity_ordered": r.headcount})
+
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "kitchen_orders", None,
+              after_state={"date": order_date, "meal_type": meal_type, "created": len(created), "skipped": len(skipped)},
+              ip_address=request.client.host if request else None)
+    return {"created": created, "skipped": skipped}
 
 
 @router.post("/orders/{order_id}/prepare")
@@ -99,7 +150,11 @@ async def prepare_kitchen_order(order_id: int, data: KitchenOrderPrepareRequest,
     before = serialize_model(order)
 
     if _is_feature_enabled(db, "recipe_deductions"):
-        deduct_recipe_stock(db, order.recipe, order.quantity_ordered, order.id, current_user.id)
+        consumed_cost = deduct_recipe_stock(db, order.recipe, order.quantity_ordered, order.id, current_user.id)
+        # Auto-record food cost from the batches actually consumed, so cost
+        # reporting needs zero manual entry (gated by its own feature flag).
+        if _is_feature_enabled(db, "food_cost_reports"):
+            order.food_cost = consumed_cost
 
     if _is_feature_enabled(db, "portion_tracking") and data.actual_portions is not None:
         order.actual_portions = data.actual_portions

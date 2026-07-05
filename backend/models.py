@@ -399,6 +399,11 @@ class KitchenOrder(Base):
     food_cost = Column(Numeric(12, 2))
     status = Column(String(20), default="pending")  # pending, prepared, served, cancelled
     notes = Column(Text)
+    # Set when an order is auto-generated from that day's bookings, so the
+    # generate step stays idempotent and traceable (manual orders leave these null).
+    meal_date = Column(Date, nullable=True)
+    meal_type = Column(String(20), nullable=True)
+    source = Column(String(20), nullable=True)  # manual | auto_from_bookings
     ordered_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -557,6 +562,7 @@ class Invoice(Base):
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    booking = relationship("Booking")
     items = relationship("InvoiceItem", back_populates="invoice")
 
 

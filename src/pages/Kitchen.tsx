@@ -9,7 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { ChefHat, Plus, Trash2, Flame, CheckCircle2, XCircle } from 'lucide-react';
+import { ChefHat, Plus, Trash2, Flame, CheckCircle2, XCircle, Factory } from 'lucide-react';
+import { defaultMealForNow } from '@/lib/mealDefaults';
 
 interface Ingredient { id?: number; item_id: number; quantity: number; unit: string; item_name?: string | null; }
 interface Recipe { id: number; name: string; description: string | null; menu_category: string | null; portions: number; is_active: boolean; ingredients: Ingredient[]; }
@@ -38,8 +39,9 @@ export default function Kitchen() {
   const [orderQuantity, setOrderQuantity] = useState(1);
 
   const [consumptionDate, setConsumptionDate] = useState(new Date().toISOString().slice(0, 10));
-  const [consumptionMeal, setConsumptionMeal] = useState('breakfast');
+  const [consumptionMeal, setConsumptionMeal] = useState<string>(defaultMealForNow());
   const [suggested, setSuggested] = useState<SuggestedOrder[]>([]);
+  const [generating, setGenerating] = useState(false);
 
   const fetchRecipes = async () => {
     try {
@@ -134,6 +136,22 @@ export default function Kitchen() {
     } catch (err) { toast.error(getErrorMessage(err, 'Failed')); }
   };
 
+  const handleGenerateOrders = async () => {
+    setGenerating(true);
+    try {
+      const res = await api.post(`/kitchen/orders/generate?date=${consumptionDate}&meal_type=${consumptionMeal}`);
+      const created = res.data.created.length as number;
+      const skipped = res.data.skipped.length as number;
+      if (created === 0 && skipped === 0) {
+        toast.info('No booked menu items to produce for this date/meal');
+      } else {
+        toast.success(`Created ${created} production order(s)${skipped ? `, skipped ${skipped} already ordered` : ''}`);
+      }
+      fetchOrders();
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to generate orders')); }
+    finally { setGenerating(false); }
+  };
+
   const handleCreateOrder = async () => {
     if (!orderRecipeId) {
       toast.error('Select a recipe to order');
@@ -197,8 +215,14 @@ export default function Kitchen() {
             <select className="h-10 rounded-md border border-input bg-background px-3 text-sm capitalize" value={consumptionMeal} onChange={e => setConsumptionMeal(e.target.value)}>
               {MEAL_TYPES.map(mt => <option key={mt} value={mt} className="capitalize">{mt}</option>)}
             </select>
+            <Button onClick={handleGenerateOrders} disabled={generating || suggested.length === 0}>
+              <Factory size={16} className="mr-1" /> Generate Production Orders
+            </Button>
           </div>
-          <p className="text-sm text-gray-500">Combined headcount of members and hotel guests booked for this meal, grouped by menu item.</p>
+          <p className="text-sm text-gray-500">
+            Combined headcount of members and hotel guests booked for this meal, grouped by menu item.
+            One click turns these into pending kitchen orders — re-running skips menu items already ordered. Bookings lock at each meal's cutoff.
+          </p>
           <Card>
             <CardContent className="p-0">
               <Table>

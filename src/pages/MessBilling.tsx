@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import { Wallet, RefreshCw, CheckCircle, DollarSign, Percent, Plus } from 'lucide-react';
+import { defaultMealForNow } from '@/lib/mealDefaults';
 
 interface MessBill {
   id: number;
@@ -45,6 +46,7 @@ interface GuestCharge {
 }
 
 const today = new Date();
+const emptyChargeForm = () => ({ sponsor_member_id: 0, guest_name: '', date: today.toISOString().slice(0, 10), meal_type: defaultMealForNow() as string, amount: 0, notes: '' });
 
 export default function MessBilling() {
   const { user } = useAuth();
@@ -58,7 +60,7 @@ export default function MessBilling() {
   const [discountRate, setDiscountRate] = useState(0);
   const [discountReason, setDiscountReason] = useState('');
   const [chargeDialogOpen, setChargeDialogOpen] = useState(false);
-  const [chargeForm, setChargeForm] = useState({ sponsor_member_id: 0, guest_name: '', date: '', meal_type: 'dinner', amount: 0, notes: '' });
+  const [chargeForm, setChargeForm] = useState(emptyChargeForm());
 
   const fetchBills = async () => {
     try {
@@ -125,7 +127,7 @@ export default function MessBilling() {
       await api.post('/mess-billing/guest-charges', chargeForm);
       toast.success('Guest meal charge recorded');
       setChargeDialogOpen(false);
-      setChargeForm({ sponsor_member_id: 0, guest_name: '', date: '', meal_type: 'dinner', amount: 0, notes: '' });
+      setChargeForm(emptyChargeForm());
       fetchCharges();
     } catch (err) { toast.error(getErrorMessage(err, 'Failed to record charge')); }
   };

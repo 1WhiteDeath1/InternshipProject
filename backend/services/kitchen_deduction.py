@@ -4,12 +4,17 @@ from sqlalchemy.orm import Session
 from backend.models import Recipe, RecipeIngredient, StockBatch, StockMovement, StockZone
 
 
-def deduct_recipe_stock(db: Session, recipe: Recipe, quantity_ordered: int, reference_id: int, created_by: int) -> None:
+def deduct_recipe_stock(db: Session, recipe: Recipe, quantity_ordered: int, reference_id: int, created_by: int) -> float:
     """Deduct each ingredient's required quantity (scaled to quantity_ordered)
     from a kitchen-zone StockBatch, logging a `recipe_deduction` StockMovement
     per ingredient. Single-batch-per-ingredient deduction (earliest expiry
     first) is a deliberate Tier-1 simplification - splitting a shortfall
     across multiple batches of the same item is not handled here.
+
+    Returns the total cost consumed (sum of needed x batch.unit_cost across all
+    ingredients), so the caller can record it as the order's food_cost without
+    any extra queries or manual entry. Returns 0.0 when the recipe has no
+    ingredients.
 
     Raises HTTPException(400) if any ingredient has no kitchen stock batch at
     all (checked before any mutation), or HTTPException(409) if a concurrent
@@ -19,7 +24,7 @@ def deduct_recipe_stock(db: Session, recipe: Recipe, quantity_ordered: int, refe
     """
     ingredients = db.query(RecipeIngredient).filter(RecipeIngredient.recipe_id == recipe.id).all()
     if not ingredients:
-        return
+        return 0.0
 
     # Pre-flight: resolve a kitchen batch for every ingredient before mutating anything,
     # so a missing batch never leaves a partial deduction in the session.
@@ -58,3 +63,5 @@ def deduct_recipe_stock(db: Session, recipe: Recipe, quantity_ordered: int, refe
             db.delete(movement)
         db.commit()
         raise HTTPException(status_code=409, detail="Stock level would go negative due to a concurrent change - please retry")
+
+    return float(sum(needed * float(batch.unit_cost or 0) for _, batch, needed in plan))

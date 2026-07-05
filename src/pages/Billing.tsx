@@ -36,13 +36,25 @@ interface InvoiceLineItem {
   is_meal_charge: boolean;
 }
 
+interface BookingOption {
+  id: number;
+  guest_name: string;
+  room_number: string;
+  status: string;
+}
+
 const emptyItem: InvoiceLineItem = { description: '', quantity: 1, unit_price: 0, is_meal_charge: false };
+const INVOICE_DUE_DAYS = 7;
+
+const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+const addDays = (d: Date, days: number) => new Date(d.getTime() + days * 86400000);
 
 export default function Billing() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<BillingStats | null>(null);
+  const [bookings, setBookings] = useState<BookingOption[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [paymentDialogInvoice, setPaymentDialogInvoice] = useState<Invoice | null>(null);
   const [paymentAmount, setPaymentAmount] = useState(0);
@@ -60,12 +72,31 @@ export default function Billing() {
     catch { toast.error('Failed to load billing stats'); }
   };
 
+  const fetchBookings = async () => {
+    try {
+      const [ci, co] = await Promise.all([
+        api.get('/bookings?status=checked_in&page_size=100'),
+        api.get('/bookings?status=checked_out&page_size=100'),
+      ]);
+      setBookings([...ci.data.items, ...co.data.items]);
+    } catch { toast.error('Failed to load bookings'); }
+  };
+
   useEffect(() => {
     queueMicrotask(() => {
       setLoading(true);
-      Promise.all([fetchInvoices(), fetchStats()]).finally(() => setLoading(false));
+      Promise.all([fetchInvoices(), fetchStats(), fetchBookings()]).finally(() => setLoading(false));
     });
   }, [search]);
+
+  const openCreateDialog = (open: boolean) => {
+    // Pre-fill the dates the clerk would otherwise type by hand: today and today + terms.
+    if (open) {
+      const today = new Date();
+      setForm(f => ({ ...f, issue_date: f.issue_date || isoDate(today), due_date: f.due_date || isoDate(addDays(today, INVOICE_DUE_DAYS)) }));
+    }
+    setDialogOpen(open);
+  };
 
   const handlePullRecordedMeals = async () => {
     if (!form.booking_id) {
@@ -154,13 +185,16 @@ export default function Billing() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Billing & Invoicing</h1>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <Dialog open={dialogOpen} onOpenChange={openCreateDialog}>
           <DialogTrigger asChild><Button><Plus size={16} className="mr-1" /> Create Invoice</Button></DialogTrigger>
           <DialogContent className="max-w-xl">
             <DialogHeader><DialogTitle>Create Invoice</DialogTitle></DialogHeader>
             <div className="space-y-3">
               <div className="flex items-center gap-2">
-                <Input placeholder="Booking ID" type="number" className="flex-1" value={form.booking_id || ''} onChange={e => setForm({...form, booking_id: Number(e.target.value)})} />
+                <select className="h-10 rounded-md border border-input bg-background px-3 text-sm flex-1" value={form.booking_id} onChange={e => setForm({...form, booking_id: Number(e.target.value)})}>
+                  <option value="0">Select booking…</option>
+                  {bookings.map(b => <option key={b.id} value={b.id}>{b.guest_name} — Room {b.room_number} (#{b.id}{b.status === 'checked_out' ? ', out' : ''})</option>)}
+                </select>
                 <Button type="button" variant="outline" size="sm" onClick={handlePullRecordedMeals} title="Pull this guest's recorded meals from the Kitchen module">
                   <UtensilsCrossed size={14} className="mr-1" /> Pull Recorded Meals
                 </Button>

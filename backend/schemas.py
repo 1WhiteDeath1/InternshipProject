@@ -306,6 +306,9 @@ class KitchenOrderOut(BaseModel):
     food_cost: Optional[float] = None
     status: str
     notes: Optional[str] = None
+    meal_date: Optional[date] = None
+    meal_type: Optional[str] = None
+    source: Optional[str] = None
     ordered_by: Optional[int] = None
     created_at: datetime
 

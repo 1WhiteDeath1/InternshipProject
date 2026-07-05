@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import { UtensilsCrossed, Plus, CheckCircle, XCircle, Users } from 'lucide-react';
+import { defaultMealForNow } from '@/lib/mealDefaults';
 
 interface AttendanceRecord {
   id: number;
@@ -57,7 +58,7 @@ const MEAL_TYPES = ['breakfast', 'lunch', 'hitea', 'dinner'];
 
 export default function Attendance() {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [mealType, setMealType] = useState('breakfast');
+  const [mealType, setMealType] = useState<string>(defaultMealForNow());
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [members, setMembers] = useState<MemberOption[]>([]);
   const [checkedInBookings, setCheckedInBookings] = useState<BookingOption[]>([]);
@@ -184,8 +185,14 @@ export default function Attendance() {
       booked: 'bg-blue-100 text-blue-800', attended: 'bg-green-100 text-green-800',
       cancelled: 'bg-gray-100 text-gray-800', excluded: 'bg-amber-100 text-amber-800',
     };
-    return <Badge className={colors[status] || ''}>{status}</Badge>;
+    const titles: Record<string, string> = {
+      booked: 'Booked - not yet served', attended: 'Ate this meal (counts toward billing)',
+      cancelled: 'Booking cancelled', excluded: 'Auto-excluded - member is on leave',
+    };
+    return <Badge className={colors[status] || ''} title={titles[status]}>{status === 'excluded' ? 'on leave' : status}</Badge>;
   };
+
+  const statusCounts = records.reduce((acc, r) => { acc[r.status] = (acc[r.status] || 0) + 1; return acc; }, {} as Record<string, number>);
 
   return (
     <div className="space-y-6">
@@ -196,39 +203,71 @@ export default function Attendance() {
           <TabsList className="grid grid-cols-4 max-w-md">
             {MEAL_TYPES.map(mt => <TabsTrigger key={mt} value={mt} className="capitalize">{mt}</TabsTrigger>)}
           </TabsList>
-          <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-40" />
+          <div className="flex items-center gap-2">
+            <Label className="text-sm text-gray-500 whitespace-nowrap">Meal date</Label>
+            <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-40" />
+          </div>
         </div>
 
         {MEAL_TYPES.map(mt => (
           <TabsContent key={mt} value={mt} className="space-y-4">
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex rounded-md border border-input overflow-hidden text-sm">
-                <button className={`px-3 py-2 ${consumerType === 'member' ? 'bg-primary text-primary-foreground' : 'bg-background'}`} onClick={() => setConsumerType('member')}>Member</button>
-                <button className={`px-3 py-2 ${consumerType === 'guest' ? 'bg-primary text-primary-foreground' : 'bg-background'}`} onClick={() => setConsumerType('guest')}>Guest</button>
-              </div>
-              {consumerType === 'member' ? (
-                <select className="h-10 rounded-md border border-input bg-background px-3 text-sm flex-1 max-w-xs" value={bookMemberId} onChange={e => setBookMemberId(Number(e.target.value))}>
-                  <option value="0">Select member to book</option>
-                  {members.map(m => <option key={m.id} value={m.id}>{m.full_name} ({m.service_number})</option>)}
-                </select>
-              ) : (
-                <select className="h-10 rounded-md border border-input bg-background px-3 text-sm flex-1 max-w-xs" value={bookBookingId} onChange={e => setBookBookingId(Number(e.target.value))}>
-                  <option value="0">Select checked-in guest</option>
-                  {checkedInBookings.map(b => <option key={b.id} value={b.id}>{b.guest_name} (Room {b.room_number})</option>)}
-                </select>
-              )}
-              <select className="h-10 rounded-md border border-input bg-background px-3 text-sm max-w-xs" value={bookRecipeId} onChange={e => setBookRecipeId(Number(e.target.value))}>
-                <option value="0">No menu item</option>
-                {recipes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-              </select>
-              <Button onClick={handleBook}><Plus size={16} className="mr-1" /> Book</Button>
-              {consumerType === 'member' && <Button variant="outline" onClick={handleBulkBook}><Users size={16} className="mr-1" /> Book All Active</Button>}
+            <Card>
+              <CardContent className="p-4 space-y-3">
+                <div>
+                  <h2 className="font-semibold">Book a meal <span className="capitalize text-gray-500 font-normal">— {mt}, {date}</span></h2>
+                  <p className="text-xs text-gray-500">Reserve a plate for a mess member or a checked-in hotel guest. Picking the menu item is optional but lets the kitchen plan quantities.</p>
+                </div>
+                <div className="flex items-end gap-3 flex-wrap">
+                  <div>
+                    <Label className="text-xs text-gray-500">Who is eating?</Label>
+                    <div className="flex rounded-md border border-input overflow-hidden text-sm mt-1">
+                      <button type="button" className={`px-3 py-2 ${consumerType === 'member' ? 'bg-primary text-primary-foreground' : 'bg-background'}`} onClick={() => setConsumerType('member')}>Member</button>
+                      <button type="button" className={`px-3 py-2 ${consumerType === 'guest' ? 'bg-primary text-primary-foreground' : 'bg-background'}`} onClick={() => setConsumerType('guest')}>Hotel Guest</button>
+                    </div>
+                  </div>
+                  <div className="flex-1 min-w-56 max-w-xs">
+                    <Label className="text-xs text-gray-500">{consumerType === 'member' ? 'Member' : 'Checked-in guest'}</Label>
+                    {consumerType === 'member' ? (
+                      <select className="mt-1 w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={bookMemberId} onChange={e => setBookMemberId(Number(e.target.value))}>
+                        <option value="0">Select member…</option>
+                        {members.map(m => <option key={m.id} value={m.id}>{m.full_name} ({m.service_number})</option>)}
+                      </select>
+                    ) : (
+                      <select className="mt-1 w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={bookBookingId} onChange={e => setBookBookingId(Number(e.target.value))}>
+                        <option value="0">Select guest…</option>
+                        {checkedInBookings.map(b => <option key={b.id} value={b.id}>{b.guest_name} (Room {b.room_number})</option>)}
+                      </select>
+                    )}
+                  </div>
+                  <div className="min-w-48 max-w-xs">
+                    <Label className="text-xs text-gray-500">Menu item <span className="text-gray-400">(optional)</span></Label>
+                    <select className="mt-1 w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={bookRecipeId} onChange={e => setBookRecipeId(Number(e.target.value))}>
+                      <option value="0">Not specified</option>
+                      {recipes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
+                  </div>
+                  <Button onClick={handleBook}><Plus size={16} className="mr-1" /> Book</Button>
+                  {consumerType === 'member' && (
+                    <Button variant="outline" onClick={handleBulkBook} title="Creates a booking for every active member for this meal - members on leave are excluded automatically, already-booked members are skipped">
+                      <Users size={16} className="mr-1" /> Book All Active Members
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="flex items-center gap-2 text-sm flex-wrap">
+              <span className="text-gray-500">This meal:</span>
+              <Badge className="bg-blue-100 text-blue-800">{statusCounts.booked || 0} booked</Badge>
+              <Badge className="bg-green-100 text-green-800">{statusCounts.attended || 0} attended</Badge>
+              <Badge className="bg-amber-100 text-amber-800">{statusCounts.excluded || 0} on leave</Badge>
+              <Badge className="bg-gray-100 text-gray-800">{statusCounts.cancelled || 0} cancelled</Badge>
             </div>
 
             <Card>
               <CardContent className="p-0">
                 <Table>
-                  <TableHeader><TableRow><TableHead>Consumer</TableHead><TableHead>Menu Item</TableHead><TableHead>Status</TableHead><TableHead>Method</TableHead><TableHead className="w-32">Actions</TableHead></TableRow></TableHeader>
+                  <TableHeader><TableRow><TableHead>Consumer</TableHead><TableHead>Menu Item</TableHead><TableHead>Status</TableHead><TableHead>Method</TableHead><TableHead className="w-56">Actions</TableHead></TableRow></TableHeader>
                   <TableBody>
                     {loading && <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500">Loading...</TableCell></TableRow>}
                     {!loading && records.map(r => (
@@ -243,14 +282,18 @@ export default function Attendance() {
                         <TableCell>
                           {r.status === 'booked' && (
                             <div className="flex gap-1">
-                              <Button size="sm" variant="ghost" onClick={() => handleMark(r.id, 'attended')}><CheckCircle size={16} className="text-green-600" /></Button>
-                              <Button size="sm" variant="ghost" onClick={() => handleMark(r.id, 'cancelled')}><XCircle size={16} className="text-red-500" /></Button>
+                              <Button size="sm" variant="outline" onClick={() => handleMark(r.id, 'attended')} title="Confirm this person ate the meal (counts toward billing)">
+                                <CheckCircle size={14} className="text-green-600 mr-1" /> Attended
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => handleMark(r.id, 'cancelled')} title="Cancel this booking (will not be billed)">
+                                <XCircle size={14} className="text-red-500 mr-1" /> Cancel
+                              </Button>
                             </div>
                           )}
                         </TableCell>
                       </TableRow>
                     ))}
-                    {!loading && records.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500">No bookings for this meal/date</TableCell></TableRow>}
+                    {!loading && records.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500 capitalize">No bookings for {mt} on {date} — use "Book a meal" above</TableCell></TableRow>}
                   </TableBody>
                 </Table>
               </CardContent>
