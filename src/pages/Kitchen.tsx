@@ -9,33 +9,25 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { ChefHat, Plus, Trash2, Flame, XCircle, Factory } from 'lucide-react';
+import { ChefHat, Plus, Trash2, Flame, XCircle, Factory, AlertTriangle, UtensilsCrossed } from 'lucide-react';
 import { defaultMealForNow } from '@/lib/mealDefaults';
+import RecipeIngredientEditor, { type Ingredient, type InventoryItemOption } from '@/components/RecipeIngredientEditor';
 
-interface Ingredient { id?: number; item_id: number; quantity: number; unit: string; item_name?: string | null; }
 interface Recipe { id: number; name: string; description: string | null; menu_category: string | null; portions: number; is_active: boolean; ingredients: Ingredient[]; }
-interface InventoryItemOption { id: number; name: string; unit: string; ingredient_type: string | null; }
 interface KitchenOrder {
   id: number; recipe_id: number; recipe_name: string | null; quantity_ordered: number;
   actual_portions: number | null; food_cost: number | null; status: string; notes: string | null; created_at: string;
+  is_ala_carte: boolean; consumer_type: string | null; member_id: number | null; booking_id: number | null;
+  consumer_name: string | null; sla_minutes: number | null; due_at: string | null; cooking_started_at: string | null;
 }
 interface SuggestedOrder { recipe_id: number; recipe_name: string | null; suggested_quantity: number; }
+interface MemberOption { id: number; full_name: string; service_number: string; }
+interface BookingOption { id: number; guest_name: string; room_number: string; }
+interface LateOrder { id: number; recipe_name: string | null; consumer_name: string | null; due_at: string | null; }
 
 const MEAL_TYPES = ['breakfast', 'lunch', 'hitea', 'dinner'];
 const emptyRecipeForm = { name: '', description: '', menu_category: 'breakfast', portions: 1 };
-
-// Cooking units a recipe can be authored in, per ingredient density category -
-// converted back to the item's own stock-tracked unit at deduction time
-// (see backend/services/unit_conversion.py). Items with no ingredient_type
-// set (count-based, e.g. eggs) fall back to just their own unit.
-const UNIT_OPTIONS: Record<string, string[]> = {
-  liquid: ['ml', 'l', 'cup', 'tbsp', 'tsp'],
-  powder: ['g', 'kg', 'cup', 'tbsp', 'tsp'],
-  granular: ['g', 'kg', 'cup', 'tbsp', 'tsp'],
-  solid_pieces: ['g', 'kg', 'pcs'],
-};
-const unitChoicesFor = (item: InventoryItemOption | undefined, fallbackUnit: string): string[] =>
-  (item?.ingredient_type && UNIT_OPTIONS[item.ingredient_type]) || [item?.unit ?? fallbackUnit];
+const emptyAlaCarteForm = { recipe_id: 0, consumer_kind: 'guest' as 'member' | 'guest', consumer_id: 0, quantity: 1, sla_minutes: 45 };
 
 export default function Kitchen() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
@@ -56,6 +48,17 @@ export default function Kitchen() {
   const [prodMeal, setProdMeal] = useState<string>(defaultMealForNow());
   const [suggested, setSuggested] = useState<SuggestedOrder[]>([]);
   const [busy, setBusy] = useState(false);
+
+  // A la carte custom orders: consumer picker + timer
+  const [members, setMembers] = useState<MemberOption[]>([]);
+  const [bookings, setBookings] = useState<BookingOption[]>([]);
+  const [lateOrders, setLateOrders] = useState<LateOrder[]>([]);
+  const [alaCarteDialogOpen, setAlaCarteDialogOpen] = useState(false);
+  const [alaCarteForm, setAlaCarteForm] = useState(emptyAlaCarteForm);
+  const [showNewRecipeInline, setShowNewRecipeInline] = useState(false);
+  const [newRecipeForm, setNewRecipeForm] = useState(emptyRecipeForm);
+  const [newRecipeIngredients, setNewRecipeIngredients] = useState<Ingredient[]>([]);
+  const [now, setNow] = useState(() => Date.now()); // ticks every second to redraw live countdowns
 
   const fetchRecipes = async () => {
     try { const res = await api.get('/recipes?page_size=100'); setRecipes(res.data.items); }
@@ -79,16 +82,40 @@ export default function Kitchen() {
     } catch { toast.error('Failed to load booked meals'); }
   };
 
+  const fetchMembers = async () => {
+    try { const res = await api.get('/members?status=active&page_size=100'); setMembers(res.data.items); }
+    catch { /* consumer picker is secondary to the core order flow */ }
+  };
+
+  const fetchBookings = async () => {
+    try { const res = await api.get('/bookings?status=checked_in'); setBookings(res.data.items); }
+    catch { /* consumer picker is secondary to the core order flow */ }
+  };
+
+  const fetchLateSummary = async () => {
+    try { const res = await api.get('/kitchen/orders/late-summary'); setLateOrders(res.data.items); }
+    catch { /* banner is best-effort, not critical */ }
+  };
+
   useEffect(() => {
     queueMicrotask(() => {
       setLoading(true);
-      Promise.all([fetchRecipes(), fetchItems(), fetchOrders()]).finally(() => setLoading(false));
+      Promise.all([fetchRecipes(), fetchItems(), fetchOrders(), fetchMembers(), fetchBookings(), fetchLateSummary()]).finally(() => setLoading(false));
     });
   }, []);
 
   useEffect(() => {
     queueMicrotask(() => { fetchSuggested(); });
   }, [prodDate, prodMeal]);
+
+  // Lazy SLA recompute happens server-side on every GET /kitchen/orders - this
+  // poll (plus the 1s countdown tick) is what keeps the a la carte board and
+  // late banner live without a background scheduler.
+  useEffect(() => {
+    const poll = setInterval(() => { fetchOrders(); fetchLateSummary(); }, 20000);
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    return () => { clearInterval(poll); clearInterval(tick); };
+  }, []);
 
   const openCreateRecipe = () => {
     setEditingRecipeId(null);
@@ -103,10 +130,6 @@ export default function Kitchen() {
     setRecipeIngredients(r.ingredients.map(i => ({ item_id: i.item_id, quantity: i.quantity, unit: i.unit })));
     setRecipeDialogOpen(true);
   };
-
-  const addIngredientRow = () => setRecipeIngredients([...recipeIngredients, { item_id: 0, quantity: 0, unit: '' }]);
-  const updateIngredientRow = (idx: number, patch: Partial<Ingredient>) => setRecipeIngredients(recipeIngredients.map((ing, i) => i === idx ? { ...ing, ...patch } : ing));
-  const removeIngredientRow = (idx: number) => setRecipeIngredients(recipeIngredients.filter((_, i) => i !== idx));
 
   const handleSaveRecipe = async () => {
     if (!recipeForm.name.trim()) { toast.error('Recipe name is required'); return; }
@@ -169,7 +192,7 @@ export default function Kitchen() {
   };
 
   const handleCookAllPending = async () => {
-    const pending = orders.filter(o => o.status === 'pending');
+    const pending = orders.filter(o => o.status === 'pending' && !o.is_ala_carte);
     if (pending.length === 0) { toast.info('No pending orders to cook'); return; }
     setBusy(true);
     let ok = 0; let fail = 0;
@@ -187,6 +210,74 @@ export default function Kitchen() {
     catch (err) { toast.error(getErrorMessage(err, 'Failed to cancel order')); }
   };
 
+  const openAlaCarteDialog = () => {
+    setAlaCarteForm(emptyAlaCarteForm);
+    setShowNewRecipeInline(false);
+    setNewRecipeForm(emptyRecipeForm);
+    setNewRecipeIngredients([]);
+    setAlaCarteDialogOpen(true);
+  };
+
+  const handleCreateRecipeInline = async () => {
+    if (!newRecipeForm.name.trim()) { toast.error('Recipe name is required'); return; }
+    const ingredients = newRecipeIngredients.filter(i => i.item_id && i.quantity > 0);
+    try {
+      const res = await api.post('/recipes', { ...newRecipeForm, ingredients });
+      toast.success('Recipe created');
+      await fetchRecipes();
+      setAlaCarteForm({ ...alaCarteForm, recipe_id: res.data.id });
+      setShowNewRecipeInline(false);
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to create recipe')); }
+  };
+
+  const handleCreateAlaCarteOrder = async () => {
+    if (!alaCarteForm.recipe_id) { toast.error('Select or create a recipe'); return; }
+    if (!alaCarteForm.consumer_id) { toast.error(`Select a ${alaCarteForm.consumer_kind}`); return; }
+    try {
+      await api.post('/kitchen/orders', {
+        recipe_id: alaCarteForm.recipe_id, quantity_ordered: alaCarteForm.quantity, is_ala_carte: true,
+        member_id: alaCarteForm.consumer_kind === 'member' ? alaCarteForm.consumer_id : undefined,
+        booking_id: alaCarteForm.consumer_kind === 'guest' ? alaCarteForm.consumer_id : undefined,
+        sla_minutes: alaCarteForm.sla_minutes,
+      });
+      toast.success('A la carte order started');
+      setAlaCarteDialogOpen(false);
+      fetchOrders();
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to create order')); }
+  };
+
+  const handleStartCooking = async (id: number) => {
+    try { await api.post(`/kitchen/orders/${id}/start-cooking`); toast.success('Cooking started — inventory deducted'); fetchOrders(); }
+    catch (err) { toast.error(getErrorMessage(err, 'Failed to start cooking')); }
+  };
+
+  const handleCompleteAlaCarte = async (id: number) => {
+    try { await api.post(`/kitchen/orders/${id}/complete`); toast.success('Order completed'); fetchOrders(); fetchLateSummary(); }
+    catch (err) { toast.error(getErrorMessage(err, 'Failed to complete order')); }
+  };
+
+  const countdownLabel = (dueAt: string | null): { label: string; overdue: boolean } => {
+    if (!dueAt) return { label: '—', overdue: false };
+    // Backend sends naive UTC timestamps (no trailing Z) - without it, `new Date()`
+    // parses the string as local time, throwing the countdown off by the browser's
+    // UTC offset. Force UTC interpretation explicitly.
+    const utcDueAt = dueAt.endsWith('Z') || dueAt.includes('+') ? dueAt : `${dueAt}Z`;
+    const diffMs = new Date(utcDueAt).getTime() - now;
+    const overdue = diffMs <= 0;
+    const totalSec = Math.floor(Math.abs(diffMs) / 1000);
+    const mm = String(Math.floor(totalSec / 60)).padStart(2, '0');
+    const ss = String(totalSec % 60).padStart(2, '0');
+    return { label: `${overdue ? '-' : ''}${mm}:${ss}`, overdue };
+  };
+
+  const alaCarteOrders = orders.filter(o => o.is_ala_carte);
+  const alaCarteColumns: { key: string; title: string; statuses: string[] }[] = [
+    { key: 'pending', title: 'Pending', statuses: ['pending'] },
+    { key: 'cooking', title: 'Cooking', statuses: ['cooking'] },
+    { key: 'completed', title: 'Completed', statuses: ['served'] },
+    { key: 'late', title: 'Late', statuses: ['late'] },
+  ];
+
   const orderStatusBadge = (status: string) => {
     const map: Record<string, { cls: string; label: string }> = {
       pending: { cls: 'bg-amber-100 text-amber-800', label: 'to cook' },
@@ -198,7 +289,8 @@ export default function Kitchen() {
     return <Badge className={s.cls}>{s.label}</Badge>;
   };
 
-  const pendingCount = orders.filter(o => o.status === 'pending').length;
+  const routineOrders = orders.filter(o => !o.is_ala_carte);
+  const pendingCount = routineOrders.filter(o => o.status === 'pending').length;
 
   return (
     <div className="space-y-6">
@@ -242,7 +334,7 @@ export default function Kitchen() {
                 <TableHeader><TableRow><TableHead>Recipe</TableHead><TableHead>Qty</TableHead><TableHead>Status</TableHead><TableHead className="w-48">Action</TableHead></TableRow></TableHeader>
                 <TableBody>
                   {loading && <TableRow><TableCell colSpan={4} className="text-center py-8 text-gray-500">Loading…</TableCell></TableRow>}
-                  {!loading && orders.map(o => (
+                  {!loading && routineOrders.map(o => (
                     <TableRow key={o.id}>
                       <TableCell className="font-medium">{o.recipe_name || `Recipe #${o.recipe_id}`}</TableCell>
                       <TableCell>{o.quantity_ordered}</TableCell>
@@ -260,7 +352,7 @@ export default function Kitchen() {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {!loading && orders.length === 0 && <TableRow><TableCell colSpan={4} className="text-center py-8 text-gray-500">No orders yet — Generate from bookings, or add a manual order</TableCell></TableRow>}
+                  {!loading && routineOrders.length === 0 && <TableRow><TableCell colSpan={4} className="text-center py-8 text-gray-500">No orders yet — Generate from bookings, or add a manual order</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </CardContent>
@@ -282,6 +374,125 @@ export default function Kitchen() {
               </CardContent>
             </Card>
           )}
+
+          {/* A la carte custom orders: Pending -> Cooking -> Completed/Late with a live SLA timer */}
+          <div className="pt-2 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h2 className="text-lg font-semibold flex items-center gap-2"><UtensilsCrossed size={18} /> A La Carte Orders</h2>
+              <Dialog open={alaCarteDialogOpen} onOpenChange={setAlaCarteDialogOpen}>
+                <DialogTrigger asChild><Button onClick={openAlaCarteDialog}><Plus size={16} className="mr-1" /> New A La Carte Order</Button></DialogTrigger>
+                <DialogContent className="max-w-2xl">
+                  <DialogHeader><DialogTitle>New A La Carte Order</DialogTitle></DialogHeader>
+                  <div className="space-y-3">
+                    {!showNewRecipeInline ? (
+                      <div className="flex items-end gap-2">
+                        <div className="flex-1">
+                          <Label>Recipe</Label>
+                          <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={alaCarteForm.recipe_id} onChange={e => setAlaCarteForm({ ...alaCarteForm, recipe_id: Number(e.target.value) })}>
+                            <option value="0">Select recipe</option>
+                            {recipes.filter(r => r.is_active).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                          </select>
+                        </div>
+                        <Button variant="outline" type="button" onClick={() => setShowNewRecipeInline(true)}>+ Create new recipe</Button>
+                      </div>
+                    ) : (
+                      <Card>
+                        <CardContent className="p-3 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <Label>New Recipe</Label>
+                            <Button size="sm" variant="ghost" type="button" onClick={() => setShowNewRecipeInline(false)}>Cancel</Button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <Input placeholder="Recipe Name" value={newRecipeForm.name} onChange={e => setNewRecipeForm({ ...newRecipeForm, name: e.target.value })} />
+                            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm capitalize" value={newRecipeForm.menu_category} onChange={e => setNewRecipeForm({ ...newRecipeForm, menu_category: e.target.value })}>
+                              {MEAL_TYPES.map(mt => <option key={mt} value={mt} className="capitalize">{mt}</option>)}
+                            </select>
+                          </div>
+                          <RecipeIngredientEditor items={items} ingredients={newRecipeIngredients} onChange={setNewRecipeIngredients} />
+                          <Button size="sm" type="button" onClick={handleCreateRecipeInline}>Save Recipe & Use It</Button>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label>For</Label>
+                        <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={alaCarteForm.consumer_kind} onChange={e => setAlaCarteForm({ ...alaCarteForm, consumer_kind: e.target.value as 'member' | 'guest', consumer_id: 0 })}>
+                          <option value="guest">Guest (checked-in booking)</option>
+                          <option value="member">Member</option>
+                        </select>
+                      </div>
+                      <div>
+                        <Label>{alaCarteForm.consumer_kind === 'member' ? 'Member' : 'Guest'}</Label>
+                        <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={alaCarteForm.consumer_id} onChange={e => setAlaCarteForm({ ...alaCarteForm, consumer_id: Number(e.target.value) })}>
+                          <option value="0">Select {alaCarteForm.consumer_kind === 'member' ? 'member' : 'guest'}</option>
+                          {alaCarteForm.consumer_kind === 'member'
+                            ? members.map(m => <option key={m.id} value={m.id}>{m.full_name} ({m.service_number})</option>)
+                            : bookings.map(b => <option key={b.id} value={b.id}>{b.guest_name} (Room {b.room_number})</option>)}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label>Quantity</Label>
+                        <Input type="number" min={1} value={alaCarteForm.quantity} onChange={e => setAlaCarteForm({ ...alaCarteForm, quantity: Number(e.target.value) })} />
+                      </div>
+                      <div>
+                        <Label>SLA Timer (minutes)</Label>
+                        <Input type="number" min={1} value={alaCarteForm.sla_minutes} onChange={e => setAlaCarteForm({ ...alaCarteForm, sla_minutes: Number(e.target.value) })} />
+                      </div>
+                    </div>
+
+                    <Button onClick={handleCreateAlaCarteOrder} className="w-full">Start Order</Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
+
+            {lateOrders.length > 0 && (
+              <div className="flex items-center gap-2 rounded-md border border-red-300 bg-red-50 dark:bg-red-950/20 px-3 py-2 text-sm text-red-800 dark:text-red-300">
+                <AlertTriangle size={16} className="animate-pulse" />
+                {lateOrders.length} order(s) critically overdue: {lateOrders.map(o => `${o.recipe_name || 'item'} for ${o.consumer_name || 'guest'}`).join(', ')}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {alaCarteColumns.map(col => (
+                <Card key={col.key}>
+                  <CardContent className="p-3 space-y-2">
+                    <h3 className="text-sm font-semibold text-gray-500">{col.title} ({alaCarteOrders.filter(o => col.statuses.includes(o.status)).length})</h3>
+                    {alaCarteOrders.filter(o => col.statuses.includes(o.status)).map(o => {
+                      const { label, overdue } = countdownLabel(o.due_at);
+                      const isLate = col.key === 'late';
+                      return (
+                        <div key={o.id} className={`rounded-md border p-2 space-y-1 ${isLate ? 'border-red-400 bg-red-50 dark:bg-red-950/20 animate-pulse' : 'border-gray-200 dark:border-gray-700'}`}>
+                          <p className="font-medium text-sm">{o.recipe_name || `Recipe #${o.recipe_id}`}</p>
+                          <p className="text-xs text-gray-500">{o.consumer_name || 'Unknown'} · qty {o.quantity_ordered}</p>
+                          {col.key !== 'completed' && (
+                            <p className={`text-xs font-mono ${overdue ? 'text-red-600' : 'text-gray-500'}`}>{label}</p>
+                          )}
+                          {col.key === 'pending' && <Button size="sm" className="w-full bg-orange-600 hover:bg-orange-700" onClick={() => handleStartCooking(o.id)}><Flame size={14} className="mr-1" /> Start Cooking</Button>}
+                          {col.key === 'cooking' && <Button size="sm" className="w-full bg-green-600 hover:bg-green-700" onClick={() => handleCompleteAlaCarte(o.id)}>Complete</Button>}
+                          {col.key === 'late' && (
+                            <div className="flex gap-1">
+                              {o.status === 'late' && o.cooking_started_at ? (
+                                <Button size="sm" className="flex-1 bg-green-600 hover:bg-green-700" onClick={() => handleCompleteAlaCarte(o.id)}>Complete</Button>
+                              ) : (
+                                <Button size="sm" className="flex-1 bg-orange-600 hover:bg-orange-700" onClick={() => handleStartCooking(o.id)}><Flame size={14} className="mr-1" /> Start Cooking</Button>
+                              )}
+                              <Button size="sm" variant="ghost" onClick={() => handleCancelOrder(o.id)}><XCircle size={16} className="text-red-500" /></Button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {alaCarteOrders.filter(o => col.statuses.includes(o.status)).length === 0 && <p className="text-xs text-gray-400">None</p>}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
         </TabsContent>
 
         <TabsContent value="recipes" className="space-y-4">
@@ -303,33 +514,7 @@ export default function Kitchen() {
                     <Input type="number" min={1} value={recipeForm.portions} onChange={e => setRecipeForm({...recipeForm, portions: Number(e.target.value)})} />
                   </div>
 
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label>Ingredients</Label>
-                      <Button size="sm" variant="outline" onClick={addIngredientRow}><Plus size={14} className="mr-1" /> Add Ingredient</Button>
-                    </div>
-                    {recipeIngredients.map((ing, idx) => {
-                      const selectedItem = items.find(i => i.id === ing.item_id);
-                      const unitChoices = unitChoicesFor(selectedItem, ing.unit);
-                      return (
-                      <div key={idx} className="flex items-center gap-2">
-                        <select className="h-9 rounded-md border border-input bg-background px-2 text-sm flex-1" value={ing.item_id} onChange={e => {
-                          const item = items.find(i => i.id === Number(e.target.value));
-                          updateIngredientRow(idx, { item_id: Number(e.target.value), unit: unitChoicesFor(item, ing.unit)[0] });
-                        }}>
-                          <option value="0">Select item</option>
-                          {items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-                        </select>
-                        <Input type="number" min={0} step="0.01" placeholder="Qty" value={ing.quantity} onChange={e => updateIngredientRow(idx, { quantity: Number(e.target.value) })} className="w-24" />
-                        <select className="h-9 rounded-md border border-input bg-background px-2 text-sm w-24" value={ing.unit} onChange={e => updateIngredientRow(idx, { unit: e.target.value })}>
-                          {unitChoices.map(u => <option key={u} value={u}>{u}</option>)}
-                        </select>
-                        <Button size="sm" variant="ghost" onClick={() => removeIngredientRow(idx)}><Trash2 size={16} className="text-red-500" /></Button>
-                      </div>
-                      );
-                    })}
-                    {recipeIngredients.length === 0 && <p className="text-sm text-gray-500">No ingredients added - order/cook will still work but won't deduct inventory.</p>}
-                  </div>
+                  <RecipeIngredientEditor items={items} ingredients={recipeIngredients} onChange={setRecipeIngredients} />
 
                   <Button onClick={handleSaveRecipe} className="w-full">{editingRecipeId ? 'Save Changes' : 'Create Recipe'}</Button>
                 </div>

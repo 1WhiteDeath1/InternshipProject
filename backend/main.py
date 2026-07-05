@@ -56,6 +56,7 @@ app.include_router(routers.attendance_router, prefix="/api/attendance", tags=["A
 app.include_router(routers.mess_billing_router, prefix="/api/mess-billing", tags=["Mess Billing"])
 app.include_router(routers.recipes_router, prefix="/api/recipes", tags=["Recipes"])
 app.include_router(routers.kitchen_router, prefix="/api/kitchen", tags=["Kitchen"])
+app.include_router(routers.menu_prices_router, prefix="/api/menu-prices", tags=["Menu Prices"])
 
 # Serve static files (React build)
 dist_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dist")

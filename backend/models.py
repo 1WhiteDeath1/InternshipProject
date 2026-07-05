@@ -409,6 +409,41 @@ class KitchenOrder(Base):
     ordered_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # --- À la carte custom-order fields (is_ala_carte=True only) ---
+    # A la carte orders are attributed to one specific consumer for billing -
+    # MealAttendance can't hold this (its unique constraint allows only one row
+    # per person per date/meal_type, but a guest may order several custom
+    # dishes in a day), so the link lives here instead.
+    is_ala_carte = Column(Boolean, default=False)
+    consumer_type = Column(String(20), nullable=True)  # "member" | "guest"
+    member_id = Column(Integer, ForeignKey("members.id"), nullable=True)
+    booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=True)
+    sla_minutes = Column(Integer, nullable=True)
+    due_at = Column(DateTime, nullable=True)  # fixed at creation; later SystemSetting changes don't move it
+    cooking_started_at = Column(DateTime, nullable=True)  # set the instant status -> "cooking" (also the deduction instant)
+    escalated_at = Column(DateTime, nullable=True)  # idempotency guard: >15min-overdue admin alert posted once
+    invoiced_at = Column(DateTime, nullable=True)  # set once pulled into a MessBill/Invoice, guards double-billing
+
+    recipe = relationship("Recipe")
+    member = relationship("Member")
+    booking = relationship("Booking")
+
+
+class MenuPrice(Base):
+    """Guest-facing (non-member, pay-per-item) price for a recipe. Deliberately
+    decoupled from Recipe itself - a recipe used only for member routine meals
+    may never need a guest price, and pricing may vary by context later without
+    touching recipe/ingredient data. One row per recipe; missing/inactive means
+    "not yet priced for guests" and is excluded from bills, flagged instead."""
+    __tablename__ = "menu_prices"
+
+    id = Column(Integer, primary_key=True)
+    recipe_id = Column(Integer, ForeignKey("recipes.id"), nullable=False, unique=True)
+    price = Column(Numeric(12, 2), nullable=False, default=0)
+    is_active = Column(Boolean, default=True)
+    updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
     recipe = relationship("Recipe")
 
 
@@ -693,6 +728,10 @@ class MealAttendance(Base):
     booked_at = Column(DateTime, default=datetime.utcnow)
     marked_at = Column(DateTime, nullable=True)
     marked_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Set once this row's routine-meal charge (non-member/guest pay-per-item,
+    # priced via MenuPrice) has been pulled into an Instant Checkout invoice -
+    # guards against double-billing the same meal on a repeat checkout.
+    invoiced_at = Column(DateTime, nullable=True)
 
     member = relationship("Member")
     booking = relationship("Booking")
@@ -722,6 +761,9 @@ class MessBill(Base):
     discount_amount = Column(Numeric(12, 2), default=0)
     discount_approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     discount_reason = Column(Text, nullable=True)
+    # Member's own à la carte custom-order charges for the period, billed at
+    # cost (food_cost, no markup) since MenuPrice is the guest-facing list.
+    ala_carte_amount = Column(Numeric(12, 2), default=0)
     total_amount = Column(Numeric(12, 2), nullable=False, default=0)
     status = Column(Enum(MessBillStatus), default=MessBillStatus.DRAFT)
     generated_at = Column(DateTime, default=datetime.utcnow)

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import (
     Member, MemberStatus, MessBill, MessBillStatus, GuestMealCharge,
-    PurchaseOrder, POStatus, Booking,
+    PurchaseOrder, POStatus, Booking, KitchenOrder,
 )
 from backend.schemas import GuestMealChargeCreate, DiscountApplyRequest
 from backend.auth import get_current_user, check_permission
@@ -40,7 +40,8 @@ async def list_bills(
         {"id": b.id, "member_id": b.member_id, "member_name": b.member.full_name if b.member else None,
          "month": b.month, "year": b.year, "man_days": b.man_days, "per_head_rate": float(b.per_head_rate),
          "base_menu_amount": float(b.base_menu_amount), "stay_amount": float(b.stay_amount or 0),
-         "extra_meals_amount": float(b.extra_meals_amount or 0), "applied_discount_rate": float(b.applied_discount_rate or 0),
+         "extra_meals_amount": float(b.extra_meals_amount or 0), "ala_carte_amount": float(b.ala_carte_amount or 0),
+         "applied_discount_rate": float(b.applied_discount_rate or 0),
          "discount_amount": float(b.discount_amount or 0), "discount_reason": b.discount_reason,
          "total_amount": float(b.total_amount), "status": b.status.value, "generated_at": b.generated_at} for b in bills], "total": total}
 
@@ -92,9 +93,18 @@ async def generate_bills(month: int = Query(..., ge=1, le=12), year: int = Query
                 GuestMealCharge.sponsor_member_id == member.id, GuestMealCharge.date >= period_start, GuestMealCharge.date <= period_end,
             ).all()
         ))
+        # Member's own a la carte custom orders for the period, billed at cost
+        # (food_cost, no markup - MenuPrice is the guest-facing list, not
+        # member-facing) and not yet pulled into a bill.
+        ala_carte_orders = db.query(KitchenOrder).filter(
+            KitchenOrder.member_id == member.id, KitchenOrder.is_ala_carte == True,
+            KitchenOrder.status == "served", KitchenOrder.invoiced_at.is_(None),
+            KitchenOrder.created_at >= period_start_dt, KitchenOrder.created_at <= period_end_dt,
+        ).all()
+        ala_carte_amount = float(sum(o.food_cost or 0 for o in ala_carte_orders))
         discount_rate = float(member.custom_discount_rate) if member.custom_discount_rate and member.custom_discount_rate > 0 else default_discount_rate
         discount_amount = base_menu_amount * discount_rate / 100
-        total_amount = base_menu_amount - discount_amount + stay_amount + extra_meals_amount
+        total_amount = base_menu_amount - discount_amount + stay_amount + extra_meals_amount + ala_carte_amount
 
         if existing:
             bill = existing
@@ -107,11 +117,14 @@ async def generate_bills(month: int = Query(..., ge=1, le=12), year: int = Query
         bill.base_menu_amount = base_menu_amount
         bill.stay_amount = stay_amount
         bill.extra_meals_amount = extra_meals_amount
+        bill.ala_carte_amount = ala_carte_amount
         bill.applied_discount_rate = discount_rate
         bill.discount_amount = discount_amount
         bill.total_amount = total_amount
         bill.generated_at = datetime.utcnow()
         bill.generated_by = current_user.id
+        for o in ala_carte_orders:
+            o.invoiced_at = datetime.utcnow()
         db.commit()
         db.refresh(bill)
         generated.append(bill.id)

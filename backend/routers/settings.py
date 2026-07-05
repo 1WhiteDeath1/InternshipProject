@@ -33,6 +33,8 @@ async def list_settings(db: Session = Depends(get_db), current_user=Depends(requ
             SystemSetting(key="civilian_meal_multiplier", value="1.00", description="Multiplier applied to extra-meal charges for civilian non-members"),
             SystemSetting(key="non_civilian_meal_multiplier", value="1.00", description="Multiplier applied to extra-meal charges for non-civilian non-members"),
             SystemSetting(key="default_member_discount_rate", value="0.00", description="Institution-wide baseline member discount percentage, used when a member has no custom rate set"),
+            SystemSetting(key="ala_carte_default_sla_minutes", value="45", description="Default countdown timer (minutes) for a new a la carte kitchen order before it flips Late, if not manually overridden"),
+            SystemSetting(key="ala_carte_escalation_minutes", value="15", description="Additional minutes overdue past the SLA deadline before a Late order escalates to a CRITICAL admin alert"),
         ]
         for d in defaults:
             db.add(d)

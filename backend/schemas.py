@@ -292,6 +292,19 @@ class KitchenOrderCreate(BaseModel):
     recipe_id: int
     quantity_ordered: int = Field(1, gt=0)
     notes: Optional[str] = None
+    is_ala_carte: bool = False
+    consumer_type: Optional[str] = None  # "member" | "guest"
+    member_id: Optional[int] = None
+    booking_id: Optional[int] = None
+    sla_minutes: Optional[int] = Field(None, gt=0)
+
+    @model_validator(mode="after")
+    def _check_consumer(self):
+        if self.is_ala_carte:
+            if bool(self.member_id) == bool(self.booking_id):
+                raise ValueError("Exactly one of member_id or booking_id is required for an a la carte order")
+            self.consumer_type = "member" if self.member_id else "guest"
+        return self
 
 class KitchenOrderOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -308,9 +321,30 @@ class KitchenOrderOut(BaseModel):
     source: Optional[str] = None
     ordered_by: Optional[int] = None
     created_at: datetime
+    is_ala_carte: bool = False
+    consumer_type: Optional[str] = None
+    member_id: Optional[int] = None
+    booking_id: Optional[int] = None
+    consumer_name: Optional[str] = None
+    sla_minutes: Optional[int] = None
+    due_at: Optional[datetime] = None
+    cooking_started_at: Optional[datetime] = None
 
 class KitchenOrderPrepareRequest(BaseModel):
     actual_portions: Optional[int] = Field(None, gt=0)
+
+class MenuPriceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    recipe_id: int
+    recipe_name: Optional[str] = None
+    price: float
+    is_active: bool
+    updated_at: Optional[datetime] = None
+
+class MenuPriceUpdate(BaseModel):
+    price: float = Field(..., ge=0)
+    is_active: bool = True
 
 
 # --- Vendor Schemas ---

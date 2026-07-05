@@ -19,3 +19,4 @@ from backend.routers.attendance import router as attendance_router
 from backend.routers.mess_billing import router as mess_billing_router
 from backend.routers.recipes import router as recipes_router
 from backend.routers.kitchen import router as kitchen_router
+from backend.routers.menu_prices import router as menu_prices_router

@@ -11,6 +11,7 @@ import Inventory from '@/pages/Inventory';
 import Procurement from '@/pages/Procurement';
 import Bookings from '@/pages/Bookings';
 import Billing from '@/pages/Billing';
+import ClerkDesk from '@/pages/ClerkDesk';
 import Members from '@/pages/Members';
 import Attendance from '@/pages/Attendance';
 import MessBilling from '@/pages/MessBilling';
@@ -40,6 +41,7 @@ function App() {
                 <Route path="/procurement" element={<Procurement />} />
                 <Route path="/bookings" element={<Bookings />} />
                 <Route path="/billing" element={<Billing />} />
+                <Route path="/clerk-desk" element={<ClerkDesk />} />
                 <Route path="/members" element={<Members />} />
                 <Route path="/attendance" element={<Attendance />} />
                 <Route path="/mess-billing" element={<MessBilling />} />

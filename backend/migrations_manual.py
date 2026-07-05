@@ -15,6 +15,9 @@ def run_startup_migrations(engine):
     _migrate_kitchen_orders(engine)
     _migrate_stock_zone_removal(engine)
     _migrate_inventory_ingredient_type(engine)
+    _migrate_kitchen_orders_ala_carte(engine)
+    _migrate_meal_attendance_invoiced(engine)
+    _migrate_mess_bills_ala_carte(engine)
 
 
 def _migrate_inventory_ingredient_type(engine):
@@ -203,3 +206,56 @@ def _rebuild_meal_attendance_nullable_member(conn):
     conn.execute(text("CREATE UNIQUE INDEX uq_attendance_member_date_meal ON meal_attendance (member_id, date, meal_type)"))
     conn.execute(text("CREATE UNIQUE INDEX uq_attendance_booking_date_meal ON meal_attendance (booking_id, date, meal_type)"))
     conn.commit()
+
+
+def _migrate_kitchen_orders_ala_carte(engine):
+    # Additive columns for the custom a la carte order lifecycle (Pending ->
+    # Cooking -> Completed/Late with a timer and consumer attribution). All
+    # nullable - plain ALTER TABLE ADD COLUMN, no rebuild needed.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(kitchen_orders)")).fetchall()
+        if not cols:
+            return  # table doesn't exist yet - create_all() will make it correctly
+        col_names = {c[1] for c in cols}
+        additions = (
+            ("is_ala_carte", "BOOLEAN"),
+            ("consumer_type", "VARCHAR(20)"),
+            ("member_id", "INTEGER REFERENCES members(id)"),
+            ("booking_id", "INTEGER REFERENCES bookings(id)"),
+            ("sla_minutes", "INTEGER"),
+            ("due_at", "DATETIME"),
+            ("cooking_started_at", "DATETIME"),
+            ("escalated_at", "DATETIME"),
+            ("invoiced_at", "DATETIME"),
+        )
+        for name, ddl_type in additions:
+            if name not in col_names:
+                conn.execute(text(f"ALTER TABLE kitchen_orders ADD COLUMN {name} {ddl_type}"))
+                logger.info("migration: added kitchen_orders.%s", name)
+        conn.commit()
+
+
+def _migrate_meal_attendance_invoiced(engine):
+    # Guards a non-member's routine-meal consumption against being billed
+    # twice across repeated Instant Checkout attempts.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(meal_attendance)")).fetchall()
+        if not cols:
+            return
+        if "invoiced_at" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE meal_attendance ADD COLUMN invoiced_at DATETIME"))
+            conn.commit()
+            logger.info("migration: added meal_attendance.invoiced_at")
+
+
+def _migrate_mess_bills_ala_carte(engine):
+    # A member's own a la carte custom-order charges for the period, folded
+    # into their monthly statement alongside the existing extra_meals_amount.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(mess_bills)")).fetchall()
+        if not cols:
+            return
+        if "ala_carte_amount" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE mess_bills ADD COLUMN ala_carte_amount NUMERIC(12, 2) DEFAULT 0"))
+            conn.commit()
+            logger.info("migration: added mess_bills.ala_carte_amount")

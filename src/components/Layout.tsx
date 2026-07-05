@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Package, ShoppingCart, BedDouble, Receipt,
   Shield, Users, UserCog, ClipboardList, Bell, BarChart3,
   Settings, FileUp, LogOut, Sun, Moon, ChevronLeft, ChevronRight,
-  IdCard, UtensilsCrossed, Wallet, ChefHat
+  IdCard, UtensilsCrossed, Wallet, ChefHat, LayoutGrid
 } from 'lucide-react';
 
 const navItems = [
@@ -18,6 +18,7 @@ const navItems = [
   { path: '/procurement', label: 'Procurement', icon: ShoppingCart, feature: null },
   { path: '/bookings', label: 'Bookings', icon: BedDouble, feature: null },
   { path: '/billing', label: 'Billing', icon: Receipt, feature: null },
+  { path: '/clerk-desk', label: 'Clerk Desk', icon: LayoutGrid, feature: 'clerk_desk' },
   { path: '/members', label: 'Members', icon: IdCard, feature: 'mess_members' },
   { path: '/attendance', label: 'Attendance', icon: UtensilsCrossed, feature: 'mess_attendance' },
   { path: '/mess-billing', label: 'Mess Billing', icon: Wallet, feature: 'mess_billing' },

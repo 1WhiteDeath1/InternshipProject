@@ -24,6 +24,7 @@ interface MessBill {
   base_menu_amount: number;
   stay_amount: number;
   extra_meals_amount: number;
+  ala_carte_amount: number;
   applied_discount_rate: number;
   discount_amount: number;
   discount_reason: string | null;
@@ -182,10 +183,10 @@ export default function MessBilling() {
             <CardContent className="p-0">
               <Table>
                 <TableHeader>
-                  <TableRow><TableHead>Member</TableHead><TableHead>Man-Days</TableHead><TableHead>Menu</TableHead><TableHead>Stay</TableHead><TableHead>Extras</TableHead><TableHead>Discount</TableHead><TableHead>Total</TableHead><TableHead>Status</TableHead><TableHead className="w-32">Actions</TableHead></TableRow>
+                  <TableRow><TableHead>Member</TableHead><TableHead>Man-Days</TableHead><TableHead>Menu</TableHead><TableHead>Stay</TableHead><TableHead>Extras</TableHead><TableHead>A La Carte</TableHead><TableHead>Discount</TableHead><TableHead>Total</TableHead><TableHead>Status</TableHead><TableHead className="w-32">Actions</TableHead></TableRow>
                 </TableHeader>
                 <TableBody>
-                  {loading && <TableRow><TableCell colSpan={9} className="text-center py-8 text-gray-500">Loading bills...</TableCell></TableRow>}
+                  {loading && <TableRow><TableCell colSpan={10} className="text-center py-8 text-gray-500">Loading bills...</TableCell></TableRow>}
                   {!loading && bills.map(b => (
                     <TableRow key={b.id}>
                       <TableCell className="font-medium">{b.member_name}</TableCell>
@@ -193,6 +194,7 @@ export default function MessBilling() {
                       <TableCell>${b.base_menu_amount.toFixed(2)}</TableCell>
                       <TableCell>${b.stay_amount.toFixed(2)}</TableCell>
                       <TableCell>${b.extra_meals_amount.toFixed(2)}</TableCell>
+                      <TableCell>${b.ala_carte_amount.toFixed(2)}</TableCell>
                       <TableCell className="text-sm text-gray-500">{b.applied_discount_rate}% (${b.discount_amount.toFixed(2)})</TableCell>
                       <TableCell className="font-semibold">${b.total_amount.toFixed(2)}</TableCell>
                       <TableCell>{statusBadge(b.status)}</TableCell>
@@ -209,7 +211,7 @@ export default function MessBilling() {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {!loading && bills.length === 0 && <TableRow><TableCell colSpan={9} className="text-center py-8 text-gray-500">No bills for this period - click Generate Bills</TableCell></TableRow>}
+                  {!loading && bills.length === 0 && <TableRow><TableCell colSpan={10} className="text-center py-8 text-gray-500">No bills for this period - click Generate Bills</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </CardContent>

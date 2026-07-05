@@ -40,6 +40,7 @@ DEFAULT_FEATURES = [
     FeatureFlag(key="mess_attendance", name="Meal Attendance & Booking", description="Advance meal booking and attendance tracking for members", department="Mess", enabled=True),
     FeatureFlag(key="mess_billing", name="Mess Billing", description="Communal per-head mess bill generation for members", department="Mess", enabled=True),
     FeatureFlag(key="kitchen_module", name="Kitchen Module", description="Recipe/menu management and kitchen production orders", department="Mess", enabled=True),
+    FeatureFlag(key="clerk_desk", name="Clerk Desk", description="Front-desk guest/member balance grid with Instant Checkout", department="Billing", enabled=True),
 ]
 
 
