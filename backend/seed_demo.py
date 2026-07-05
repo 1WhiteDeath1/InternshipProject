@@ -103,12 +103,12 @@ db.commit()
 
 # --- Stock Batches ---
 batches = [
-    StockBatch(item_id=items[0].id, batch_number="B001", quantity=45, zone=StockZone.WAREHOUSE, bin_location="A1", expiry_date=date(2026, 12, 31), unit_cost=2.5),
-    StockBatch(item_id=items[1].id, batch_number="B002", quantity=12, zone=StockZone.KITCHEN, unit_cost=8.0),
-    StockBatch(item_id=items[2].id, batch_number="B003", quantity=25, zone=StockZone.KITCHEN, unit_cost=1.2),
-    StockBatch(item_id=items[4].id, batch_number="B004", quantity=30, zone=StockZone.KITCHEN, bin_location="V1", unit_cost=1.5),
-    StockBatch(item_id=items[5].id, batch_number="B005", quantity=15, zone=StockZone.KITCHEN, unit_cost=2.0),
-    StockBatch(item_id=items[6].id, batch_number="B006", quantity=8, zone=StockZone.WAREHOUSE, bin_location="B2", expiry_date=date(2026, 10, 15), unit_cost=12.0),
+    StockBatch(item_id=items[0].id, batch_number="B001", quantity=45, bin_location="A1", expiry_date=date(2026, 12, 31), unit_cost=2.5),
+    StockBatch(item_id=items[1].id, batch_number="B002", quantity=12, unit_cost=8.0),
+    StockBatch(item_id=items[2].id, batch_number="B003", quantity=25, unit_cost=1.2),
+    StockBatch(item_id=items[4].id, batch_number="B004", quantity=30, bin_location="V1", unit_cost=1.5),
+    StockBatch(item_id=items[5].id, batch_number="B005", quantity=15, unit_cost=2.0),
+    StockBatch(item_id=items[6].id, batch_number="B006", quantity=8, bin_location="B2", expiry_date=date(2026, 10, 15), unit_cost=12.0),
 ]
 db.add_all(batches)
 db.commit()

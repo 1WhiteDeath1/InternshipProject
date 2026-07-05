@@ -180,6 +180,7 @@ class InventoryItemBase(BaseModel):
     unit: str = Field(..., min_length=1, max_length=50)
     reorder_level: float = 0
     reorder_quantity: float = 0
+    ingredient_type: Optional[str] = None  # "liquid" | "powder" | "granular" | "solid_pieces" | None
 
 class InventoryItemCreate(InventoryItemBase):
     pass
@@ -192,6 +193,7 @@ class InventoryItemUpdate(BaseModel):
     unit: Optional[str] = None
     reorder_level: Optional[float] = None
     reorder_quantity: Optional[float] = None
+    ingredient_type: Optional[str] = None
 
 class InventoryItemOut(InventoryItemBase):
     model_config = ConfigDict(from_attributes=True)
@@ -200,14 +202,11 @@ class InventoryItemOut(InventoryItemBase):
     created_at: datetime
     category_name: Optional[str] = None
     total_stock: float = 0
-    warehouse_stock: float = 0
-    kitchen_stock: float = 0
 
 class StockBatchBase(BaseModel):
     item_id: int
     batch_number: str = Field(..., min_length=1, max_length=100)
     quantity: float = Field(..., gt=0)
-    zone: str
     bin_location: Optional[str] = None
     expiry_date: Optional[date] = None
     unit_cost: float = 0
@@ -227,8 +226,6 @@ class StockMovementCreate(BaseModel):
     item_id: int
     movement_type: str
     quantity: float = Field(..., gt=0)
-    from_zone: Optional[str] = None
-    to_zone: Optional[str] = None
     reference_type: Optional[str] = None
     reference_id: Optional[int] = None
     notes: Optional[str] = None
@@ -702,6 +699,14 @@ class BulkAttendanceCreate(BaseModel):
     date: date
     meal_type: str
     method: str = "manual"
+
+class RosterSetRequest(BaseModel):
+    date: date
+    meal_type: str
+    member_ids: List[int] = Field(..., min_length=1)
+    present: bool
+    recipe_id: Optional[int] = None
+    reason: Optional[str] = None
 
 class MemberLeaveBase(BaseModel):
     member_id: int

@@ -137,6 +137,19 @@ async def generate_orders_from_bookings(
     return {"created": created, "skipped": skipped}
 
 
+def _apply_deduction(db: Session, order: KitchenOrder, current_user, actual_portions=None):
+    """Shared body for prepare/cook: deduct recipe stock, auto-record food cost,
+    optionally capture actual portions. Feature-flag gated exactly as before."""
+    if _is_feature_enabled(db, "recipe_deductions"):
+        consumed_cost = deduct_recipe_stock(db, order.recipe, order.quantity_ordered, order.id, current_user.id)
+        # Auto-record food cost from the batches actually consumed, so cost
+        # reporting needs zero manual entry (gated by its own feature flag).
+        if _is_feature_enabled(db, "food_cost_reports"):
+            order.food_cost = consumed_cost
+    if _is_feature_enabled(db, "portion_tracking") and actual_portions is not None:
+        order.actual_portions = actual_portions
+
+
 @router.post("/orders/{order_id}/prepare")
 async def prepare_kitchen_order(order_id: int, data: KitchenOrderPrepareRequest, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     if not check_permission(current_user, "kitchen", "edit"):
@@ -148,18 +161,30 @@ async def prepare_kitchen_order(order_id: int, data: KitchenOrderPrepareRequest,
         raise HTTPException(status_code=400, detail="Only a pending order can be prepared")
 
     before = serialize_model(order)
-
-    if _is_feature_enabled(db, "recipe_deductions"):
-        consumed_cost = deduct_recipe_stock(db, order.recipe, order.quantity_ordered, order.id, current_user.id)
-        # Auto-record food cost from the batches actually consumed, so cost
-        # reporting needs zero manual entry (gated by its own feature flag).
-        if _is_feature_enabled(db, "food_cost_reports"):
-            order.food_cost = consumed_cost
-
-    if _is_feature_enabled(db, "portion_tracking") and data.actual_portions is not None:
-        order.actual_portions = data.actual_portions
-
+    _apply_deduction(db, order, current_user, data.actual_portions)
     order.status = "prepared"
+    db.commit()
+    db.refresh(order)
+
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "kitchen_orders", order.id, before_state=before, after_state=serialize_model(order), ip_address=request.client.host)
+    return order
+
+
+@router.post("/orders/{order_id}/cook")
+async def cook_kitchen_order(order_id: int, data: KitchenOrderPrepareRequest, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """One-tap 'Mark Cooked' - collapses prepare+serve: deduct inventory and
+    take the order straight to served. Only a pending order can be cooked."""
+    if not check_permission(current_user, "kitchen", "edit"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    order = db.query(KitchenOrder).filter(KitchenOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Kitchen order not found")
+    if order.status != "pending":
+        raise HTTPException(status_code=400, detail="Only a pending order can be cooked")
+
+    before = serialize_model(order)
+    _apply_deduction(db, order, current_user, data.actual_portions)
+    order.status = "served"
     db.commit()
     db.refresh(order)
 

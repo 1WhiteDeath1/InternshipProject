@@ -4,7 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from backend.database import get_db
-from backend.models import Vendor, PurchaseOrder, PurchaseOrderItem, InventoryItem, ThreeWayMatch, StockBatch, StockMovement
+from backend.models import Vendor, PurchaseOrder, PurchaseOrderItem, ThreeWayMatch, StockBatch, StockMovement
 from backend.schemas import VendorCreate, VendorUpdate, PurchaseOrderCreate, PurchaseOrderUpdate, POItemBase, ReceivingQuantities
 from backend.auth import get_current_user, check_permission
 from backend.audit import log_audit, serialize_model, AuditAction
@@ -195,12 +195,10 @@ async def confirm_receipt(po_id: int, data: ReceivingQuantities, request: Reques
 
         # Create stock batch for received items
         if received > 0:
-            inv_item = db.query(InventoryItem).filter(InventoryItem.id == item.item_id).first()
             batch = StockBatch(
                 item_id=item.item_id,
                 batch_number=f"{po.po_number}-I{item.id}",
                 quantity=received,
-                zone="warehouse",
                 unit_cost=item.unit_price,
             )
             db.add(batch)
@@ -209,7 +207,7 @@ async def confirm_receipt(po_id: int, data: ReceivingQuantities, request: Reques
 
             movement = StockMovement(
                 batch_id=batch.id, item_id=item.item_id, movement_type="receipt",
-                quantity=received, to_zone="warehouse",
+                quantity=received,
                 reference_type="purchase_order", reference_id=po.id,
                 notes=f"Receipt from PO {po.po_number}", created_by=current_user.id,
             )

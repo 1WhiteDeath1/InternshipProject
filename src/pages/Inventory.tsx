@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import {
-  Search, Plus, Trash2, Warehouse, ChefHat, AlertTriangle
+  Search, Plus, Trash2, AlertTriangle
 } from 'lucide-react';
 
 interface InventoryItem {
@@ -25,10 +25,9 @@ interface InventoryItem {
   name: string;
   category_name: string;
   unit: string;
+  ingredient_type: string | null;
   reorder_level: number;
   total_stock: number;
-  warehouse_stock: number;
-  kitchen_stock: number;
   is_active: boolean;
 }
 
@@ -37,7 +36,6 @@ interface StockBatch {
   batch_number: string;
   item_name: string;
   quantity: number;
-  zone: string;
   bin_location: string;
   expiry_date: string;
 }
@@ -49,7 +47,7 @@ export default function Inventory() {
   const [lowStock, setLowStock] = useState(false);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState({ sku: '', name: '', category_id: 1, unit: 'pcs', reorder_level: 0, reorder_quantity: 0 });
+  const [form, setForm] = useState({ sku: '', name: '', category_id: 1, unit: 'pcs', ingredient_type: '', reorder_level: 0, reorder_quantity: 0 });
   const [categories, setCategories] = useState<{id: number; name: string}[]>([]);
   const [expirySoonThreshold, setExpirySoonThreshold] = useState(0);
 
@@ -85,11 +83,11 @@ export default function Inventory() {
 
   const handleCreate = async () => {
     try {
-      await api.post('/inventory/items', form);
+      await api.post('/inventory/items', { ...form, ingredient_type: form.ingredient_type || null });
       toast.success('Item created');
       setDialogOpen(false);
       fetchItems();
-      setForm({ sku: '', name: '', category_id: 1, unit: 'pcs', reorder_level: 0, reorder_quantity: 0 });
+      setForm({ sku: '', name: '', category_id: 1, unit: 'pcs', ingredient_type: '', reorder_level: 0, reorder_quantity: 0 });
     } catch (err) {
       toast.error(getErrorMessage(err, 'Failed to create item'));
     }
@@ -126,6 +124,16 @@ export default function Inventory() {
                   </select>
                 </div>
                 <div className="space-y-2"><Label>Unit</Label><Input value={form.unit} onChange={e => setForm({...form, unit: e.target.value})} /></div>
+              </div>
+              <div className="space-y-2">
+                <Label>Ingredient Type (optional, for recipe unit conversion)</Label>
+                <select className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={form.ingredient_type} onChange={e => setForm({...form, ingredient_type: e.target.value})}>
+                  <option value="">Not applicable (non-food item / count-based)</option>
+                  <option value="liquid">Liquid</option>
+                  <option value="powder">Powder</option>
+                  <option value="granular">Granular</option>
+                  <option value="solid_pieces">Solid Pieces</option>
+                </select>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2"><Label>Reorder Level</Label><Input type="number" value={form.reorder_level} onChange={e => setForm({...form, reorder_level: Number(e.target.value)})} /></div>
@@ -165,22 +173,18 @@ export default function Inventory() {
                     <TableHead>Name</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>Total Stock</TableHead>
-                    <TableHead>Warehouse</TableHead>
-                    <TableHead>Kitchen</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="w-16"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {loading && <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">Loading inventory...</TableCell></TableRow>}
+                  {loading && <TableRow><TableCell colSpan={6} className="text-center py-8 text-gray-500">Loading inventory...</TableCell></TableRow>}
                   {!loading && items.map(item => (
                     <TableRow key={item.id}>
                       <TableCell className="font-medium">{item.sku}</TableCell>
                       <TableCell>{item.name}</TableCell>
                       <TableCell>{item.category_name}</TableCell>
                       <TableCell className="font-semibold">{item.total_stock} {item.unit}</TableCell>
-                      <TableCell className="text-blue-600">{item.warehouse_stock}</TableCell>
-                      <TableCell className="text-amber-600">{item.kitchen_stock}</TableCell>
                       <TableCell>
                         {item.total_stock <= item.reorder_level && item.reorder_level > 0 ? (
                           <Badge variant="destructive" className="gap-1"><AlertTriangle size={12} /> Low</Badge>
@@ -194,7 +198,7 @@ export default function Inventory() {
                     </TableRow>
                   ))}
                   {!loading && items.length === 0 && (
-                    <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">No inventory items found</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={6} className="text-center py-8 text-gray-500">No inventory items found</TableCell></TableRow>
                   )}
                 </TableBody>
               </Table>
@@ -207,7 +211,7 @@ export default function Inventory() {
             <CardContent className="p-0">
               <Table>
                 <TableHeader>
-                  <TableRow><TableHead>Batch</TableHead><TableHead>Item</TableHead><TableHead>Quantity</TableHead><TableHead>Zone</TableHead><TableHead>Location</TableHead><TableHead>Expiry</TableHead></TableRow>
+                  <TableRow><TableHead>Batch</TableHead><TableHead>Item</TableHead><TableHead>Quantity</TableHead><TableHead>Location</TableHead><TableHead>Expiry</TableHead></TableRow>
                 </TableHeader>
                 <TableBody>
                   {batches.map(b => (
@@ -215,12 +219,6 @@ export default function Inventory() {
                       <TableCell>{b.batch_number}</TableCell>
                       <TableCell>{b.item_name}</TableCell>
                       <TableCell className="font-semibold">{b.quantity}</TableCell>
-                      <TableCell>
-                        <Badge variant={b.zone === 'kitchen' ? 'default' : 'secondary'} className="gap-1">
-                          {b.zone === 'kitchen' ? <ChefHat size={12} /> : <Warehouse size={12} />}
-                          {b.zone}
-                        </Badge>
-                      </TableCell>
                       <TableCell>{b.bin_location || '-'}</TableCell>
                       <TableCell className={b.expiry_date && expirySoonThreshold && new Date(b.expiry_date).getTime() < expirySoonThreshold ? 'text-red-500 font-medium' : ''}>
                         {b.expiry_date || '-'}
@@ -228,7 +226,7 @@ export default function Inventory() {
                     </TableRow>
                   ))}
                   {batches.length === 0 && (
-                    <TableRow><TableCell colSpan={6} className="text-center py-8 text-gray-500">No stock batches</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500">No stock batches</TableCell></TableRow>
                   )}
                 </TableBody>
               </Table>

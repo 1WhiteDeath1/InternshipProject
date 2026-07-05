@@ -13,7 +13,7 @@ import {
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Search, Plus, CheckCircle, Star, Trash2 } from 'lucide-react';
+import { Search, Plus, CheckCircle, Star, Trash2, Truck, PackageCheck } from 'lucide-react';
 
 interface PurchaseOrder {
   id: number;
@@ -22,7 +22,7 @@ interface PurchaseOrder {
   status: string;
   total_amount: number;
   expected_delivery: string;
-  items: { item_name: string; quantity_ordered: number; quantity_received: number; unit_price: number }[];
+  items: { id: number; item_name: string; quantity_ordered: number; quantity_delivered: number; quantity_received: number; unit_price: number }[];
 }
 
 interface Vendor {
@@ -70,6 +70,9 @@ export default function Procurement() {
   const [vendorDialogOpen, setVendorDialogOpen] = useState(false);
   const [poForm, setPoForm] = useState({ vendor_id: 0, expected_delivery: '', notes: '', items: [{ ...emptyLineItem }] as POLineItem[] });
   const [vendorForm, setVendorForm] = useState({ name: '', contact_person: '', phone: '', email: '', address: '', payment_terms: '' });
+  const [receiveDialogPO, setReceiveDialogPO] = useState<PurchaseOrder | null>(null);
+  const [confirmDialogPO, setConfirmDialogPO] = useState<PurchaseOrder | null>(null);
+  const [qtyByItem, setQtyByItem] = useState<Record<number, number>>({});
 
   const fetchPOs = async () => {
     try {
@@ -154,6 +157,42 @@ export default function Procurement() {
   const handleApprove = async (id: number) => {
     try { await api.post(`/procurement/purchase-orders/${id}/approve`); toast.success('PO approved'); fetchPOs(); }
     catch { toast.error('Failed'); }
+  };
+
+  const openReceiveDialog = (po: PurchaseOrder) => {
+    setReceiveDialogPO(po);
+    // Smart default: exact delivery is the common case, clerk only adjusts on a shortfall/overage.
+    setQtyByItem(Object.fromEntries(po.items.map(i => [i.id, i.quantity_ordered])));
+  };
+
+  const openConfirmDialog = (po: PurchaseOrder) => {
+    setConfirmDialogPO(po);
+    setQtyByItem(Object.fromEntries(po.items.map(i => [i.id, i.quantity_delivered])));
+  };
+
+  const handleRecordDelivery = async () => {
+    if (!receiveDialogPO) return;
+    try {
+      await api.post(`/procurement/purchase-orders/${receiveDialogPO.id}/receive`, {
+        items: receiveDialogPO.items.map(i => ({ po_item_id: i.id, quantity: qtyByItem[i.id] ?? 0 })),
+      });
+      toast.success('Delivery recorded');
+      setReceiveDialogPO(null);
+      fetchPOs();
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to record delivery')); }
+  };
+
+  const handleConfirmReceipt = async () => {
+    if (!confirmDialogPO) return;
+    try {
+      await api.post(`/procurement/purchase-orders/${confirmDialogPO.id}/confirm-receipt`, {
+        items: confirmDialogPO.items.map(i => ({ po_item_id: i.id, quantity: qtyByItem[i.id] ?? 0 })),
+      });
+      toast.success('Receipt confirmed - stock updated');
+      setConfirmDialogPO(null);
+      fetchPOs();
+      fetchMatches();
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to confirm receipt')); }
   };
 
   return (
@@ -252,7 +291,13 @@ export default function Procurement() {
                       <TableCell>{po.items?.length || 0} items</TableCell>
                       <TableCell>
                         {po.status === 'draft' && (
-                          <Button size="sm" variant="ghost" onClick={() => handleApprove(po.id)}><CheckCircle size={16} className="text-green-600" /></Button>
+                          <Button size="sm" variant="ghost" onClick={() => handleApprove(po.id)} title="Approve"><CheckCircle size={16} className="text-green-600" /></Button>
+                        )}
+                        {po.status === 'approved' && (
+                          <Button size="sm" variant="outline" onClick={() => openReceiveDialog(po)}><Truck size={14} className="mr-1" /> Record Delivery</Button>
+                        )}
+                        {po.status === 'delivery_expected' && (
+                          <Button size="sm" variant="outline" onClick={() => openConfirmDialog(po)}><PackageCheck size={14} className="mr-1" /> Confirm Receipt</Button>
                         )}
                       </TableCell>
                     </TableRow>
@@ -314,6 +359,44 @@ export default function Procurement() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={!!receiveDialogPO} onOpenChange={(open) => { if (!open) setReceiveDialogPO(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Record Delivery - {receiveDialogPO?.po_number}</DialogTitle></DialogHeader>
+          {receiveDialogPO && (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-500">Enter the quantity actually delivered for each item - defaults to what was ordered.</p>
+              {receiveDialogPO.items.map(i => (
+                <div key={i.id} className="flex items-center justify-between gap-3">
+                  <span className="text-sm flex-1">{i.item_name} <span className="text-gray-400">(ordered {i.quantity_ordered})</span></span>
+                  <Input type="number" min={0} className="w-28" value={qtyByItem[i.id] ?? 0}
+                         onChange={e => setQtyByItem({...qtyByItem, [i.id]: Number(e.target.value)})} />
+                </div>
+              ))}
+              <Button onClick={handleRecordDelivery} className="w-full">Record Delivery</Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!confirmDialogPO} onOpenChange={(open) => { if (!open) setConfirmDialogPO(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Confirm Receipt - {confirmDialogPO?.po_number}</DialogTitle></DialogHeader>
+          {confirmDialogPO && (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-500">Enter the quantity actually received (after inspection) - defaults to what was delivered. This creates stock and runs the three-way match.</p>
+              {confirmDialogPO.items.map(i => (
+                <div key={i.id} className="flex items-center justify-between gap-3">
+                  <span className="text-sm flex-1">{i.item_name} <span className="text-gray-400">(delivered {i.quantity_delivered})</span></span>
+                  <Input type="number" min={0} className="w-28" value={qtyByItem[i.id] ?? 0}
+                         onChange={e => setQtyByItem({...qtyByItem, [i.id]: Number(e.target.value)})} />
+                </div>
+              ))}
+              <Button onClick={handleConfirmReceipt} className="w-full">Confirm Receipt</Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

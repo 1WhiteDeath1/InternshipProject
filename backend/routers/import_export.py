@@ -24,7 +24,7 @@ TEMPLATES = {
     "rooms": ["room_number", "room_type", "floor", "capacity", "base_price", "amenities"],
     "recipes": ["name", "description", "menu_category", "portions"],
     "bookings": ["guest_name", "guest_phone", "guest_email", "room_number", "check_in", "check_out", "adults", "children"],
-    "opening_stock": ["sku", "batch_number", "quantity", "zone", "bin_location", "expiry_date", "unit_cost"],
+    "opening_stock": ["sku", "batch_number", "quantity", "bin_location", "expiry_date", "unit_cost"],
 }
 
 
@@ -101,14 +101,12 @@ async def export_data(module: str, db: Session = Depends(get_db), current_user=D
     ws = wb.active
 
     if module == "inventory":
-        ws.append(["ID", "SKU", "Name", "Category", "Unit", "Reorder Level", "Reorder Qty", "Total Stock", "Kitchen Stock", "Warehouse Stock"])
+        ws.append(["ID", "SKU", "Name", "Category", "Unit", "Reorder Level", "Reorder Qty", "Total Stock"])
         items = db.query(InventoryItem).filter(InventoryItem.is_active == True).all()
         for item in items:
             batches = db.query(StockBatch).filter(StockBatch.item_id == item.id, StockBatch.is_active == True).all()
             total = sum(b.quantity for b in batches)
-            kt = sum(b.quantity for b in batches if b.zone.value == "kitchen")
-            wh = sum(b.quantity for b in batches if b.zone.value == "warehouse")
-            ws.append([item.id, item.sku, item.name, item.category.name if item.category else "", item.unit, item.reorder_level, item.reorder_quantity, total, kt, wh])
+            ws.append([item.id, item.sku, item.name, item.category.name if item.category else "", item.unit, item.reorder_level, item.reorder_quantity, total])
     elif module == "bookings":
         ws.append(["ID", "Reference", "Guest", "Phone", "Room", "Check In", "Check Out", "Status", "Total"])
         bookings = db.query(Booking).order_by(Booking.created_at.desc()).limit(1000).all()

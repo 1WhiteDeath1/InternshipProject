@@ -122,6 +122,28 @@ async def generate_bills(month: int = Query(..., ge=1, le=12), year: int = Query
     return {"generated": generated, "skipped_finalized": skipped, "per_head_rate": per_head_rate}
 
 
+@router.post("/issue-all")
+async def issue_all_bills(month: int = Query(..., ge=1, le=12), year: int = Query(...), request: Request = None, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Issue every draft bill for a period in one action, instead of clicking
+    each one. Non-draft bills are left untouched."""
+    if not check_permission(current_user, "mess_billing", "approve"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    drafts = db.query(MessBill).filter(
+        MessBill.month == month, MessBill.year == year, MessBill.status == MessBillStatus.DRAFT,
+    ).all()
+    issued = []
+    for bill in drafts:
+        bill.status = MessBillStatus.ISSUED
+        issued.append(bill.id)
+    db.commit()
+
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.APPROVE, "mess_bills", None,
+              after_state={"month": month, "year": year, "issued": len(issued)},
+              ip_address=request.client.host if request else None)
+    return {"issued": issued}
+
+
 @router.post("/bills/{bill_id}/issue")
 async def issue_bill(bill_id: int, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     if not check_permission(current_user, "mess_billing", "approve"):

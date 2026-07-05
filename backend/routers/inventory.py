@@ -72,8 +72,6 @@ async def list_items(
     for item in items:
         batches = batches_by_item.get(item.id, [])
         total_stock = sum(b.quantity for b in batches)
-        wh_stock = sum(b.quantity for b in batches if b.zone.value == "warehouse")
-        kt_stock = sum(b.quantity for b in batches if b.zone.value == "kitchen")
 
         is_low = total_stock <= item.reorder_level and item.reorder_level > 0
         if low_stock and not is_low:
@@ -83,10 +81,10 @@ async def list_items(
             "id": item.id, "sku": item.sku, "name": item.name,
             "category_id": item.category_id, "category_name": item.category.name if item.category else None,
             "description": item.description, "unit": item.unit,
+            "ingredient_type": item.ingredient_type.value if item.ingredient_type else None,
             "reorder_level": item.reorder_level, "reorder_quantity": item.reorder_quantity,
             "is_active": item.is_active, "created_at": item.created_at,
-            "total_stock": total_stock, "warehouse_stock": wh_stock,
-            "kitchen_stock": kt_stock,
+            "total_stock": total_stock,
         })
 
     return {"items": result, "total": total, "page": page, "page_size": page_size}
@@ -142,15 +140,13 @@ async def soft_delete_item(item_id: int, request: Request, db: Session = Depends
 # --- Stock Batches ---
 
 @router.get("/batches")
-async def list_batches(item_id: int = 0, zone: str = "", db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+async def list_batches(item_id: int = 0, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     query = db.query(StockBatch).filter(StockBatch.is_active == True)
     if item_id:
         query = query.filter(StockBatch.item_id == item_id)
-    if zone:
-        query = query.filter(StockBatch.zone == zone)
     batches = query.order_by(StockBatch.expiry_date).all()
     return [{"id": b.id, "item_id": b.item_id, "item_name": b.item.name if b.item else None,
-             "batch_number": b.batch_number, "quantity": b.quantity, "zone": b.zone.value,
+             "batch_number": b.batch_number, "quantity": b.quantity,
              "bin_location": b.bin_location, "expiry_date": b.expiry_date, "unit_cost": float(b.unit_cost) if b.unit_cost else 0} for b in batches]
 
 
@@ -166,7 +162,7 @@ async def create_batch(data: StockBatchCreate, request: Request, db: Session = D
     # Log stock movement
     movement = StockMovement(
         batch_id=batch.id, item_id=batch.item_id, movement_type="receipt",
-        quantity=batch.quantity, to_zone=batch.zone,
+        quantity=batch.quantity,
         reference_type="batch", reference_id=batch.id,
         notes=f"Batch {batch.batch_number} created", created_by=current_user.id,
     )
@@ -198,31 +194,10 @@ async def create_movement(data: StockMovementCreate, request: Request, db: Sessi
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found")
 
-    dest_batch = None
     if data.movement_type == "issue":
         if batch.quantity < data.quantity:
             raise HTTPException(status_code=400, detail="Insufficient stock")
         batch.quantity -= data.quantity
-    elif data.movement_type == "transfer":
-        if batch.quantity < data.quantity:
-            raise HTTPException(status_code=400, detail="Insufficient stock")
-        if not data.to_zone:
-            raise HTTPException(status_code=400, detail="to_zone is required for transfers")
-        # Split: decrement the source batch and create a new batch for the
-        # transferred quantity in the destination zone, instead of flipping the
-        # whole batch's zone (which silently relocated 100% of the stock
-        # regardless of the requested transfer quantity).
-        batch.quantity -= data.quantity
-        dest_batch = StockBatch(
-            item_id=batch.item_id,
-            batch_number=f"{batch.batch_number}-XFER-{data.to_zone}",
-            quantity=data.quantity,
-            zone=data.to_zone,
-            bin_location=batch.bin_location,
-            expiry_date=batch.expiry_date,
-            unit_cost=batch.unit_cost,
-        )
-        db.add(dest_batch)
     elif data.movement_type == "receipt":
         batch.quantity += data.quantity
     elif data.movement_type == "adjustment":
@@ -236,11 +211,8 @@ async def create_movement(data: StockMovementCreate, request: Request, db: Sessi
     if batch.quantity < 0:
         # A concurrent request depleted this batch between our read and commit.
         # SQLite serializes commits, so this check immediately after commit is
-        # race-free: compensate by reverting the decrement (and any destination
-        # batch created for a transfer) and reject.
+        # race-free: compensate by reverting the decrement and reject.
         batch.quantity += data.quantity
-        if dest_batch is not None:
-            db.delete(dest_batch)
         db.delete(movement)
         db.commit()
         raise HTTPException(status_code=409, detail="Stock level would go negative due to a concurrent change - please retry")
@@ -278,7 +250,7 @@ async def log_waste(data: WasteLogCreate, request: Request, db: Session = Depend
             batch.quantity -= data.quantity
             movement = StockMovement(
                 batch_id=batch.id, item_id=data.item_id, movement_type="waste",
-                quantity=data.quantity, from_zone=batch.zone,
+                quantity=data.quantity,
                 notes=f"Waste: {data.category}", created_by=current_user.id,
             )
             db.add(movement)

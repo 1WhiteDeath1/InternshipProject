@@ -53,9 +53,11 @@ class InvoiceStatus(str, enum.Enum):
     VOID = "void"
     OVERDUE = "overdue"
 
-class StockZone(str, enum.Enum):
-    WAREHOUSE = "warehouse"
-    KITCHEN = "kitchen"
+class IngredientType(str, enum.Enum):
+    LIQUID = "liquid"
+    POWDER = "powder"
+    GRANULAR = "granular"
+    SOLID_PIECES = "solid_pieces"
 
 class WasteCategory(str, enum.Enum):
     SPOILAGE = "spoilage"
@@ -275,6 +277,10 @@ class InventoryItem(Base):
     unit = Column(String(50), nullable=False)  # kg, l, pcs, etc.
     reorder_level = Column(Float, default=0)
     reorder_quantity = Column(Float, default=0)
+    # Nullable: only meaningful for cookable ingredients that need a
+    # cup/tbsp/tsp <-> unit density bridge (see unit_conversion.py) - non-food
+    # items and count-based ingredients (pcs) leave this unset.
+    ingredient_type = Column(Enum(IngredientType), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -289,7 +295,6 @@ class StockBatch(Base):
     item_id = Column(Integer, ForeignKey("inventory_items.id"), nullable=False)
     batch_number = Column(String(100), nullable=False)
     quantity = Column(Float, nullable=False, default=0)
-    zone = Column(Enum(StockZone), nullable=False)
     bin_location = Column(String(100))
     expiry_date = Column(Date, nullable=True)
     received_date = Column(Date, default=datetime.utcnow)
@@ -301,7 +306,6 @@ class StockBatch(Base):
 
     __table_args__ = (
         Index("idx_stock_item", "item_id"),
-        Index("idx_stock_zone", "zone"),
     )
 
 
@@ -311,10 +315,8 @@ class StockMovement(Base):
     id = Column(Integer, primary_key=True)
     batch_id = Column(Integer, ForeignKey("stock_batches.id"), nullable=False)
     item_id = Column(Integer, ForeignKey("inventory_items.id"), nullable=False)
-    movement_type = Column(String(50), nullable=False)  # receipt, issue, transfer, adjustment, waste, recipe_deduction
+    movement_type = Column(String(50), nullable=False)  # receipt, issue, adjustment, waste, recipe_deduction
     quantity = Column(Float, nullable=False)
-    from_zone = Column(Enum(StockZone), nullable=True)
-    to_zone = Column(Enum(StockZone), nullable=True)
     reference_type = Column(String(50))  # po, recipe, booking, etc.
     reference_id = Column(Integer)
     notes = Column(Text)

@@ -98,6 +98,15 @@ export default function MessBilling() {
     } catch (err) { toast.error(getErrorMessage(err, 'Failed to generate bills')); }
   };
 
+  const handleIssueAll = async () => {
+    try {
+      const res = await api.post(`/mess-billing/issue-all?month=${month}&year=${year}`);
+      if (res.data.issued.length === 0) toast.info('No draft bills to issue');
+      else toast.success(`Issued ${res.data.issued.length} bill(s)`);
+      fetchBills();
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to issue bills')); }
+  };
+
   const handleIssue = async (id: number) => {
     try { await api.post(`/mess-billing/bills/${id}/issue`); toast.success('Bill issued'); fetchBills(); }
     catch (err) { toast.error(getErrorMessage(err, 'Failed to issue bill')); }
@@ -137,6 +146,11 @@ export default function MessBilling() {
     return <Badge className={colors[status] || ''}>{status}</Badge>;
   };
 
+  const draftCount = bills.filter(b => b.status === 'draft').length;
+  const totalBilled = bills.filter(b => b.status !== 'draft').reduce((s, b) => s + b.total_amount, 0);
+  const collected = bills.filter(b => b.status === 'paid').reduce((s, b) => s + b.total_amount, 0);
+  const outstanding = bills.filter(b => b.status === 'issued').reduce((s, b) => s + b.total_amount, 0);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -147,7 +161,17 @@ export default function MessBilling() {
           </select>
           <Input type="number" className="w-24" value={year} onChange={e => setYear(Number(e.target.value))} />
           <Button onClick={handleGenerate}><RefreshCw size={16} className="mr-1" /> Generate Bills</Button>
+          <Button variant="outline" onClick={handleIssueAll} disabled={draftCount === 0}>
+            <CheckCircle size={16} className="mr-1" /> Issue All Drafts ({draftCount})
+          </Button>
         </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Total Billed</p><p className="text-xl font-bold">${totalBilled.toFixed(2)}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Collected</p><p className="text-xl font-bold text-green-600">${collected.toFixed(2)}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Outstanding</p><p className="text-xl font-bold text-amber-600">${outstanding.toFixed(2)}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Drafts</p><p className="text-xl font-bold">{draftCount}</p></CardContent></Card>
       </div>
 
       <Tabs defaultValue="bills">

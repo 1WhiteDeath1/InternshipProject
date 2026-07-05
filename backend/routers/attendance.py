@@ -5,10 +5,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import (
-    MealAttendance, MemberLeave, Member, Booking, AttendanceStatus, LeaveStatus,
+    MealAttendance, MemberLeave, Member, MemberStatus, Booking, AttendanceStatus, LeaveStatus,
 )
 from backend.schemas import (
     MealAttendanceCreate, AttendanceMarkRequest, BulkAttendanceCreate, MemberLeaveCreate,
+    RosterSetRequest,
 )
 from backend.auth import get_current_user, check_permission
 from backend.audit import log_audit, serialize_model, AuditAction
@@ -141,6 +142,109 @@ async def bulk_book_attendance(data: BulkAttendanceCreate, request: Request, db:
     log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "meal_attendance", None,
               after_state={"count": len(succeeded), "date": str(data.date), "meal_type": data.meal_type}, ip_address=request.client.host)
     return {"booked": succeeded, "failed": failed}
+
+
+# --- Roster (single-tap present/absent grid) ---
+
+@router.get("/roster")
+async def get_roster(
+    date_: str = Query(..., alias="date"), meal_type: str = Query(...),
+    db: Session = Depends(get_db), current_user=Depends(get_current_user),
+):
+    """Every active member with their present/absent/on_leave state for one
+    meal, plus any guest rows recorded for it - the data behind the roster grid.
+    Present means an attendance row exists in a booked or attended state."""
+    roster_date = date.fromisoformat(date_)
+    members = db.query(Member).filter(Member.status == MemberStatus.ACTIVE).order_by(Member.full_name).all()
+
+    rows = db.query(MealAttendance).filter(
+        MealAttendance.date == roster_date, MealAttendance.meal_type == meal_type,
+    ).all()
+    by_member = {r.member_id: r for r in rows if r.member_id is not None}
+
+    # One leave lookup for the whole active set instead of per-member.
+    on_leave_ids = {
+        l.member_id for l in db.query(MemberLeave).filter(
+            MemberLeave.status == LeaveStatus.ACTIVE,
+            MemberLeave.start_date <= roster_date,
+            MemberLeave.end_date >= roster_date,
+        ).all()
+    }
+
+    member_out = []
+    for m in members:
+        rec = by_member.get(m.id)
+        if m.id in on_leave_ids:
+            status = "on_leave"
+        elif rec and rec.status.value in ("booked", "attended"):
+            status = "present"
+        else:
+            status = "absent"
+        member_out.append({"member_id": m.id, "full_name": m.full_name,
+                           "service_number": m.service_number, "status": status})
+
+    guest_out = [
+        {"id": r.id, "booking_id": r.booking_id, "guest_name": r.booking.guest_name if r.booking else None,
+         "recipe_id": r.recipe_id, "recipe_name": r.recipe.name if r.recipe else None, "status": r.status.value}
+        for r in rows if r.booking_id is not None and r.status.value in ("booked", "attended")
+    ]
+    return {"members": member_out, "guests": guest_out}
+
+
+@router.post("/roster")
+async def set_roster(data: RosterSetRequest, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Bulk present/absent for a set of members - powers both a single-row
+    toggle (one id) and 'Mark all present' (all ids). Present on today/past =
+    ATTENDED, present on a future date = BOOKED (advance booking, not yet
+    billable); absent = CANCELLED. On-leave members are skipped when marking
+    present. Past-date edits require a reason and are logged as OVERRIDE,
+    matching mark_attendance."""
+    if not check_permission(current_user, "attendance", "edit"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    is_backdated = data.date < date.today()
+    if data.present and is_backdated and not data.reason:
+        raise HTTPException(status_code=400, detail="A reason is required to record attendance for a past date")
+
+    present_status = AttendanceStatus.BOOKED if data.date > date.today() else AttendanceStatus.ATTENDED
+    updated, skipped = [], []
+    for member_id in data.member_ids:
+        if not db.query(Member).filter(Member.id == member_id).first():
+            skipped.append(member_id)
+            continue
+        if data.present and _has_active_leave(db, member_id, data.date):
+            skipped.append(member_id)  # on leave - excluded, never auto-marked present
+            continue
+
+        record = db.query(MealAttendance).filter(
+            MealAttendance.member_id == member_id, MealAttendance.date == data.date,
+            MealAttendance.meal_type == data.meal_type,
+        ).first()
+
+        if data.present:
+            if not record:
+                record = MealAttendance(member_id=member_id, date=data.date, meal_type=data.meal_type, method="manual")
+                db.add(record)
+            record.status = present_status
+            if data.recipe_id is not None:
+                record.recipe_id = data.recipe_id
+            record.marked_at = datetime.utcnow()
+            record.marked_by = current_user.id
+        else:
+            if not record:
+                continue  # absent and never recorded - nothing to do
+            record.status = AttendanceStatus.CANCELLED
+            record.marked_at = datetime.utcnow()
+            record.marked_by = current_user.id
+        updated.append(member_id)
+
+    db.commit()
+    action = AuditAction.OVERRIDE if is_backdated else AuditAction.UPDATE
+    log_audit(db, current_user.id, current_user.full_name, action, "meal_attendance", None,
+              after_state={"date": str(data.date), "meal_type": data.meal_type, "present": data.present,
+                           "updated": len(updated), "skipped": len(skipped)},
+              reason=data.reason if is_backdated else None, ip_address=request.client.host)
+    return {"updated": updated, "skipped": skipped}
 
 
 @router.post("/{attendance_id}/mark")
