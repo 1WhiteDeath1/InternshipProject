@@ -19,7 +19,13 @@ def set_sqlite_pragma(dbapi_conn, connection_record):
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# expire_on_commit=False: keep ORM instances populated after commit. Without
+# this, every log_audit() commit expires the objects the calling endpoint just
+# created, so a bare `return <orm object>` serializes to `{}` (the attributes
+# are gone until touched, and FastAPI's encoder reads __dict__ without
+# triggering a lazy reload). The post-commit negative-stock re-checks still call
+# db.refresh() explicitly, so they read authoritative DB state regardless.
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, expire_on_commit=False, bind=engine)
 Base = declarative_base()
 
 

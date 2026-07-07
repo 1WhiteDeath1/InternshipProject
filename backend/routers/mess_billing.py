@@ -219,7 +219,16 @@ async def apply_discount(bill_id: int, data: DiscountApplyRequest, request: Requ
 
     bill.discount_approved_by = current_user.id
     bill.discount_reason = data.reason
-    bill.total_amount = pre_discount_menu - float(bill.discount_amount) + float(bill.stay_amount or 0) + float(bill.extra_meals_amount or 0)
+    # Mirror the total formula in generate_bills exactly - every additive
+    # component must be here, or applying a discount silently erases it. The a
+    # la carte charges in particular were being dropped from the recomputed total.
+    bill.total_amount = (
+        pre_discount_menu
+        - float(bill.discount_amount)
+        + float(bill.stay_amount or 0)
+        + float(bill.extra_meals_amount or 0)
+        + float(bill.ala_carte_amount or 0)
+    )
     db.commit()
     db.refresh(bill)
 

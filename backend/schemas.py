@@ -1,7 +1,19 @@
 """Pydantic schemas for request/response models."""
 from datetime import datetime, date
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
+
+# Kept in sync with models.MealType. Defined here (rather than imported) to keep
+# the schema layer free of an ORM dependency; a request carrying an unknown meal
+# slot is rejected with a clean 422 instead of blowing up as a 500 when the
+# SQLAlchemy Enum column rejects it at flush time.
+_VALID_MEAL_TYPES = {"breakfast", "lunch", "hitea", "dinner"}
+
+
+def _ensure_meal_type(v: str) -> str:
+    if v not in _VALID_MEAL_TYPES:
+        raise ValueError(f"meal_type must be one of {sorted(_VALID_MEAL_TYPES)}")
+    return v
 
 
 # --- Auth Schemas ---
@@ -706,6 +718,8 @@ class MealAttendanceBase(BaseModel):
     meal_type: str
     method: str = "manual"
 
+    _check_meal_type = field_validator("meal_type")(_ensure_meal_type)
+
 class MealAttendanceCreate(MealAttendanceBase):
     @model_validator(mode="after")
     def _exactly_one_consumer(self):
@@ -734,6 +748,8 @@ class BulkAttendanceCreate(BaseModel):
     meal_type: str
     method: str = "manual"
 
+    _check_meal_type = field_validator("meal_type")(_ensure_meal_type)
+
 class RosterSetRequest(BaseModel):
     date: date
     meal_type: str
@@ -741,6 +757,8 @@ class RosterSetRequest(BaseModel):
     present: bool
     recipe_id: Optional[int] = None
     reason: Optional[str] = None
+
+    _check_meal_type = field_validator("meal_type")(_ensure_meal_type)
 
 class MemberLeaveBase(BaseModel):
     member_id: int
@@ -794,6 +812,8 @@ class GuestMealChargeCreate(BaseModel):
     meal_type: str
     amount: float = Field(..., gt=0)
     notes: Optional[str] = None
+
+    _check_meal_type = field_validator("meal_type")(_ensure_meal_type)
 
 class GuestMealChargeOut(GuestMealChargeCreate):
     model_config = ConfigDict(from_attributes=True)
