@@ -58,7 +58,14 @@ app.include_router(routers.recipes_router, prefix="/api/recipes", tags=["Recipes
 app.include_router(routers.kitchen_router, prefix="/api/kitchen", tags=["Kitchen"])
 app.include_router(routers.menu_prices_router, prefix="/api/menu-prices", tags=["Menu Prices"])
 
-# Serve static files (React build)
+@app.get("/api/health")
+async def health_check():
+    return {"status": "ok", "version": "1.0.0"}
+
+
+# Serve static files (React build). Registered LAST so the "/{full_path:path}"
+# SPA fallback below cannot shadow real /api routes (FastAPI matches routes in
+# registration order - a catch-all declared before /api/health would swallow it).
 dist_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dist")
 if os.path.exists(dist_path):
     app.mount("/assets", StaticFiles(directory=os.path.join(dist_path, "assets")), name="assets")
@@ -69,8 +76,3 @@ if os.path.exists(dist_path):
         if os.path.exists(index_path):
             return FileResponse(index_path)
         return {"message": "Build the frontend first"}
-
-
-@app.get("/api/health")
-async def health_check():
-    return {"status": "ok", "version": "1.0.0"}

@@ -154,7 +154,10 @@ async def get_roster(
     """Every active member with their present/absent/on_leave state for one
     meal, plus any guest rows recorded for it - the data behind the roster grid.
     Present means an attendance row exists in a booked or attended state."""
-    roster_date = date.fromisoformat(date_)
+    try:
+        roster_date = date.fromisoformat(date_)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be an ISO date (YYYY-MM-DD)")
     members = db.query(Member).filter(Member.status == MemberStatus.ACTIVE).order_by(Member.full_name).all()
 
     rows = db.query(MealAttendance).filter(

@@ -77,8 +77,12 @@ async def list_kitchen_orders(
     if status:
         query = query.filter(KitchenOrder.status == status)
     if order_date:
-        day_start = datetime.combine(date.fromisoformat(order_date), datetime.min.time())
-        day_end = datetime.combine(date.fromisoformat(order_date), datetime.max.time())
+        try:
+            parsed = date.fromisoformat(order_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="date must be an ISO date (YYYY-MM-DD)")
+        day_start = datetime.combine(parsed, datetime.min.time())
+        day_end = datetime.combine(parsed, datetime.max.time())
         query = query.filter(KitchenOrder.created_at >= day_start, KitchenOrder.created_at <= day_end)
 
     total = query.count()
@@ -157,7 +161,10 @@ async def generate_orders_from_bookings(
     order for the same meal_date/meal_type is skipped rather than duplicated."""
     if not check_permission(current_user, "kitchen", "create"):
         raise HTTPException(status_code=403, detail="Permission denied")
-    meal_date = date.fromisoformat(order_date)  # Date column needs a real date, not the raw query string
+    try:
+        meal_date = date.fromisoformat(order_date)  # Date column needs a real date, not the raw query string
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be an ISO date (YYYY-MM-DD)")
 
     rows = _aggregate_suggestions(db, order_date, meal_type)
     recipe_ids = [r.recipe_id for r in rows]

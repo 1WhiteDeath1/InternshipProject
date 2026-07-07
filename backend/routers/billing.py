@@ -15,16 +15,23 @@ logger = get_logger("app")
 router = APIRouter()
 
 
+def _meal_multiplier(db: Session, booking: Booking) -> float:
+    """The client-category multiplier applied to meal-charge line items. Shared
+    by the running-balance preview and the actual invoice build, so the Clerk
+    Desk total a clerk sees can never diverge from what Instant Checkout charges."""
+    if booking.client_category == ClientCategory.NON_MEMBER_NON_CIVILIAN:
+        return get_setting_float(db, "non_civilian_meal_multiplier", 1.0)
+    if booking.client_category == ClientCategory.NON_MEMBER_CIVILIAN:
+        return get_setting_float(db, "civilian_meal_multiplier", 1.0)
+    return 1.0
+
+
 def _build_invoice(db: Session, booking: Booking, items: list, current_user, issue_date: date, due_date: date, tax_amount: float = 0.0, discount: float = 0.0, notes: str = None) -> Invoice:
     """Shared invoice-assembly logic used by both the manual create_invoice
     endpoint and Instant Checkout: scales meal-charge line items by the
     booking's client-category multiplier, assigns a race-free invoice number,
     and creates the InvoiceItem rows."""
-    meal_multiplier = 1.0
-    if booking.client_category == ClientCategory.NON_MEMBER_NON_CIVILIAN:
-        meal_multiplier = get_setting_float(db, "non_civilian_meal_multiplier", 1.0)
-    elif booking.client_category == ClientCategory.NON_MEMBER_CIVILIAN:
-        meal_multiplier = get_setting_float(db, "civilian_meal_multiplier", 1.0)
+    meal_multiplier = _meal_multiplier(db, booking)
 
     effective_prices = [(item.unit_price * meal_multiplier if item.is_meal_charge else item.unit_price) for item in items]
     total = sum(price * item.quantity for price, item in zip(effective_prices, items))
@@ -124,6 +131,9 @@ def _gather_unbilled_items(db: Session, booking_id: int):
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     items, unpriced = [], []
     amounts = {"room": 0.0, "routine_meals": 0.0, "ala_carte": 0.0}
+    # Preview must reflect the same meal scaling the invoice will apply, or the
+    # Clerk Desk total shown before checkout won't match the invoice produced.
+    meal_multiplier = _meal_multiplier(db, booking)
 
     if booking.total_amount:
         amounts["room"] = float(booking.total_amount)
@@ -137,8 +147,11 @@ def _gather_unbilled_items(db: Session, booking_id: int):
         price = _resolve_menu_price(db, a.recipe_id)
         label = f"{a.meal_type.value.title()} - {a.recipe.name if a.recipe else 'meal'}"
         if price > 0:
+            # Line item stays at the raw menu price with is_meal_charge=True;
+            # _build_invoice applies the multiplier. The preview amount, however,
+            # must bake it in here so running-balance == invoice total.
             items.append(InvoiceItemCreate(description=label, quantity=1, unit_price=price, is_meal_charge=True))
-            amounts["routine_meals"] += price
+            amounts["routine_meals"] += price * meal_multiplier
         else:
             unpriced.append(label)
 
