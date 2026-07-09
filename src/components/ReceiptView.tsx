@@ -1,6 +1,7 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Printer } from 'lucide-react';
+import { formatCurrency } from '@/lib/currency';
 
 export interface ReceiptItem { description: string; quantity: number; unit_price: number; total_price: number; }
 export interface ReceiptData {
@@ -42,13 +43,13 @@ export default function ReceiptView({ receipt, onClose }: Props) {
             {receipt.items.map((item, idx) => (
               <div key={idx} className="flex justify-between py-1.5">
                 <span>{item.description} {item.quantity > 1 ? `×${item.quantity}` : ''}</span>
-                <span className="font-mono">${item.total_price.toFixed(2)}</span>
+                <span className="font-mono">{formatCurrency(item.total_price)}</span>
               </div>
             ))}
           </div>
           <div className="flex justify-between font-bold text-base">
             <span>Total</span>
-            <span className="font-mono">${receipt.total_amount.toFixed(2)}</span>
+            <span className="font-mono">{formatCurrency(receipt.total_amount)}</span>
           </div>
           {receipt.unpriced_items && receipt.unpriced_items.length > 0 && (
             <p className="text-xs text-amber-600">

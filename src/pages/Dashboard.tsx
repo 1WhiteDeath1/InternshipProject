@@ -9,6 +9,7 @@ import {
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import { formatCurrency } from '@/lib/currency';
 
 interface DashboardStats {
   today_revenue: number;
@@ -109,7 +110,7 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-500 dark:text-gray-400">Today's Revenue</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">$<StatValue loading={loading} value={stats?.today_revenue?.toFixed(2) || '0.00'} /></p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white"><StatValue loading={loading} value={formatCurrency(stats?.today_revenue)} /></p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
                 <DollarSign className="text-emerald-600" size={20} />
@@ -137,7 +138,7 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-500 dark:text-gray-400">Stock Value</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">$<StatValue loading={loading} value={stats?.total_stock_value?.toLocaleString() || '0'} /></p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white"><StatValue loading={loading} value={formatCurrency(stats?.total_stock_value)} /></p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
                 <Package className="text-amber-600" size={20} />
@@ -151,7 +152,7 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-500 dark:text-gray-400">Waste This Month</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">$<StatValue loading={loading} value={stats?.waste_cost_month?.toFixed(2) || '0.00'} /></p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white"><StatValue loading={loading} value={formatCurrency(stats?.waste_cost_month)} /></p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
                 <Trash2 className="text-red-600" size={20} />

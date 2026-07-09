@@ -23,6 +23,8 @@ interface Member {
   phone: string | null;
   email: string | null;
   status: string;
+  current_room_id: number | null;
+  current_room_number: string | null;
 }
 
 const emptyForm = { service_number: '', full_name: '', rank: '', unit: '', mess_category: 'officers', phone: '', email: '', custom_discount_rate: 0 };
@@ -151,9 +153,9 @@ export default function Members() {
       <Card>
         <CardContent className="p-0">
           <Table>
-            <TableHeader><TableRow><TableHead>Service #</TableHead><TableHead>Name</TableHead><TableHead>Rank</TableHead><TableHead>Unit</TableHead><TableHead>Category</TableHead><TableHead>Status</TableHead><TableHead className="w-24">Actions</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead>Service #</TableHead><TableHead>Name</TableHead><TableHead>Rank</TableHead><TableHead>Unit</TableHead><TableHead>Category</TableHead><TableHead>Current Room</TableHead><TableHead>Status</TableHead><TableHead className="w-24">Actions</TableHead></TableRow></TableHeader>
             <TableBody>
-              {loading && <TableRow><TableCell colSpan={7} className="text-center py-8 text-gray-500">Loading members...</TableCell></TableRow>}
+              {loading && <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">Loading members...</TableCell></TableRow>}
               {!loading && members.map(m => (
                 <TableRow key={m.id} className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900" onClick={() => openEdit(m)}>
                   <TableCell className="font-medium">{m.service_number}</TableCell>
@@ -161,6 +163,7 @@ export default function Members() {
                   <TableCell>{m.rank}</TableCell>
                   <TableCell>{m.unit || '-'}</TableCell>
                   <TableCell className="capitalize">{m.mess_category}</TableCell>
+                  <TableCell>{m.current_room_number ? <Badge className="bg-purple-100 text-purple-800">{m.current_room_number} (HRA)</Badge> : <span className="text-gray-400">-</span>}</TableCell>
                   <TableCell>{statusBadge(m.status)}</TableCell>
                   <TableCell>
                     {m.status === 'active' && (
@@ -171,7 +174,7 @@ export default function Members() {
                   </TableCell>
                 </TableRow>
               ))}
-              {!loading && members.length === 0 && <TableRow><TableCell colSpan={7} className="text-center py-8 text-gray-500">No members found</TableCell></TableRow>}
+              {!loading && members.length === 0 && <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">No members found</TableCell></TableRow>}
             </TableBody>
           </Table>
         </CardContent>

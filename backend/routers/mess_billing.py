@@ -1,18 +1,19 @@
 """Communal per-head mess billing for permanent members."""
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from calendar import monthrange
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import (
     Member, MemberStatus, MessBill, MessBillStatus, GuestMealCharge,
-    PurchaseOrder, POStatus, Booking, KitchenOrder,
+    PurchaseOrder, POStatus, Booking, KitchenOrder, Room,
 )
 from backend.schemas import GuestMealChargeCreate, DiscountApplyRequest
 from backend.auth import get_current_user, check_permission
 from backend.audit import log_audit, serialize_model, AuditAction
 from backend.logging_config import get_logger
 from backend.services.mess_billing_calc import get_man_days, get_setting_float
+from backend.services.room_pricing import get_hra_rank_rate, get_hra_utility_rate
 
 logger = get_logger("app")
 router = APIRouter()
@@ -46,6 +47,31 @@ async def list_bills(
          "total_amount": float(b.total_amount), "status": b.status.value, "generated_at": b.generated_at} for b in bills], "total": total}
 
 
+def _hra_charge_and_renew(db: Session, member: Member, period_end: date) -> float:
+    """HRA residents are billed fresh each period from the current rank +
+    room-class rate (not a stored booking total, so a rank correction or
+    rate revision is reflected immediately). As a side effect, renews the
+    booking's rolling checkout window if it's due soon - see the "indefinite
+    residency" note in bookings.create_booking."""
+    booking = db.query(Booking).filter(
+        Booking.member_id == member.id, Booking.nature_of_duty == "hra",
+        Booking.status == "checked_in", Booking.check_in <= period_end,
+    ).order_by(Booking.check_in.desc()).first()
+    if not booking:
+        return 0.0
+
+    room = db.query(Room).filter(Room.id == booking.room_id).first()
+    room_type = getattr(room.room_type, "value", room.room_type) if room else None
+    hra_rate = get_hra_rank_rate(db, member.rank)
+    utility_rate = get_hra_utility_rate(db, room_type) if room_type else None
+    amount = (hra_rate[1] + utility_rate) if (hra_rate and utility_rate is not None) else 0.0
+
+    if booking.check_out <= period_end + timedelta(days=60):
+        booking.check_out += timedelta(days=365)
+
+    return amount
+
+
 @router.post("/generate")
 async def generate_bills(month: int = Query(..., ge=1, le=12), year: int = Query(...), request: Request = None, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     if not check_permission(current_user, "mess_billing", "create"):
@@ -76,6 +102,7 @@ async def generate_bills(month: int = Query(..., ge=1, le=12), year: int = Query
     default_discount_rate = get_setting_float(db, "default_member_discount_rate", 0.0)
 
     generated, skipped = [], []
+    hra_billed_count = 0
     for member in active_members:
         existing = db.query(MessBill).filter(MessBill.member_id == member.id, MessBill.month == month, MessBill.year == year).first()
         if existing and existing.status in (MessBillStatus.ISSUED, MessBillStatus.PAID):
@@ -84,10 +111,17 @@ async def generate_bills(month: int = Query(..., ge=1, le=12), year: int = Query
 
         man_days = get_man_days(db, member.id, month, year)
         base_menu_amount = fixed_menu_price if fixed_menu_price > 0 else man_days * per_head_rate
+        # HRA bookings are excluded here and priced separately below - an HRA
+        # booking's stored total_amount is only a creation-time snapshot, and
+        # counting it here too would double-bill the resident's move-in month.
         member_bookings = db.query(Booking).filter(
-            Booking.member_id == member.id, Booking.check_in >= period_start, Booking.check_in <= period_end,
+            Booking.member_id == member.id, Booking.nature_of_duty != "hra",
+            Booking.check_in >= period_start, Booking.check_in <= period_end,
         ).all()
-        stay_amount = float(sum(b.total_amount or 0 for b in member_bookings))
+        hra_amount = _hra_charge_and_renew(db, member, period_end)
+        if hra_amount:
+            hra_billed_count += 1
+        stay_amount = float(sum(b.total_amount or 0 for b in member_bookings)) + hra_amount
         extra_meals_amount = float(sum(
             c.amount for c in db.query(GuestMealCharge).filter(
                 GuestMealCharge.sponsor_member_id == member.id, GuestMealCharge.date >= period_start, GuestMealCharge.date <= period_end,
@@ -130,7 +164,8 @@ async def generate_bills(month: int = Query(..., ge=1, le=12), year: int = Query
         generated.append(bill.id)
 
     log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "mess_bills", None,
-              after_state={"month": month, "year": year, "generated": len(generated), "skipped_finalized": len(skipped), "total_expenditure": total_expenditure, "total_man_days": total_man_days},
+              after_state={"month": month, "year": year, "generated": len(generated), "skipped_finalized": len(skipped),
+                           "total_expenditure": total_expenditure, "total_man_days": total_man_days, "hra_residents_billed": hra_billed_count},
               ip_address=request.client.host if request else None)
     return {"generated": generated, "skipped_finalized": skipped, "per_head_rate": per_head_rate}
 

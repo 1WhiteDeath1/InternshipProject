@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import { Search, Plus, CheckCircle, Star, Trash2, Truck, PackageCheck } from 'lucide-react';
+import { formatCurrency } from '@/lib/currency';
 
 interface PurchaseOrder {
   id: number;
@@ -261,7 +262,7 @@ export default function Procurement() {
                       </div>
                     ))}
                   </div>
-                  <p className="text-right text-sm font-semibold mt-2">Total: ${poTotal.toFixed(2)}</p>
+                  <p className="text-right text-sm font-semibold mt-2">Total: {formatCurrency(poTotal)}</p>
                 </div>
 
                 <Button onClick={handleCreatePO} className="w-full">Create PO</Button>
@@ -287,7 +288,7 @@ export default function Procurement() {
                       <TableCell className="font-medium">{po.po_number}</TableCell>
                       <TableCell>{po.vendor_name}</TableCell>
                       <TableCell>{statusBadge(po.status)}</TableCell>
-                      <TableCell>${po.total_amount?.toFixed(2)}</TableCell>
+                      <TableCell>{formatCurrency(po.total_amount)}</TableCell>
                       <TableCell>{po.items?.length || 0} items</TableCell>
                       <TableCell>
                         {po.status === 'draft' && (

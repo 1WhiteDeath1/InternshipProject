@@ -485,15 +485,26 @@ class BookingBase(BaseModel):
     special_requests: Optional[str] = None
     client_category: str = "non_member_civilian"
     member_id: Optional[int] = None
+    # Booking-register fields
+    rank: Optional[str] = Field(None, max_length=50)
+    pa_number: Optional[str] = Field(None, max_length=50)
+    unit_address: Optional[str] = Field(None, max_length=255)
+    nature_of_duty: str = "visit"
+    da_multiplier: Optional[float] = None
+    mattress_count: int = Field(0, ge=0, le=10)
 
     @model_validator(mode="after")
     def _check_dates(self):
         if self.check_out <= self.check_in:
             raise ValueError("check_out must be after check_in")
+        if self.nature_of_duty not in ("visit", "leave", "official_duty", "hra"):
+            raise ValueError("nature_of_duty must be one of: visit, leave, official_duty, hra")
+        if self.da_multiplier is not None and self.da_multiplier not in (1.0, 1.5):
+            raise ValueError("da_multiplier must be 1 or 1.5")
         return self
 
 class BookingCreate(BookingBase):
-    pass
+    check_in_now: bool = False  # walk-in fast path: create and check in immediately
 
 class BookingUpdate(BaseModel):
     guest_name: Optional[str] = None

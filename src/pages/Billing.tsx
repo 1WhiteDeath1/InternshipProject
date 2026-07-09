@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { Search, Plus, FileText, Ban, DollarSign, Receipt, Calendar, Trash2, Wallet, UtensilsCrossed } from 'lucide-react';
+import { formatCurrency } from '@/lib/currency';
 
 interface Invoice {
   id: number;
@@ -243,7 +244,7 @@ export default function Billing() {
                 <div><Label>Tax</Label><Input type="number" min={0} value={form.tax_amount} onChange={e => setForm({...form, tax_amount: Number(e.target.value)})} /></div>
                 <div><Label>Discount</Label><Input type="number" min={0} value={form.discount} onChange={e => setForm({...form, discount: Number(e.target.value)})} /></div>
               </div>
-              <p className="text-right text-sm font-semibold">Total: ${invoiceTotal.toFixed(2)}</p>
+              <p className="text-right text-sm font-semibold">Total: {formatCurrency(invoiceTotal)}</p>
 
               <Button onClick={handleCreate} className="w-full">Create Invoice</Button>
             </div>
@@ -258,7 +259,7 @@ export default function Billing() {
           {paymentDialogInvoice && (
             <div className="space-y-3">
               <p className="text-sm text-gray-500">
-                Total: ${paymentDialogInvoice.total_amount.toFixed(2)} &middot; Paid: ${paymentDialogInvoice.amount_paid.toFixed(2)} &middot; Balance due: ${(paymentDialogInvoice.total_amount - paymentDialogInvoice.amount_paid).toFixed(2)}
+                Total: {formatCurrency(paymentDialogInvoice.total_amount)} &middot; Paid: {formatCurrency(paymentDialogInvoice.amount_paid)} &middot; Balance due: {formatCurrency(paymentDialogInvoice.total_amount - paymentDialogInvoice.amount_paid)}
               </p>
               <div><Label>Payment Amount</Label><Input type="number" min={0} value={paymentAmount || ''} onChange={e => setPaymentAmount(Number(e.target.value))} /></div>
               <Button onClick={handleRecordPayment} className="w-full">Record Payment</Button>
@@ -270,7 +271,7 @@ export default function Billing() {
       {/* Stats */}
       {stats && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[{ label: 'Today\'s Revenue', value: `$${stats.today_revenue?.toFixed(2)}`, icon: DollarSign, color: 'text-emerald-600' }, { label: 'Invoices Today', value: stats.today_invoice_count, icon: Receipt, color: 'text-blue-600' }, { label: 'Monthly Revenue', value: `$${stats.month_revenue?.toFixed(2)}`, icon: Calendar, color: 'text-purple-600' }, { label: 'Overdue', value: stats.overdue_invoices, icon: FileText, color: 'text-red-600' }].map((s, i) => (
+          {[{ label: 'Today\'s Revenue', value: formatCurrency(stats.today_revenue), icon: DollarSign, color: 'text-emerald-600' }, { label: 'Invoices Today', value: stats.today_invoice_count, icon: Receipt, color: 'text-blue-600' }, { label: 'Monthly Revenue', value: formatCurrency(stats.month_revenue), icon: Calendar, color: 'text-purple-600' }, { label: 'Overdue', value: stats.overdue_invoices, icon: FileText, color: 'text-red-600' }].map((s, i) => (
             <Card key={i}><CardContent className="p-5 flex items-center gap-4">
               <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><s.icon size={20} className={s.color} /></div>
               <div><p className="text-xs text-gray-500">{s.label}</p><p className="text-lg font-bold">{s.value}</p></div>
@@ -292,8 +293,8 @@ export default function Billing() {
                   <TableCell className="font-medium">{inv.invoice_number}</TableCell>
                   <TableCell>{inv.guest_name}</TableCell>
                   <TableCell>{inv.room_number}</TableCell>
-                  <TableCell className="font-semibold">${inv.total_amount?.toFixed(2)}</TableCell>
-                  <TableCell className="text-sm text-gray-500">${inv.amount_paid?.toFixed(2) || '0.00'} / ${(inv.total_amount - (inv.amount_paid || 0)).toFixed(2)}</TableCell>
+                  <TableCell className="font-semibold">{formatCurrency(inv.total_amount)}</TableCell>
+                  <TableCell className="text-sm text-gray-500">{formatCurrency(inv.amount_paid)} / {formatCurrency(inv.total_amount - (inv.amount_paid || 0))}</TableCell>
                   <TableCell>{statusBadge(inv.status)}</TableCell>
                   <TableCell>{inv.issue_date}</TableCell>
                   <TableCell className="flex gap-1">

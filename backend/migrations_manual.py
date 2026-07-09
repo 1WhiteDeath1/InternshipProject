@@ -18,6 +18,51 @@ def run_startup_migrations(engine):
     _migrate_kitchen_orders_ala_carte(engine)
     _migrate_meal_attendance_invoiced(engine)
     _migrate_mess_bills_ala_carte(engine)
+    _migrate_rooms_housekeeping(engine)
+    _migrate_bookings_register_fields(engine)
+
+
+def _migrate_rooms_housekeeping(engine):
+    # Physical room readiness (clean/dirty/cleaning), independent of the
+    # occupancy status column. Additive nullable-with-default column.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(rooms)")).fetchall()
+        if not cols:
+            return
+        if "housekeeping_status" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE rooms ADD COLUMN housekeeping_status VARCHAR(20) DEFAULT 'clean'"))
+            conn.commit()
+            logger.info("migration: added rooms.housekeeping_status")
+
+
+def _migrate_bookings_register_fields(engine):
+    # Booking-register columns (rank, PA no, unit, nature of duty), extra
+    # mattress billing, actual check-in/out timestamps for late-fee math,
+    # cancellation reason, and the itemized rate snapshot. All nullable -
+    # plain ALTER TABLE ADD COLUMN, no rebuild needed.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(bookings)")).fetchall()
+        if not cols:
+            return
+        col_names = {c[1] for c in cols}
+        additions = (
+            ("rank", "VARCHAR(50)"),
+            ("pa_number", "VARCHAR(50)"),
+            ("unit_address", "VARCHAR(255)"),
+            ("nature_of_duty", "VARCHAR(20) DEFAULT 'visit'"),
+            ("da_multiplier", "NUMERIC(3, 1)"),
+            ("mattress_count", "INTEGER DEFAULT 0"),
+            ("late_checkout_fee", "NUMERIC(10, 2) DEFAULT 0"),
+            ("actual_check_in", "DATETIME"),
+            ("actual_check_out", "DATETIME"),
+            ("cancel_reason", "TEXT"),
+            ("rate_breakdown", "TEXT"),
+        )
+        for name, ddl_type in additions:
+            if name not in col_names:
+                conn.execute(text(f"ALTER TABLE bookings ADD COLUMN {name} {ddl_type}"))
+                logger.info("migration: added bookings.%s", name)
+        conn.commit()
 
 
 def _migrate_inventory_ingredient_type(engine):

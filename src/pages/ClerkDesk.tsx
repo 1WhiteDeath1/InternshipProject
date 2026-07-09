@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { toast } from 'sonner';
 import { LayoutGrid, DoorOpen, IdCard, Receipt } from 'lucide-react';
 import ReceiptView, { type ReceiptData } from '@/components/ReceiptView';
+import { formatCurrency } from '@/lib/currency';
 
 interface Booking {
   id: number;
@@ -90,13 +91,13 @@ export default function ClerkDesk() {
                       <p className="font-bold">{b.guest_name}</p>
                       <p className="text-xs text-gray-500">Room {b.room_number}</p>
                     </div>
-                    <p className="text-xl font-bold">${bal ? bal.total.toFixed(2) : '—'}</p>
+                    <p className="text-xl font-bold">{bal ? formatCurrency(bal.total) : '—'}</p>
                   </div>
                   {bal && (
                     <div className="text-xs text-gray-500 space-y-0.5">
-                      <p>Room: ${bal.room_amount.toFixed(2)}</p>
-                      <p>Meals: ${bal.routine_meals_amount.toFixed(2)}</p>
-                      <p>À la carte: ${bal.ala_carte_amount.toFixed(2)}</p>
+                      <p>Room: {formatCurrency(bal.room_amount)}</p>
+                      <p>Meals: {formatCurrency(bal.routine_meals_amount)}</p>
+                      <p>À la carte: {formatCurrency(bal.ala_carte_amount)}</p>
                       {bal.unpriced_items.length > 0 && <p className="text-amber-600">Needs pricing: {bal.unpriced_items.join(', ')}</p>}
                     </div>
                   )}

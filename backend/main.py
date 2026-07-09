@@ -8,6 +8,7 @@ from backend.database import engine, Base
 from backend.logging_config import setup_logging
 from backend.branding import create_default_branding_file
 from backend.migrations_manual import run_startup_migrations
+from backend.config import UPLOADS_DIR
 from backend import routers
 
 setup_logging()
@@ -33,6 +34,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Room photo storage - mounted unconditionally (independent of the dist/
+# build below) so uploads work against the Vite dev server too, which
+# proxies /uploads to this process (see vite.config.ts).
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 # API routers
 app.include_router(routers.auth_router, prefix="/api/auth", tags=["Auth"])
