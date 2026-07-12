@@ -71,7 +71,7 @@ def _hra_charge_and_renew(db: Session, member: Member, period_start: date, perio
     room = db.query(Room).filter(Room.id == booking.room_id).first()
     room_type = getattr(room.room_type, "value", room.room_type) if room else None
     hra_rate = get_hra_rank_rate(db, member.rank)
-    utility_rate = get_hra_utility_rate(db, room_type) if room_type else None
+    utility_rate = get_hra_utility_rate(db, room_type, (room.ac_count if room else 1) or 1) if room_type else None
     amount = (hra_rate[1] + utility_rate) if (hra_rate and utility_rate is not None) else 0.0
 
     if booking.status.value == "checked_in" and booking.check_out <= period_end + timedelta(days=60):

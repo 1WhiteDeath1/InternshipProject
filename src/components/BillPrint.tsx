@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import api, { getErrorMessage } from '@/lib/api';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -80,15 +81,36 @@ const fmtD = (iso: string) => {
   return isNaN(d.getTime()) ? iso : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
 };
 
+/* The printable copy lives in a body-level portal, NOT inside the dialog:
+   the dialog is centered with a CSS transform, and a transformed ancestor
+   becomes the containing block for position:fixed/absolute - printing from
+   inside it anchored the bill to the dialog (big top offset, rows clipped
+   at the dialog edge, broken page breaks). The portal copy is hidden on
+   screen (print:block) and positioned from the real page origin. */
 const PRINT_STYLE = `
   @media print {
     body * { visibility: hidden; }
     #bill-print-area, #bill-print-area * { visibility: visible; }
-    #bill-print-area { position: fixed; top: 0; left: 0; width: 100%; }
-    .bill-page { page-break-after: always; }
+    #bill-print-area { display: block !important; position: absolute; top: 0; left: 0; width: 100%; }
+    html, body { height: auto !important; overflow: visible !important; }
+    .bill-page { page-break-after: always; break-inside: avoid; }
     .bill-page:last-child { page-break-after: auto; }
+    .bill-page tr { break-inside: avoid; }
   }
 `;
+
+/** Screen preview inside the dialog + the print-only copy portaled to <body>. */
+function PrintArea({ children }: { children: ReactNode }) {
+  return (
+    <>
+      <div className="space-y-4">{children}</div>
+      {createPortal(
+        <div id="bill-print-area" className="hidden print:block">{children}</div>,
+        document.body,
+      )}
+    </>
+  );
+}
 
 function DottedField({ label, value, grow }: { label: string; value?: string | number | null; grow?: boolean }) {
   return (
@@ -141,7 +163,7 @@ function DraftBill({ data }: { data: PrintData }) {
           <tr>
             <th className="border border-gray-500 px-2 py-1 w-10 text-left">Ser</th>
             <th className="border border-gray-500 px-2 py-1 text-left">Details</th>
-            <th className="border border-gray-500 px-2 py-1 w-28 text-right">Amount</th>
+            <th className="border border-gray-500 px-2 py-1 w-32 text-right">Amount</th>
           </tr>
         </thead>
         <tbody>
@@ -149,31 +171,31 @@ function DraftBill({ data }: { data: PrintData }) {
             <tr key={head}>
               <td className="border border-gray-500 px-2 py-1">{i + 1}</td>
               <td className="border border-gray-500 px-2 py-1">{item ? item.description : head}</td>
-              <td className="border border-gray-500 px-2 py-1 text-right font-mono">{item ? formatCurrency(item.total_price) : '—'}</td>
+              <td className="border border-gray-500 px-2 py-1 text-right font-mono whitespace-nowrap">{item ? formatCurrency(item.total_price) : '—'}</td>
             </tr>
           ))}
           {extra.map((it, i) => (
             <tr key={`x${i}`}>
               <td className="border border-gray-500 px-2 py-1">{fixed.length + i + 1}</td>
               <td className="border border-gray-500 px-2 py-1">{it.description}{it.quantity > 1 ? ` × ${it.quantity}` : ''}</td>
-              <td className="border border-gray-500 px-2 py-1 text-right font-mono">{formatCurrency(it.total_price)}</td>
+              <td className="border border-gray-500 px-2 py-1 text-right font-mono whitespace-nowrap">{formatCurrency(it.total_price)}</td>
             </tr>
           ))}
         </tbody>
         <tfoot>
           <tr>
             <td colSpan={2} className="border border-gray-500 px-2 py-1 font-bold text-right">Total</td>
-            <td className="border border-gray-500 px-2 py-1 text-right font-bold font-mono">{formatCurrency(inv.total_amount)}</td>
+            <td className="border border-gray-500 px-2 py-1 text-right font-bold font-mono whitespace-nowrap">{formatCurrency(inv.total_amount)}</td>
           </tr>
           {alreadyPaid > 0 && (
             <>
               <tr>
                 <td colSpan={2} className="border border-gray-500 px-2 py-1 text-right">Less: Amount Paid</td>
-                <td className="border border-gray-500 px-2 py-1 text-right font-mono">− {formatCurrency(alreadyPaid)}</td>
+                <td className="border border-gray-500 px-2 py-1 text-right font-mono whitespace-nowrap">− {formatCurrency(alreadyPaid)}</td>
               </tr>
               <tr>
                 <td colSpan={2} className="border border-gray-500 px-2 py-1 font-bold text-right">Balance {inv.balance_due > 0 ? 'Due' : ''}</td>
-                <td className="border border-gray-500 px-2 py-1 text-right font-bold font-mono">{formatCurrency(inv.balance_due)}</td>
+                <td className="border border-gray-500 px-2 py-1 text-right font-bold font-mono whitespace-nowrap">{formatCurrency(inv.balance_due)}</td>
               </tr>
             </>
           )}
@@ -254,9 +276,9 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
           <DialogTitle>{bills.length > 1 ? `Bills (${bills.map(x => BILL_LABELS[x.invoice.bill_type] || 'Bill').join(' + ')})` : 'Bill'}</DialogTitle>
         </DialogHeader>
         {loading && <p className="text-sm text-gray-500">Loading bill…</p>}
-        <div id="bill-print-area" className="space-y-4">
+        <PrintArea>
           {bills.map(bd => <DraftBill key={bd.invoice.id} data={bd} />)}
-        </div>
+        </PrintArea>
 
         {allowPayments && unpaid.length > 0 && (
           <div className="rounded-lg border p-3 space-y-2">
@@ -322,7 +344,7 @@ export function PaymentReceiptView({ paymentId, onClose }: { paymentId: number |
         <style>{PRINT_STYLE}</style>
         <DialogHeader><DialogTitle>Payment Receipt</DialogTitle></DialogHeader>
         {data && (
-          <div id="bill-print-area">
+          <PrintArea>
             <div className="bill-page border border-gray-400 rounded-sm p-5 text-[13px] text-gray-900 bg-white space-y-3">
               <p className="text-right text-[11px] text-gray-600">{data.mess.phone}</p>
               <div className="text-center">
@@ -348,7 +370,7 @@ export function PaymentReceiptView({ paymentId, onClose }: { paymentId: number |
                 </div>
               </div>
             </div>
-          </div>
+          </PrintArea>
         )}
         <div className="flex gap-2 pt-2">
           <Button onClick={() => window.print()} className="flex-1" disabled={!data}><Printer size={16} className="mr-1" /> Print Receipt</Button>

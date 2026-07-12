@@ -38,6 +38,7 @@ const emptyForm = (checkIn: string, checkOut: string, checkInNow: boolean) => ({
   reference_person: '',
   guest_id_type: 'cnic', guest_id_number: '', client_category: 'serving_officer',
   nature_of_duty: 'visit', da_multiplier: '1.5', mattress_count: 0,
+  adults: 1, children: 0,
   member_id: 0, special_requests: '',
   source: 'walk_in', online_voucher_no: '',
   check_in: checkIn, check_out: checkOut, check_in_now: checkInNow,
@@ -245,6 +246,7 @@ export default function RoomSection({ roomId, open, onClose, onChanged, members,
         reference_person: form.reference_person.trim() || null,
         da_multiplier: form.nature_of_duty === 'official_duty' ? Number(form.da_multiplier) : null,
         mattress_count: form.mattress_count, special_requests: form.special_requests || null,
+        adults: Math.max(1, Number(form.adults) || 1), children: Math.max(0, Number(form.children) || 0),
         source: form.source, online_voucher_no: form.source === 'online' ? form.online_voucher_no.trim() : null,
         check_in_now: effectiveCheckInNow,
       });
@@ -452,7 +454,7 @@ export default function RoomSection({ roomId, open, onClose, onChanged, members,
                   <p className="text-lg font-bold text-gray-900 dark:text-white">{formatCurrency(room.base_price)}<span className="text-xs font-normal text-gray-400">/night</span></p>
                 </div>
                 <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
-                  <div><p className="text-xs text-gray-400">Type</p><p className="font-medium">{ROOM_TYPE_LABELS[room.room_type] || room.room_type}</p></div>
+                  <div><p className="text-xs text-gray-400">Type</p><p className="font-medium">{ROOM_TYPE_LABELS[room.room_type] || room.room_type}{room.room_type === 'suite' ? ` · ${room.ac_count || 1}×AC` : ''}</p></div>
                   <div><p className="text-xs text-gray-400">Capacity</p><p className="font-medium">{room.capacity} guests</p></div>
                   <div><p className="text-xs text-gray-400">Floor</p><p className="font-medium">{room.floor}</p></div>
                   <div><p className="text-xs text-gray-400">Housekeeping</p><p className="font-medium capitalize">{room.housekeeping_status || 'clean'}</p></div>
@@ -666,14 +668,33 @@ export default function RoomSection({ roomId, open, onClose, onChanged, members,
                     <Input placeholder="Phone" value={form.guest_phone} onChange={e => setForm({ ...form, guest_phone: e.target.value })} />
                     {isOfficer && <Input placeholder="PA No" value={form.pa_number} onChange={e => setForm({ ...form, pa_number: e.target.value })} />}
                     <div className="flex gap-1.5">
-                      <select className={`${selectClass} w-24`} value={form.guest_id_type} onChange={e => setForm({ ...form, guest_id_type: e.target.value })}>
+                      <div className="flex-1">
+                        <Label className="text-xs">Adults</Label>
+                        <Input type="number" min={1} value={form.adults}
+                          onChange={e => setForm({ ...form, adults: Number(e.target.value) })} />
+                      </div>
+                      <div className="flex-1">
+                        <Label className="text-xs">Children</Label>
+                        <Input type="number" min={0} value={form.children}
+                          onChange={e => setForm({ ...form, children: Number(e.target.value) })} />
+                      </div>
+                    </div>
+                    {/* Full-width ID row so a 13-digit CNIC is visible while typing.
+                        selectClass carries w-full, so the fixed width must be an
+                        inline style to reliably win over it. */}
+                    <div className="flex gap-1.5 col-span-2">
+                      <select className={`${selectClass} shrink-0`} style={{ width: '7rem' }} value={form.guest_id_type} onChange={e => setForm({ ...form, guest_id_type: e.target.value })}>
                         <option value="cnic">CNIC</option>
                         <option value="svc_no">Svc No</option>
                         <option value="passport">Passport</option>
                       </select>
-                      <Input placeholder="ID number" value={form.guest_id_number} onChange={e => setForm({ ...form, guest_id_number: e.target.value })} />
+                      <Input className="flex-1" placeholder={form.guest_id_type === 'cnic' ? 'CNIC number (e.g. 12345-1234567-1)' : 'ID number'}
+                        value={form.guest_id_number} onChange={e => setForm({ ...form, guest_id_number: e.target.value })} />
                     </div>
-                    <Input className="col-span-2" placeholder="Unit / Address" value={form.unit_address} onChange={e => setForm({ ...form, unit_address: e.target.value })} />
+                    {/* Unit/Address is deliberately not asked at check-in (form kept
+                        lean per the desk's request) - a returning guest's stored
+                        address still flows in silently via selectGuestSuggestion so
+                        the printed bill header stays populated. */}
                     <div className="col-span-2">
                       <Input placeholder={form.client_category === 'civilian' ? 'Reference Person (C/O) * — required for civilians' : 'Reference Person (C/O) — optional'}
                         className={form.client_category === 'civilian' && !form.reference_person.trim() ? 'border-red-400' : ''}

@@ -23,6 +23,50 @@ def run_startup_migrations(engine):
     _migrate_bookings_source_fields(engine)
     _migrate_invoices_bill_type(engine)
     _migrate_bookings_guest_id(engine)
+    _migrate_room_types_three_classes(engine)
+
+
+def _migrate_room_types_three_classes(engine):
+    # 2026-07 rate-card simplification: guests see three room classes
+    # (standard / suite / dg_suite). Old classes are remapped; suites keep
+    # an ac_count (1 or 2) so HRA utilities still bill 1xAC vs 29,500 2xAC
+    # per the card. Enum values are stored as NAMES (uppercase) in rooms,
+    # but as lowercase values in the rate tables' plain-string columns.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(rooms)")).fetchall()
+        if not cols:
+            return
+        if "ac_count" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE rooms ADD COLUMN ac_count INTEGER DEFAULT 1"))
+            logger.info("migration: added rooms.ac_count")
+        # Capture AC counts BEFORE the rename collapses 1xAC/2xAC into 'suite'
+        conn.execute(text("UPDATE rooms SET ac_count = 2 WHERE UPPER(room_type) IN ('SUITE_2AC', 'DG_SUITE')"))
+        remapped = 0
+        remapped += conn.execute(text(
+            "UPDATE rooms SET room_type = 'STANDARD' WHERE UPPER(room_type) IN ('SINGLE','DOUBLE','DELUXE','DORMITORY','VIP')")).rowcount
+        remapped += conn.execute(text(
+            "UPDATE rooms SET room_type = 'SUITE' WHERE UPPER(room_type) IN ('SUITE','SUITE_1AC','SUITE_2AC') AND room_type != 'SUITE'")).rowcount
+        remapped += conn.execute(text(
+            "UPDATE rooms SET room_type = 'DG_SUITE' WHERE UPPER(room_type) = 'DG_SUITE' AND room_type != 'DG_SUITE'")).rowcount
+        # Legacy demo prices (Rs 30-200) predate the rate card; lift the
+        # displayed nightly to the card's serving-officer total.
+        conn.execute(text("UPDATE rooms SET base_price = 3500 WHERE room_type = 'STANDARD' AND base_price < 3500"))
+        conn.execute(text("UPDATE rooms SET base_price = 4500 WHERE room_type IN ('SUITE','DG_SUITE') AND base_price < 4500"))
+        # Rate-card rows (plain lowercase strings): vip -> standard; the two
+        # suite classes had identical nightly rates, so drop the duplicate
+        # before renaming to avoid two 'suite' rows per category.
+        conn.execute(text("UPDATE room_rates SET room_type = 'standard' WHERE room_type = 'vip'"))
+        conn.execute(text(
+            "DELETE FROM room_rates WHERE room_type = 'suite_2ac' AND EXISTS ("
+            " SELECT 1 FROM room_rates r2 WHERE r2.room_type = 'suite_1ac'"
+            " AND r2.guest_category = room_rates.guest_category)"))
+        conn.execute(text("UPDATE room_rates SET room_type = 'suite' WHERE room_type IN ('suite_1ac','suite_2ac')"))
+        # HRA utility rows keep suite_1ac/suite_2ac keys (resolved via
+        # ac_count) - only the vip row renames.
+        conn.execute(text("UPDATE hra_utility_rates SET room_type = 'standard' WHERE room_type = 'vip'"))
+        conn.commit()
+        if remapped:
+            logger.info("migration: remapped %d rooms to the three-class room types", remapped)
 
 
 def _migrate_bookings_source_fields(engine):

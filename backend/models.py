@@ -32,15 +32,13 @@ class RoomStatus(str, enum.Enum):
     MAINTENANCE = "maintenance"
 
 class RoomType(str, enum.Enum):
-    SINGLE = "single"
-    DOUBLE = "double"
-    DELUXE = "deluxe"
+    # The mess's three guest-room classes (2026 rate-card simplification).
+    # Suites carry Room.ac_count (1 or 2): guests see one "Suite" type but
+    # HRA utility charges still bill 1xAC vs 2xAC per the card. Legacy
+    # types (single/double/deluxe/dormitory/vip/suite_1ac/suite_2ac) are
+    # remapped by migrations_manual._migrate_room_types_three_classes.
+    STANDARD = "standard"
     SUITE = "suite"
-    DORMITORY = "dormitory"
-    # Mess guest-room classes from the official rate card
-    VIP = "vip"
-    SUITE_1AC = "suite_1ac"
-    SUITE_2AC = "suite_2ac"
     DG_SUITE = "dg_suite"
 
 class POStatus(str, enum.Enum):
@@ -539,6 +537,9 @@ class Room(Base):
     room_type = Column(Enum(RoomType), nullable=False)
     floor = Column(Integer, default=1)
     capacity = Column(Integer, default=2)
+    # Suites only: number of air conditioners (1 or 2) - drives the HRA
+    # monthly utility charge (Rs 25,500 vs 29,500 on the rate card).
+    ac_count = Column(Integer, default=1)
     base_price = Column(Numeric(10, 2), nullable=False)
     amenities = Column(Text)  # JSON array
     status = Column(Enum(RoomStatus), default=RoomStatus.VACANT)

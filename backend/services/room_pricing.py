@@ -22,21 +22,18 @@ from backend.services.mess_billing_calc import get_setting_float
 RATE_COMPONENTS = ("rent", "electricity", "generator", "gas", "internet")
 
 # room_type -> guest_category -> (rent, elec, gen, gas, internet)
-# Transcribed from the "Guest Room Charges" rate card. DG Suite figures were
-# partially legible on the source document and mirror the suite rates - edit
-# via the rates API once the mess confirms them.
+# Transcribed from the "Guest Room Charges" rate card. Three classes since
+# the 2026-07 simplification: 'standard' carries the card's VIP GRs row
+# (totals 3,500 / 4,000 / 8,500); Suite 1xAC and 2xAC priced identically
+# nightly, so one 'suite' class (totals 4,500 / 6,000 / 13,500); DG Suite
+# mirrors the suite rates on the card.
 DEFAULT_ROOM_RATES = {
-    "vip": {
+    "standard": {
         "serving_officer": (2500, 500, 300, 100, 100),
         "retired_officer": (3000, 500, 300, 100, 100),
         "civilian": (7000, 1000, 300, 100, 100),
     },
-    "suite_1ac": {
-        "serving_officer": (3000, 1000, 300, 100, 100),
-        "retired_officer": (4500, 1000, 300, 100, 100),
-        "civilian": (11500, 1500, 300, 100, 100),
-    },
-    "suite_2ac": {
+    "suite": {
         "serving_officer": (3000, 1000, 300, 100, 100),
         "retired_officer": (4500, 1000, 300, 100, 100),
         "civilian": (11500, 1500, 300, 100, 100),
@@ -67,9 +64,12 @@ DEFAULT_HRA_RANK_RATES = {
     "maj_gen": ("Maj Gen", 17469),
 }
 
-# Monthly flat utility charge for an HRA resident's room class.
+# Monthly flat utility charge for an HRA resident's room class. Suites are
+# keyed by AC count (the card prices 1xAC and 2xAC differently) even though
+# guests see a single 'suite' room type - get_hra_utility_rate resolves the
+# key from the room's ac_count.
 DEFAULT_HRA_UTILITY_RATES = {
-    "vip": 22500,
+    "standard": 22500,
     "suite_1ac": 25500,
     "suite_2ac": 29500,
     "dg_suite": 29500,
@@ -171,12 +171,16 @@ def get_hra_rank_rate(db: Session, rank: str):
     return (band, float(default[1])) if default else None
 
 
-def get_hra_utility_rate(db: Session, room_type: str):
-    """Monthly flat utility charge for an HRA resident's room class, or None."""
-    row = db.query(HraUtilityRate).filter(HraUtilityRate.room_type == room_type).first()
+def get_hra_utility_rate(db: Session, room_type: str, ac_count: int = 1):
+    """Monthly flat utility charge for an HRA resident's room class, or None.
+    A 'suite' resolves to the 1xAC or 2xAC figure via the room's ac_count."""
+    key = room_type
+    if room_type == "suite":
+        key = "suite_2ac" if (ac_count or 1) >= 2 else "suite_1ac"
+    row = db.query(HraUtilityRate).filter(HraUtilityRate.room_type == key).first()
     if row:
         return float(row.monthly_amount)
-    default = DEFAULT_HRA_UTILITY_RATES.get(room_type)
+    default = DEFAULT_HRA_UTILITY_RATES.get(key)
     return float(default) if default is not None else None
 
 
@@ -231,7 +235,7 @@ def compute_booking_price(
             if member:
                 hra_rank = member.rank
         hra_rate = get_hra_rank_rate(db, hra_rank)
-        utility_rate = get_hra_utility_rate(db, room_type)
+        utility_rate = get_hra_utility_rate(db, room_type, getattr(room, "ac_count", 1) or 1)
         if hra_rate and utility_rate is not None:
             band, hra_amount = hra_rate
             components = {"hra_rank_rate": hra_amount, "utility_charge": utility_rate}

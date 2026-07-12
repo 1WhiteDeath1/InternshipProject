@@ -133,28 +133,24 @@ poi2 = PurchaseOrderItem(po_id=po.id, item_id=items[4].id, quantity_ordered=50, 
 db.add_all([poi, poi2])
 db.commit()
 
-# --- Rooms ---
-room_types = [RoomType.SINGLE, RoomType.DOUBLE, RoomType.DELUXE, RoomType.SUITE, RoomType.DORMITORY]
+# --- Rooms (three classes per the rate card) ---
 rooms = []
 for floor in range(1, 4):
     for room_num in range(1, 9):
-        rt = room_types[(floor + room_num) % len(room_types)]
-        r = Room(
+        rooms.append(Room(
             room_number=f"{floor}0{room_num}",
-            room_type=rt,
+            room_type=RoomType.STANDARD,
             floor=floor,
-            capacity=2 if rt != RoomType.DORMITORY else 6,
-            base_price={RoomType.SINGLE: 50, RoomType.DOUBLE: 80, RoomType.DELUXE: 120, RoomType.SUITE: 200, RoomType.DORMITORY: 30}[rt],
-        )
-        rooms.append(r)
+            capacity=2,
+            base_price=3500,  # card total for a serving officer
+        ))
 
-# Mess guest-room classes from the rate card: named suites + VIP rooms
-for suite_name, suite_type in [("Suite-A", RoomType.SUITE_2AC), ("Suite-B", RoomType.SUITE_2AC), ("Suite-C", RoomType.SUITE_2AC),
-                               ("Suite-D", RoomType.SUITE_1AC), ("Suite-E", RoomType.SUITE_1AC), ("Suite-F", RoomType.SUITE_1AC)]:
-    rooms.append(Room(room_number=suite_name, room_type=suite_type, floor=1, capacity=2, base_price=4500))
-for vip_num in range(1, 5):
-    rooms.append(Room(room_number=f"VIP-{vip_num}", room_type=RoomType.VIP, floor=2, capacity=2, base_price=3500))
-rooms.append(Room(room_number="DG-Suite", room_type=RoomType.DG_SUITE, floor=3, capacity=2, base_price=4500))
+# Named suites (A-C are 2xAC, D-F are 1xAC - the AC count drives the HRA
+# monthly utility figure) and the DG suite.
+for suite_name, acs in [("Suite-A", 2), ("Suite-B", 2), ("Suite-C", 2),
+                        ("Suite-D", 1), ("Suite-E", 1), ("Suite-F", 1)]:
+    rooms.append(Room(room_number=suite_name, room_type=RoomType.SUITE, ac_count=acs, floor=1, capacity=2, base_price=4500))
+rooms.append(Room(room_number="DG-Suite", room_type=RoomType.DG_SUITE, ac_count=2, floor=3, capacity=2, base_price=4500))
 db.add_all(rooms)
 db.commit()
 

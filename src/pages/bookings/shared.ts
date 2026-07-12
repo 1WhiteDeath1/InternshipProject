@@ -11,6 +11,7 @@ export interface Room {
   housekeeping_status: string;
   floor: number;
   capacity: number;
+  ac_count?: number;
   base_price: number;
   current_guest: string | null;
   current_check_out: string | null;
@@ -101,7 +102,7 @@ export interface CalendarStay {
 export interface CalendarData {
   room: {
     id: number; room_number: string; room_type: string; floor: number; capacity: number;
-    base_price: number; status: string; housekeeping_status: string; photos: RoomPhoto[];
+    ac_count?: number; base_price: number; status: string; housekeeping_status: string; photos: RoomPhoto[];
   };
   current_booking: {
     id: number; booking_reference: string; guest_name: string; guest_phone: string | null;
@@ -200,8 +201,7 @@ export interface RoomWeekData {
 }
 
 export const ROOM_TYPE_LABELS: Record<string, string> = {
-  single: 'Single', double: 'Double', deluxe: 'Deluxe', suite: 'Suite', dormitory: 'Dormitory',
-  vip: 'VIP GR', suite_1ac: 'Suite 1×AC', suite_2ac: 'Suite 2×AC', dg_suite: 'DG Suite',
+  standard: 'Standard', suite: 'Suite', dg_suite: 'DG Suite',
 };
 
 export const RANKS = ['Lt', 'Capt', 'Maj', 'Lt Col', 'Col', 'Brig', 'Maj Gen', 'Lt Gen', 'Gen'];

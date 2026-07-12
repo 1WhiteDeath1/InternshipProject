@@ -22,7 +22,7 @@ Base.metadata.create_all(bind=engine)
 run_startup_migrations(engine)
 
 app = FastAPI(
-    title="SAM Hotel & Mess Management",
+    title="EME MESS Management",
     description="Production-grade Hotel & Mess Management System",
     version="1.0.0",
 )

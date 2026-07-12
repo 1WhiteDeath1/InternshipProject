@@ -697,10 +697,10 @@ class ImportResult(BaseModel):
 # --- Branding Schemas ---
 
 class BrandingConfig(BaseModel):
-    badge_text: str = "SAM"
+    badge_text: str = "EME MESS"
     badge_position: str = "bottom-right"
-    splash_title: str = "SAM Hotel & Mess Management"
-    splash_subtitle: str = "Developed by SAM Technologies"
+    splash_title: str = "EME MESS Management"
+    splash_subtitle: str = "EME Officers Mess, Rawalpindi"
     splash_duration_seconds: int = 3
 
 

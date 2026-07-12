@@ -108,7 +108,8 @@ async def list_rooms(
             continue
         result.append({
             "id": r.id, "room_number": r.room_number, "room_type": r.room_type.value,
-            "floor": r.floor, "capacity": r.capacity, "base_price": float(r.base_price),
+            "floor": r.floor, "capacity": r.capacity, "ac_count": r.ac_count or 1,
+            "base_price": float(r.base_price),
             "amenities": r.amenities, "status": st["status"],
             "housekeeping_status": r.housekeeping_status or "clean",
             "current_guest": current.guest_name if current else None,
@@ -135,6 +136,7 @@ async def create_room(data: dict, request: Request, db: Session = Depends(get_db
     room = Room(
         room_number=data["room_number"], room_type=data["room_type"],
         floor=data.get("floor", 1), capacity=data.get("capacity", 2),
+        ac_count=data.get("ac_count", 1),
         base_price=data["base_price"], amenities=data.get("amenities"),
     )
     db.add(room)
@@ -221,7 +223,7 @@ async def update_room(room_id: int, data: dict, request: Request, db: Session = 
         raise HTTPException(status_code=404, detail="Room not found")
 
     before = serialize_model(room)
-    for field in ["room_type", "floor", "capacity", "base_price", "amenities", "status"]:
+    for field in ["room_type", "floor", "capacity", "ac_count", "base_price", "amenities", "status"]:
         if field in data:
             setattr(room, field, data[field])
     db.commit()
@@ -262,7 +264,8 @@ async def room_calendar(
     return {
         "room": {
             "id": room.id, "room_number": room.room_number, "room_type": room.room_type.value,
-            "floor": room.floor, "capacity": room.capacity, "base_price": float(room.base_price),
+            "floor": room.floor, "capacity": room.capacity, "ac_count": room.ac_count or 1,
+            "base_price": float(room.base_price),
             "status": states["status"], "housekeeping_status": room.housekeeping_status or "clean",
             "photos": _photo_list(db, room.id),
         },

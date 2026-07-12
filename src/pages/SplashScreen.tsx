@@ -11,8 +11,8 @@ interface BrandingConfig {
 export default function SplashScreen() {
   const navigate = useNavigate();
   const [config, setConfig] = useState<BrandingConfig>({
-    splash_title: 'SAM Hotel & Mess Management',
-    splash_subtitle: 'Developed by SAM Technologies',
+    splash_title: 'EME MESS Management',
+    splash_subtitle: 'EME Officers Mess, Rawalpindi',
     splash_duration_seconds: 3,
   });
 
@@ -34,7 +34,7 @@ export default function SplashScreen() {
     <div className="h-screen w-screen flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900">
       <div className="text-center animate-fade-in">
         <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-blue-500 flex items-center justify-center shadow-2xl shadow-blue-500/30">
-          <span className="text-3xl font-black text-white">SAM</span>
+          <span className="text-3xl font-black text-white">EME</span>
         </div>
         <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">{config.splash_title}</h1>
         <p className="text-blue-300 text-lg">{config.splash_subtitle}</p>
