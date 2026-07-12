@@ -471,6 +471,15 @@ class RoomOut(RoomBase):
     current_guest: Optional[str] = None
     current_check_out: Optional[date] = None
 
+class GuestOut(BaseModel):
+    id: int
+    full_name: str
+    phone: Optional[str] = None
+    id_type: Optional[str] = None
+    id_number: Optional[str] = None
+    unit_address: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
 class BookingBase(BaseModel):
     guest_name: str = Field(..., min_length=1, max_length=200)
     guest_phone: Optional[str] = None
@@ -492,15 +501,27 @@ class BookingBase(BaseModel):
     nature_of_duty: str = "visit"
     da_multiplier: Optional[float] = None
     mattress_count: int = Field(0, ge=0, le=10)
+    source: str = "walk_in"
+    online_voucher_no: Optional[str] = Field(None, max_length=50)
+    reference_person: Optional[str] = Field(None, max_length=100)
 
     @model_validator(mode="after")
     def _check_dates(self):
         if self.check_out <= self.check_in:
             raise ValueError("check_out must be after check_in")
+        # Civilians must name a reference ("C/O ..." in the paper register);
+        # officers / institutional guests are identifiable by rank & service, so
+        # the reference stays optional for them.
+        if self.client_category in ("civilian", "non_member_civilian") and not (self.reference_person or "").strip():
+            raise ValueError("Civilian guests require a reference person (C/O)")
         if self.nature_of_duty not in ("visit", "leave", "official_duty", "hra"):
             raise ValueError("nature_of_duty must be one of: visit, leave, official_duty, hra")
         if self.da_multiplier is not None and self.da_multiplier not in (1.0, 1.5):
             raise ValueError("da_multiplier must be 1 or 1.5")
+        if self.source not in ("walk_in", "online"):
+            raise ValueError("source must be walk_in or online")
+        if self.source == "online" and not (self.online_voucher_no or "").strip():
+            raise ValueError("Online bookings need the portal voucher number (Online V/No)")
         return self
 
 class BookingCreate(BookingBase):
@@ -561,9 +582,6 @@ class InvoiceBase(BaseModel):
     total_amount: float
     notes: Optional[str] = None
 
-class InvoiceCreate(InvoiceBase):
-    items: List[InvoiceItemCreate]
-
 class InvoiceItemOut(InvoiceItemCreate):
     model_config = ConfigDict(from_attributes=True)
     id: int
@@ -580,6 +598,11 @@ class InvoiceOut(InvoiceBase):
     guest_name: Optional[str] = None
     room_number: Optional[str] = None
 
+
+class BookingChargeCreate(BaseModel):
+    head: str = Field(..., min_length=1, max_length=100)  # e.g. Dhobi, Breakage, Allied Charges
+    amount: float = Field(..., gt=0)
+    is_mess_charge: bool = False  # True routes the line onto the mess/food bill
 
 class PaymentCreate(BaseModel):
     amount: float = Field(..., gt=0)

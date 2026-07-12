@@ -63,6 +63,7 @@ app.include_router(routers.mess_billing_router, prefix="/api/mess-billing", tags
 app.include_router(routers.recipes_router, prefix="/api/recipes", tags=["Recipes"])
 app.include_router(routers.kitchen_router, prefix="/api/kitchen", tags=["Kitchen"])
 app.include_router(routers.menu_prices_router, prefix="/api/menu-prices", tags=["Menu Prices"])
+app.include_router(routers.guests_router, prefix="/api/guests", tags=["Guests"])
 
 @app.get("/api/health")
 async def health_check():

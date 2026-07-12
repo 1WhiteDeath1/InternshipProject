@@ -550,6 +550,23 @@ class Room(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class Guest(Base):
+    """Persistent guest identity, matched across stays by ID number (CNIC/svc
+    no/passport) or phone, so repeat visitors can be recognized at check-in
+    and their bookings/bills traced by name. Not a full guest-management
+    module - just enough to de-duplicate and prefill."""
+    __tablename__ = "guests"
+
+    id = Column(Integer, primary_key=True)
+    full_name = Column(String(200), nullable=False)
+    phone = Column(String(50))
+    id_type = Column(String(50))
+    id_number = Column(String(100))
+    unit_address = Column(String(255))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Booking(Base):
     __tablename__ = "bookings"
 
@@ -560,6 +577,7 @@ class Booking(Base):
     guest_email = Column(String(255))
     guest_id_type = Column(String(50))
     guest_id_number = Column(String(100))
+    guest_id = Column(Integer, ForeignKey("guests.id"), nullable=True)
     room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False)
     check_in = Column(Date, nullable=False)
     check_out = Column(Date, nullable=False)
@@ -575,9 +593,19 @@ class Booking(Base):
     rank = Column(String(50))
     pa_number = Column(String(50))
     unit_address = Column(String(255))
+    # "C/O" reference from the paper register (e.g. "C/O AD", "C/O Brig Cdr CES").
+    # Mandatory for civilian guests, optional for officers/institutional guests.
+    reference_person = Column(String(100))
     nature_of_duty = Column(String(20), default="visit")  # visit | leave | official_duty | hra
     da_multiplier = Column(Numeric(3, 1))  # 1.0 or 1.5 for official-duty DA billing
     mattress_count = Column(Integer, default=0)
+    # Booking channel: walk_in (at the desk) or online (transcribed from the
+    # separate online portal, carrying that portal's voucher number).
+    source = Column(String(20), default="walk_in")  # walk_in | online
+    online_voucher_no = Column(String(50))
+    # Guest must physically arrive (be checked in) by this time or staff may
+    # void the booking to free the room.
+    arrival_deadline = Column(DateTime)
     late_checkout_fee = Column(Numeric(10, 2), default=0)
     actual_check_in = Column(DateTime)
     actual_check_out = Column(DateTime)
@@ -588,6 +616,46 @@ class Booking(Base):
 
     room = relationship("Room")
     member = relationship("Member")
+    guest = relationship("Guest")
+
+
+class BookingCharge(Base):
+    """Ad-hoc charge against a stay, matching the paper draft bill's line
+    heads (Dhobi, Allied Charges, Breakage, Dental Kit, Extra Messing, Sui
+    Gas Charges on Messing...). is_mess_charge routes the line onto the
+    mess/food bill at checkout instead of the room bill."""
+    __tablename__ = "booking_charges"
+
+    id = Column(Integer, primary_key=True)
+    booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=False)
+    head = Column(String(100), nullable=False)
+    amount = Column(Numeric(10, 2), nullable=False)
+    is_mess_charge = Column(Boolean, default=False)
+    invoiced_at = Column(DateTime)  # set when swept into an invoice at checkout
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    booking = relationship("Booking")
+
+
+class SmsMessage(Base):
+    """Outbox for guest SMS notifications. The server itself is offline, so
+    messages queue as 'pending'; delivery happens either through an optional
+    HTTP SMS gateway (sms_gateway_url setting, e.g. a GSM-modem bridge on the
+    LAN) or manually - staff copy the text to a phone and mark it sent."""
+    __tablename__ = "sms_messages"
+
+    id = Column(Integer, primary_key=True)
+    booking_id = Column(Integer, ForeignKey("bookings.id"))
+    phone = Column(String(50), nullable=False)
+    body = Column(Text, nullable=False)
+    status = Column(String(20), default="pending")  # pending | sent | failed
+    error = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    sent_at = Column(DateTime)
+    sent_by = Column(Integer, ForeignKey("users.id"))
+
+    booking = relationship("Booking")
 
 
 class RoomRate(Base):
@@ -690,6 +758,10 @@ class Invoice(Base):
     total_amount = Column(Numeric(10, 2), nullable=False)
     amount_paid = Column(Numeric(10, 2), default=0)
     status = Column(Enum(InvoiceStatus), default=InvoiceStatus.DRAFT)
+    # Which of the two checkout bills this is: 'room' (guest room charges,
+    # mattress, dhobi, breakage...) or 'mess' (messing/food charges). Older
+    # single-bill invoices stay 'combined'.
+    bill_type = Column(String(20), default="combined")  # room | mess | combined
     notes = Column(Text)
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)

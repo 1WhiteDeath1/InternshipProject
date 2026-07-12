@@ -47,15 +47,23 @@ async def list_bills(
          "total_amount": float(b.total_amount), "status": b.status.value, "generated_at": b.generated_at} for b in bills], "total": total}
 
 
-def _hra_charge_and_renew(db: Session, member: Member, period_end: date) -> float:
+def _hra_charge_and_renew(db: Session, member: Member, period_start: date, period_end: date) -> float:
     """HRA residents are billed fresh each period from the current rank +
     room-class rate (not a stored booking total, so a rank correction or
-    rate revision is reflected immediately). As a side effect, renews the
-    booking's rolling checkout window if it's due soon - see the "indefinite
-    residency" note in bookings.create_booking."""
+    rate revision is reflected immediately). As a side effect, renews an
+    ongoing booking's rolling checkout window if it's due soon - see the
+    "indefinite residency" note in bookings.create_booking.
+
+    Also covers a residency that ENDED during this period (checked_out via
+    end-residency, check_out truncated to the departure date) so the final
+    month is still billed rather than silently dropped."""
     booking = db.query(Booking).filter(
         Booking.member_id == member.id, Booking.nature_of_duty == "hra",
-        Booking.status == "checked_in", Booking.check_in <= period_end,
+        Booking.check_in <= period_end,
+        (
+            (Booking.status == "checked_in") |
+            ((Booking.status == "checked_out") & (Booking.check_out >= period_start))
+        ),
     ).order_by(Booking.check_in.desc()).first()
     if not booking:
         return 0.0
@@ -66,7 +74,7 @@ def _hra_charge_and_renew(db: Session, member: Member, period_end: date) -> floa
     utility_rate = get_hra_utility_rate(db, room_type) if room_type else None
     amount = (hra_rate[1] + utility_rate) if (hra_rate and utility_rate is not None) else 0.0
 
-    if booking.check_out <= period_end + timedelta(days=60):
+    if booking.status.value == "checked_in" and booking.check_out <= period_end + timedelta(days=60):
         booking.check_out += timedelta(days=365)
 
     return amount
@@ -118,7 +126,7 @@ async def generate_bills(month: int = Query(..., ge=1, le=12), year: int = Query
             Booking.member_id == member.id, Booking.nature_of_duty != "hra",
             Booking.check_in >= period_start, Booking.check_in <= period_end,
         ).all()
-        hra_amount = _hra_charge_and_renew(db, member, period_end)
+        hra_amount = _hra_charge_and_renew(db, member, period_start, period_end)
         if hra_amount:
             hra_billed_count += 1
         stay_amount = float(sum(b.total_amount or 0 for b in member_bookings)) + hra_amount

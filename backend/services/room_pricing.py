@@ -14,7 +14,7 @@ Rates live in the room_rates / duty_rates / hra_rank_rates / hra_utility_rates
 tables so the mess can enter revisions; the DEFAULT_* dicts (transcribed
 from the official card) are used as a fallback when no row exists yet.
 """
-from datetime import date
+from datetime import date, timedelta
 from sqlalchemy.orm import Session
 from backend.models import RoomRate, DutyRate, HraRankRate, HraUtilityRate
 from backend.services.mess_billing_calc import get_setting_float
@@ -178,6 +178,31 @@ def get_hra_utility_rate(db: Session, room_type: str):
         return float(row.monthly_amount)
     default = DEFAULT_HRA_UTILITY_RATES.get(room_type)
     return float(default) if default is not None else None
+
+
+def reprice_for_departure(db: Session, booking, departure: date):
+    """Re-price a guest booking over its ACTUAL stay span when the departure
+    date differs from the booked check-out: an overstayed night is billed, an
+    unused night is not (folio practice - the bill covers nights actually
+    stayed). Same-day hours past the standard checkout time are the late-fee
+    logic's job, not a re-price.
+
+    Returns (effective_check_out, pricing) - pricing is None when no re-price
+    applies (HRA residencies bill monthly; unchanged dates need no recompute).
+    Used by perform_check_out (mutating) and by the running-balance preview
+    (read-only) so the Clerk Desk total always equals the invoice."""
+    if booking.nature_of_duty == "hra":
+        return booking.check_out, None
+    effective = max(departure, booking.check_in + timedelta(days=1))  # minimum 1-night stay
+    if effective == booking.check_out:
+        return effective, None
+    pricing = compute_booking_price(
+        db, booking.room, check_in=booking.check_in, check_out=effective,
+        client_category=booking.client_category, nature_of_duty=booking.nature_of_duty,
+        rank=booking.rank, da_multiplier=float(booking.da_multiplier) if booking.da_multiplier else None,
+        mattress_count=booking.mattress_count or 0, member_id=booking.member_id,
+    )
+    return effective, pricing
 
 
 def compute_booking_price(

@@ -20,6 +20,58 @@ def run_startup_migrations(engine):
     _migrate_mess_bills_ala_carte(engine)
     _migrate_rooms_housekeeping(engine)
     _migrate_bookings_register_fields(engine)
+    _migrate_bookings_source_fields(engine)
+    _migrate_invoices_bill_type(engine)
+    _migrate_bookings_guest_id(engine)
+
+
+def _migrate_bookings_source_fields(engine):
+    # Online-portal booking channel (source + portal voucher number) and the
+    # arrival deadline after which an unclaimed booking may be voided. All
+    # nullable/defaulted - plain ALTER TABLE ADD COLUMN.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(bookings)")).fetchall()
+        if not cols:
+            return
+        col_names = {c[1] for c in cols}
+        additions = (
+            ("source", "VARCHAR(20) DEFAULT 'walk_in'"),
+            ("online_voucher_no", "VARCHAR(50)"),
+            ("arrival_deadline", "DATETIME"),
+            ("reference_person", "VARCHAR(100)"),
+        )
+        for name, ddl_type in additions:
+            if name not in col_names:
+                conn.execute(text(f"ALTER TABLE bookings ADD COLUMN {name} {ddl_type}"))
+                logger.info("migration: added bookings.%s", name)
+        conn.commit()
+
+
+def _migrate_invoices_bill_type(engine):
+    # Room-bill / mess-bill split at checkout. Additive with default; older
+    # single invoices remain 'combined'.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(invoices)")).fetchall()
+        if not cols:
+            return
+        if "bill_type" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN bill_type VARCHAR(20) DEFAULT 'combined'"))
+            conn.commit()
+            logger.info("migration: added invoices.bill_type")
+
+
+def _migrate_bookings_guest_id(engine):
+    # Links a booking to a persistent Guest identity (matched by CNIC/phone),
+    # so repeat visitors are recognized. guests table is new, created by
+    # create_all(); this only adds the FK column to the existing bookings table.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(bookings)")).fetchall()
+        if not cols:
+            return
+        if "guest_id" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE bookings ADD COLUMN guest_id INTEGER"))
+            conn.commit()
+            logger.info("migration: added bookings.guest_id")
 
 
 def _migrate_rooms_housekeeping(engine):

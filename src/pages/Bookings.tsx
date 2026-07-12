@@ -4,7 +4,8 @@ import { toast } from 'sonner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import DashboardTab from './bookings/DashboardTab';
 import RoomGridTab from './bookings/RoomGridTab';
-import TimelineTab from './bookings/TimelineTab';
+import CalendarTab from './bookings/CalendarTab';
+import BookingsListTab from './bookings/BookingsListTab';
 import RoomSection, { type InitialBooking } from './bookings/RoomSection';
 import type { Room, MemberOption } from './bookings/shared';
 
@@ -36,10 +37,11 @@ export default function Bookings() {
       <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Hotel Bookings</h1>
 
       <Tabs defaultValue="dashboard">
-        <TabsList className="grid w-full grid-cols-3 max-w-lg">
+        <TabsList className="grid w-full grid-cols-4 max-w-2xl">
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="rooms">Rooms</TabsTrigger>
-          <TabsTrigger value="timeline">7-Day Overview</TabsTrigger>
+          <TabsTrigger value="calendar">Calendar</TabsTrigger>
+          <TabsTrigger value="list">All Bookings</TabsTrigger>
         </TabsList>
 
         <TabsContent value="dashboard">
@@ -50,8 +52,12 @@ export default function Bookings() {
           <RoomGridTab rooms={rooms} onOpenRoom={openRoom} />
         </TabsContent>
 
-        <TabsContent value="timeline">
-          <TimelineTab onOpenRoom={id => openRoom(id)} />
+        <TabsContent value="calendar">
+          <CalendarTab onOpenRoom={id => openRoom(id)} />
+        </TabsContent>
+
+        <TabsContent value="list">
+          <BookingsListTab onChanged={fetchRooms} />
         </TabsContent>
       </Tabs>
 

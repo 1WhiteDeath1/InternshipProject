@@ -18,6 +18,14 @@ def get_setting_float(db: Session, key: str, default: float) -> float:
         return default
 
 
+def get_setting_str(db: Session, key: str, default: str) -> str:
+    """Read a text SystemSetting, falling back to `default` when unset."""
+    setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+    if not setting or not (setting.value or "").strip():
+        return default
+    return setting.value.strip()
+
+
 def get_man_days(db: Session, member_id: int, month: int, year: int) -> int:
     """Count of attended meal-slots for a member in a given month/year.
 
