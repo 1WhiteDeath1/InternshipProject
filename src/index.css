@@ -72,6 +72,25 @@
   body {
     @apply bg-background text-foreground;
   }
+  /* Readability floor for a front-desk app viewed at arm's length or
+     further: a slightly larger rem base scales every rem-sized utility
+     (text, spacing) up ~6% across the app. */
+  html {
+    font-size: 17px;
+  }
+}
+
+/* No small text anywhere: lift the smallest Tailwind sizes so nothing
+   renders below ~14px. Declared after the Tailwind layers on purpose so
+   these win over the generated utilities. */
+.text-xs {
+  font-size: 0.875rem;   /* ~15px at the 17px root (was ~12.75px) */
+  line-height: 1.3rem;
+}
+.text-\[10px\],
+.text-\[11px\] {
+  font-size: 0.8rem !important;   /* ~13.6px - badges and chips */
+  line-height: 1.1rem !important;
 }
 
 /* Splash screen animations */

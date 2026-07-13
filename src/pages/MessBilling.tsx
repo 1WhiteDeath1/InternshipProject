@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import { Wallet, RefreshCw, CheckCircle, DollarSign, Percent, Plus } from 'lucide-react';
 import { defaultMealForNow } from '@/lib/mealDefaults';
+import { formatCurrency } from '@/lib/currency';
 
 interface MessBill {
   id: number;
@@ -169,9 +170,9 @@ export default function MessBilling() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Total Billed</p><p className="text-xl font-bold">${totalBilled.toFixed(2)}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Collected</p><p className="text-xl font-bold text-green-600">${collected.toFixed(2)}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Outstanding</p><p className="text-xl font-bold text-amber-600">${outstanding.toFixed(2)}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Total Billed</p><p className="text-xl font-bold">{formatCurrency(totalBilled)}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Collected</p><p className="text-xl font-bold text-green-600">{formatCurrency(collected)}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Outstanding</p><p className="text-xl font-bold text-amber-600">{formatCurrency(outstanding)}</p></CardContent></Card>
         <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Drafts</p><p className="text-xl font-bold">{draftCount}</p></CardContent></Card>
       </div>
 
@@ -191,12 +192,12 @@ export default function MessBilling() {
                     <TableRow key={b.id}>
                       <TableCell className="font-medium">{b.member_name}</TableCell>
                       <TableCell>{b.man_days}</TableCell>
-                      <TableCell>${b.base_menu_amount.toFixed(2)}</TableCell>
-                      <TableCell>${b.stay_amount.toFixed(2)}</TableCell>
-                      <TableCell>${b.extra_meals_amount.toFixed(2)}</TableCell>
-                      <TableCell>${b.ala_carte_amount.toFixed(2)}</TableCell>
-                      <TableCell className="text-sm text-gray-500">{b.applied_discount_rate}% (${b.discount_amount.toFixed(2)})</TableCell>
-                      <TableCell className="font-semibold">${b.total_amount.toFixed(2)}</TableCell>
+                      <TableCell>{formatCurrency(b.base_menu_amount)}</TableCell>
+                      <TableCell>{formatCurrency(b.stay_amount)}</TableCell>
+                      <TableCell>{formatCurrency(b.extra_meals_amount)}</TableCell>
+                      <TableCell>{formatCurrency(b.ala_carte_amount)}</TableCell>
+                      <TableCell className="text-sm text-gray-500">{b.applied_discount_rate}% ({formatCurrency(b.discount_amount)})</TableCell>
+                      <TableCell className="font-semibold">{formatCurrency(b.total_amount)}</TableCell>
                       <TableCell>{statusBadge(b.status)}</TableCell>
                       <TableCell>
                         <div className="flex gap-1">
@@ -253,7 +254,7 @@ export default function MessBilling() {
                       <TableCell>{c.guest_name}</TableCell>
                       <TableCell>{c.date}</TableCell>
                       <TableCell className="capitalize">{c.meal_type}</TableCell>
-                      <TableCell>${c.amount.toFixed(2)}</TableCell>
+                      <TableCell>{formatCurrency(c.amount)}</TableCell>
                     </TableRow>
                   ))}
                   {charges.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500">No guest meal charges recorded</TableCell></TableRow>}

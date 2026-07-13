@@ -3,13 +3,12 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/useAuth';
 import { useTheme } from '@/contexts/useTheme';
 import { useFeatures } from '@/contexts/useFeatures';
-import SAMBadge from '@/components/SAMBadge';
 import api from '@/lib/api';
 import {
   LayoutDashboard, Package, ShoppingCart, BedDouble, Receipt,
   Shield, Users, UserCog, ClipboardList, Bell, BarChart3,
   Settings, FileUp, LogOut, Sun, Moon, ChevronLeft, ChevronRight,
-  IdCard, UtensilsCrossed, Wallet, ChefHat, LayoutGrid
+  IdCard, UtensilsCrossed, Wallet, ChefHat, LayoutGrid, Menu, X
 } from 'lucide-react';
 
 const navItems = [
@@ -40,11 +39,21 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
+  // Below lg the sidebar becomes an overlay drawer opened from the header's
+  // hamburger button; it closes on navigation or backdrop tap.
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [alertCount, setAlertCount] = useState(0);
 
   useEffect(() => {
     if (!loading && !user) navigate('/login');
   }, [user, loading, navigate]);
+
+  // Close the drawer on navigation (adjust-state-during-render, not an effect)
+  const [prevPath, setPrevPath] = useState(location.pathname);
+  if (location.pathname !== prevPath) {
+    setPrevPath(location.pathname);
+    setDrawerOpen(false);
+  }
 
   useEffect(() => {
     const fetchAlerts = async () => {
@@ -68,12 +77,25 @@ export default function Layout() {
 
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-950">
-      {/* Sidebar */}
-      <aside className={`${collapsed ? 'w-16' : 'w-64'} bg-slate-900 text-white flex flex-col transition-all duration-300 flex-shrink-0`}>
+      {/* Backdrop for the mobile drawer */}
+      {drawerOpen && (
+        <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setDrawerOpen(false)} />
+      )}
+
+      {/* Sidebar: static on desktop, slide-in drawer below lg */}
+      <aside className={`
+        ${collapsed ? 'lg:w-16' : 'lg:w-64'} w-72 max-w-[85vw]
+        bg-slate-900 text-white flex flex-col transition-all duration-300 flex-shrink-0
+        fixed inset-y-0 left-0 z-50 transform lg:transform-none lg:static
+        ${drawerOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+      `}>
         <div className="h-16 flex items-center px-4 border-b border-slate-700">
-          {!collapsed && <span className="text-lg font-bold tracking-tight">SAM Hotel</span>}
-          <button onClick={() => setCollapsed(!collapsed)} className="ml-auto p-1.5 rounded hover:bg-slate-700 transition-colors">
+          {!collapsed && <span className="text-xl font-bold tracking-tight">EME MESS</span>}
+          <button onClick={() => setCollapsed(!collapsed)} className="ml-auto p-1.5 rounded hover:bg-slate-700 transition-colors hidden lg:block">
             {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+          </button>
+          <button onClick={() => setDrawerOpen(false)} className="ml-auto p-1.5 rounded hover:bg-slate-700 transition-colors lg:hidden">
+            <X size={20} />
           </button>
         </div>
 
@@ -93,17 +115,17 @@ export default function Layout() {
                 title={collapsed ? item.label : undefined}
               >
                 <Icon size={20} />
-                {!collapsed && (
+                {(!collapsed || drawerOpen) && (
                   <>
-                    <span className="text-[15px]">{item.label}</span>
+                    <span className="text-base">{item.label}</span>
                     {item.badge === 'alertCount' && alertCount > 0 && (
-                      <span className="ml-auto bg-red-500 text-white text-xs font-bold rounded-full h-5 min-w-5 flex items-center justify-center px-1.5 animate-pulse">
+                      <span className="ml-auto bg-red-500 text-white text-sm font-bold rounded-full h-6 min-w-6 flex items-center justify-center px-1.5 animate-pulse">
                         {alertCount}
                       </span>
                     )}
                   </>
                 )}
-                {collapsed && item.badge === 'alertCount' && alertCount > 0 && (
+                {collapsed && !drawerOpen && item.badge === 'alertCount' && alertCount > 0 && (
                   <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-red-500 rounded-full" />
                 )}
               </button>
@@ -117,14 +139,14 @@ export default function Layout() {
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
           >
             {darkMode ? <Sun size={18} /> : <Moon size={18} />}
-            {!collapsed && <span className="text-sm">{darkMode ? 'Light Mode' : 'Dark Mode'}</span>}
+            {(!collapsed || drawerOpen) && <span className="text-base">{darkMode ? 'Light Mode' : 'Dark Mode'}</span>}
           </button>
           <button
             onClick={logout}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-300 hover:bg-red-900/40 hover:text-red-400 transition-colors mt-1"
           >
             <LogOut size={18} />
-            {!collapsed && <span className="text-sm">Logout</span>}
+            {(!collapsed || drawerOpen) && <span className="text-base">Logout</span>}
           </button>
         </div>
       </aside>
@@ -132,52 +154,55 @@ export default function Layout() {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top Bar */}
-        <header className="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center px-6 justify-between flex-shrink-0">
-          <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-            {location.pathname !== '/dashboard' && (
-              <>
-                <button onClick={() => navigate('/dashboard')} className="hover:text-blue-600 transition-colors">Home</button>
-                <span>/</span>
-                <span className="text-gray-700 dark:text-gray-300 font-medium capitalize">
-                  {location.pathname.slice(1).replace(/-/g, ' ')}
-                </span>
-              </>
-            )}
+        <header className="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center px-4 sm:px-6 justify-between flex-shrink-0 gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <button onClick={() => setDrawerOpen(true)} className="p-2 -ml-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors lg:hidden">
+              <Menu size={22} className="text-gray-700 dark:text-gray-300" />
+            </button>
+            <div className="flex items-center gap-2 text-base text-gray-500 dark:text-gray-400 min-w-0">
+              {location.pathname !== '/dashboard' && (
+                <>
+                  <button onClick={() => navigate('/dashboard')} className="hover:text-blue-600 transition-colors hidden sm:block">Home</button>
+                  <span className="hidden sm:block">/</span>
+                  <span className="text-gray-700 dark:text-gray-300 font-medium capitalize truncate">
+                    {location.pathname.slice(1).replace(/-/g, ' ')}
+                  </span>
+                </>
+              )}
+            </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
             {user.is_supervisor && (
               <button
                 onClick={() => navigate('/alerts')}
                 className="relative p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
               >
-                <Bell size={20} className="text-gray-600 dark:text-gray-400" />
+                <Bell size={22} className="text-gray-600 dark:text-gray-400" />
                 {alertCount > 0 && (
-                  <span className="absolute top-1 right-1 h-4 min-w-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1">
+                  <span className="absolute top-0.5 right-0.5 h-5 min-w-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center px-1">
                     {alertCount}
                   </span>
                 )}
               </button>
             )}
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-800">
-              <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold">
+              <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-bold">
                 {user.full_name?.charAt(0)?.toUpperCase() || 'U'}
               </div>
-              <div className="hidden sm:block">
-                <p className="text-sm font-medium text-gray-900 dark:text-gray-100 leading-tight">{user.full_name}</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 leading-tight">{user.role_name}</p>
+              <div className="hidden md:block">
+                <p className="text-base font-medium text-gray-900 dark:text-gray-100 leading-tight">{user.full_name}</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 leading-tight">{user.role_name}</p>
               </div>
             </div>
           </div>
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6">
           <Outlet />
         </main>
       </div>
-
-      <SAMBadge />
     </div>
   );
 }

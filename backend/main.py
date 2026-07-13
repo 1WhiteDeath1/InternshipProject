@@ -8,6 +8,7 @@ from backend.database import engine, Base
 from backend.logging_config import setup_logging
 from backend.branding import create_default_branding_file
 from backend.migrations_manual import run_startup_migrations
+from backend.config import UPLOADS_DIR
 from backend import routers
 
 setup_logging()
@@ -21,7 +22,7 @@ Base.metadata.create_all(bind=engine)
 run_startup_migrations(engine)
 
 app = FastAPI(
-    title="SAM Hotel & Mess Management",
+    title="EME MESS Management",
     description="Production-grade Hotel & Mess Management System",
     version="1.0.0",
 )
@@ -33,6 +34,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Room photo storage - mounted unconditionally (independent of the dist/
+# build below) so uploads work against the Vite dev server too, which
+# proxies /uploads to this process (see vite.config.ts).
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 # API routers
 app.include_router(routers.auth_router, prefix="/api/auth", tags=["Auth"])
@@ -57,6 +63,7 @@ app.include_router(routers.mess_billing_router, prefix="/api/mess-billing", tags
 app.include_router(routers.recipes_router, prefix="/api/recipes", tags=["Recipes"])
 app.include_router(routers.kitchen_router, prefix="/api/kitchen", tags=["Kitchen"])
 app.include_router(routers.menu_prices_router, prefix="/api/menu-prices", tags=["Menu Prices"])
+app.include_router(routers.guests_router, prefix="/api/guests", tags=["Guests"])
 
 @app.get("/api/health")
 async def health_check():

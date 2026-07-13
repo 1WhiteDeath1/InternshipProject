@@ -1,15 +1,23 @@
 """Billing and invoicing router."""
+import hashlib
+import json
 import uuid
 from datetime import datetime, date, timedelta
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy.orm import Session
+from typing import Optional, List
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Body
+from sqlalchemy import and_, exists, or_
+from sqlalchemy.orm import Session, joinedload
 from backend.database import get_db
-from backend.models import Invoice, InvoiceItem, InvoicePayment, Booking, InvoiceStatus, ClientCategory, MealAttendance, KitchenOrder, MenuPrice
-from backend.schemas import InvoiceCreate, InvoiceItemCreate, PaymentCreate, DiscountApplyRequest
+from backend.models import (
+    Invoice, InvoiceItem, InvoicePayment, Booking, BookingCharge, InvoiceStatus,
+    ClientCategory, MealAttendance, KitchenOrder, MenuPrice,
+)
+from backend.schemas import InvoiceItemCreate, BookingChargeCreate, PaymentCreate, DiscountApplyRequest
 from backend.auth import get_current_user, check_permission
 from backend.audit import log_audit, serialize_model, AuditAction
 from backend.logging_config import get_logger
-from backend.services.mess_billing_calc import get_setting_float
+from backend.services.mess_billing_calc import get_setting_float, get_setting_str
+from backend.services.room_pricing import reprice_for_departure
 
 logger = get_logger("app")
 router = APIRouter()
@@ -26,7 +34,7 @@ def _meal_multiplier(db: Session, booking: Booking) -> float:
     return 1.0
 
 
-def _build_invoice(db: Session, booking: Booking, items: list, current_user, issue_date: date, due_date: date, tax_amount: float = 0.0, discount: float = 0.0, notes: str = None) -> Invoice:
+def _build_invoice(db: Session, booking: Booking, items: list, current_user, issue_date: date, due_date: date, tax_amount: float = 0.0, discount: float = 0.0, notes: str = None, bill_type: str = "combined") -> Invoice:
     """Shared invoice-assembly logic used by both the manual create_invoice
     endpoint and Instant Checkout: scales meal-charge line items by the
     booking's client-category multiplier, assigns a race-free invoice number,
@@ -41,7 +49,10 @@ def _build_invoice(db: Session, booking: Booking, items: list, current_user, iss
         issue_date=issue_date, due_date=due_date,
         subtotal=total, tax_amount=tax_amount,
         discount=discount, total_amount=total + tax_amount - discount,
-        notes=notes, created_by=current_user.id,
+        notes=notes, created_by=current_user.id, bill_type=bill_type,
+        # A checkout bill handed to the guest is final the moment it exists -
+        # 'issued', not 'draft', so revenue stats and overdue tracking see it.
+        status=InvoiceStatus.ISSUED,
     )
     db.add(invoice)
     db.commit()
@@ -94,50 +105,60 @@ async def list_invoices(
          "subtotal": float(inv.subtotal), "tax_amount": float(inv.tax_amount),
          "discount": float(inv.discount), "total_amount": float(inv.total_amount),
          "amount_paid": float(inv.amount_paid), "status": inv.status.value,
+         "bill_type": inv.bill_type or "combined",
          "notes": inv.notes, "created_at": inv.created_at,
          "items": [{"id": i.id, "description": i.description, "quantity": i.quantity,
                     "unit_price": float(i.unit_price), "total_price": float(i.total_price)} for i in inv.items]} for inv in invoices], "total": total}
 
 
-@router.post("/invoices")
-async def create_invoice(data: InvoiceCreate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    if not check_permission(current_user, "billing", "create"):
-        raise HTTPException(status_code=403, detail="Permission denied")
-
-    booking = db.query(Booking).filter(Booking.id == data.booking_id).first()
-    if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
-
-    if booking.status.value not in ("checked_in", "checked_out"):
-        raise HTTPException(status_code=400, detail=f"Cannot invoice a booking with status '{booking.status.value}' - guest must be checked in")
-
-    # Check for existing invoice
-    existing = db.query(Invoice).filter(Invoice.booking_id == data.booking_id, Invoice.status != InvoiceStatus.VOID).first()
-    if existing:
-        raise HTTPException(status_code=409, detail=f"Invoice already exists: {existing.invoice_number}")
-
-    invoice = _build_invoice(db, booking, data.items, current_user, data.issue_date, data.due_date, data.tax_amount, data.discount, data.notes)
-
-    log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "invoices", invoice.id, after_state=serialize_model(invoice), ip_address=request.client.host)
-    return {"id": invoice.id, "invoice_number": invoice.invoice_number, "total_amount": float(invoice.total_amount)}
-
-
 def _gather_unbilled_items(db: Session, booking_id: int):
-    """Collects everything not yet invoiced for a booking: room amount, priced
-    routine-meal MealAttendance rows, and priced a la carte KitchenOrders.
-    Returns (items: List[InvoiceItemCreate], unpriced: List[str], attendance_rows,
-    ala_carte_orders, amounts: {room, routine_meals, ala_carte}) so both a
-    read-only balance check and the mutating checkout can share it."""
+    """Collects everything not yet invoiced for a booking, split into the two
+    checkout bills: room_items (guest room charges + non-mess ad-hoc charges
+    like Dhobi/Breakage/Allied) and mess_items (routine meals, a la carte,
+    mess ad-hoc charges like Extra Messing / Sui Gas on Messing). Returned as
+    a dict so both the read-only balance check and the mutating checkout can
+    share it."""
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
-    items, unpriced = [], []
-    amounts = {"room": 0.0, "routine_meals": 0.0, "ala_carte": 0.0}
+    room_items, mess_items, unpriced = [], [], []
+    amounts = {"room": 0.0, "routine_meals": 0.0, "ala_carte": 0.0,
+               "room_charges": 0.0, "mess_charges": 0.0}
     # Preview must reflect the same meal scaling the invoice will apply, or the
     # Clerk Desk total shown before checkout won't match the invoice produced.
     meal_multiplier = _meal_multiplier(db, booking)
 
-    if booking.total_amount:
-        amounts["room"] = float(booking.total_amount)
-        items.append(InvoiceItemCreate(description=f"Room {booking.room.room_number if booking.room else ''} stay".strip(), quantity=1, unit_price=amounts["room"], is_meal_charge=False))
+    room_total = float(booking.total_amount) if booking.total_amount else 0.0
+    late_fee = float(booking.late_checkout_fee) if booking.late_checkout_fee else 0.0
+    mattress_total = 0.0
+    try:
+        mattress_total = float((json.loads(booking.rate_breakdown or "{}") or {}).get("mattress_total") or 0)
+    except (ValueError, TypeError):
+        pass
+    check_out_label = booking.check_out
+    # For a guest still in-house, preview the ACTUAL-stay price as of today
+    # (overstayed nights added, unused nights dropped) - the same re-price
+    # perform_check_out will apply, so preview always equals invoice. A
+    # checked-out booking's stored figures already reflect it.
+    if booking.status.value == "checked_in":
+        effective_out, projected = reprice_for_departure(db, booking, date.today())
+        if projected is not None:
+            room_total = projected["total"]
+            mattress_total = float(projected.get("mattress_total") or 0)
+            check_out_label = effective_out
+
+    if room_total:
+        amounts["room"] = room_total
+        # Break the paper bill's separate heads out of the booking total:
+        # Extra Mattress (from the pricing snapshot) and the late checkout fee
+        # each get their own line; the remainder is Guest Room Charges.
+        base_room = max(room_total - late_fee - mattress_total, 0.0)
+        room_no = booking.room.room_number if booking.room else ""
+        label = (f"Guest Room Charges - Room {room_no} "
+                 f"(From {booking.check_in.strftime('%d-%m-%y')} to {check_out_label.strftime('%d-%m-%y')})").strip()
+        room_items.append(InvoiceItemCreate(description=label, quantity=1, unit_price=base_room, is_meal_charge=False))
+        if mattress_total > 0:
+            room_items.append(InvoiceItemCreate(description="Extra Mattress", quantity=1, unit_price=mattress_total, is_meal_charge=False))
+        if late_fee > 0:
+            room_items.append(InvoiceItemCreate(description="Late Checkout Fee", quantity=1, unit_price=late_fee, is_meal_charge=False))
 
     attendance_rows = db.query(MealAttendance).filter(
         MealAttendance.booking_id == booking_id, MealAttendance.invoiced_at.is_(None),
@@ -150,7 +171,7 @@ def _gather_unbilled_items(db: Session, booking_id: int):
             # Line item stays at the raw menu price with is_meal_charge=True;
             # _build_invoice applies the multiplier. The preview amount, however,
             # must bake it in here so running-balance == invoice total.
-            items.append(InvoiceItemCreate(description=label, quantity=1, unit_price=price, is_meal_charge=True))
+            mess_items.append(InvoiceItemCreate(description=label, quantity=1, unit_price=price, is_meal_charge=True))
             amounts["routine_meals"] += price * meal_multiplier
         else:
             unpriced.append(label)
@@ -163,33 +184,245 @@ def _gather_unbilled_items(db: Session, booking_id: int):
         price = _resolve_menu_price(db, o.recipe_id)
         label = f"A la carte - {o.recipe.name if o.recipe else 'item'}"
         if price > 0:
-            items.append(InvoiceItemCreate(description=label, quantity=o.quantity_ordered, unit_price=price, is_meal_charge=False))
+            mess_items.append(InvoiceItemCreate(description=label, quantity=o.quantity_ordered, unit_price=price, is_meal_charge=False))
             amounts["ala_carte"] += price * o.quantity_ordered
         else:
             unpriced.append(label)
 
-    return items, unpriced, attendance_rows, ala_carte_orders, amounts
+    charge_rows = db.query(BookingCharge).filter(
+        BookingCharge.booking_id == booking_id, BookingCharge.invoiced_at.is_(None),
+    ).all()
+    for c in charge_rows:
+        item = InvoiceItemCreate(description=c.head, quantity=1, unit_price=float(c.amount), is_meal_charge=False)
+        if c.is_mess_charge:
+            mess_items.append(item)
+            amounts["mess_charges"] += float(c.amount)
+        else:
+            room_items.append(item)
+            amounts["room_charges"] += float(c.amount)
+
+    return {
+        "room_items": room_items, "mess_items": mess_items, "unpriced": unpriced,
+        "attendance_rows": attendance_rows, "ala_carte_orders": ala_carte_orders,
+        "charge_rows": charge_rows, "amounts": amounts, "booking": booking,
+    }
+
+
+def _guest_display_name(booking: Booking) -> str:
+    """Rank-prefixed guest name, without doubling the rank when the name was
+    entered already carrying it ('Brig Nasir Iqbal' + rank 'Brig')."""
+    name = booking.guest_name or "-"
+    rank = (booking.rank or "").strip()
+    if rank and not name.lower().startswith(rank.lower()):
+        return f"{rank} {name}"
+    return name
+
+
+def _booking_bill_header(booking: Booking) -> dict:
+    """Everything the printable draft-bill header needs, straight from the
+    paper format: Online V/No, PA No, Rank, Name, Room No, Address."""
+    return {
+        "guest_name": booking.guest_name, "rank": booking.rank,
+        "pa_number": booking.pa_number, "unit_address": booking.unit_address,
+        "room_number": booking.room.room_number if booking.room else None,
+        "check_in": booking.check_in, "check_out": booking.check_out,
+        "reference_person": booking.reference_person,
+        "source": booking.source or "walk_in", "online_voucher_no": booking.online_voucher_no,
+        "booking_reference": booking.booking_reference,
+    }
+
+
+def _running_balance_payload(db: Session, booking: Booking) -> dict:
+    """Read-only unbilled balance for one booking - never mutates anything.
+    Shared by the single-booking endpoint and the Clerk Desk worklist."""
+    gathered = _gather_unbilled_items(db, booking.id)
+    amounts = gathered["amounts"]
+    booking_id = booking.id
+    invoices = db.query(Invoice).filter(
+        Invoice.booking_id == booking_id, Invoice.status != InvoiceStatus.VOID,
+    ).all()
+    billed_types = {inv.bill_type for inv in invoices}
+    room_billed, mess_billed = "room" in billed_types, "mess" in billed_types
+    # A billed side's charges are already on an invoice - drop that side from
+    # the unbilled preview instead of re-showing (and re-summing) it.
+    room_items = [] if room_billed else gathered["room_items"]
+    mess_items = [] if mess_billed else gathered["mess_items"]
+    room_bill = 0.0 if room_billed else amounts["room"] + amounts["room_charges"]
+    mess_bill = 0.0 if mess_billed else amounts["routine_meals"] + amounts["ala_carte"] + amounts["mess_charges"]
+    # What the guest still owes on bills that already exist but aren't paid off.
+    outstanding = sum(float(i.total_amount) - float(i.amount_paid) for i in invoices)
+    # Itemized previews for the Clerk Desk's side-by-side Room / Food boxes -
+    # meal lines shown at the effective (multiplied) price the invoice will use.
+    meal_multiplier = _meal_multiplier(db, booking)
+    preview = lambda item: {  # noqa: E731 - tiny local shaping helper
+        "description": item.description,
+        "amount": round((item.unit_price * meal_multiplier if item.is_meal_charge else item.unit_price) * item.quantity, 2),
+    }
+    return {
+        "room_amount": amounts["room"], "routine_meals_amount": amounts["routine_meals"],
+        "ala_carte_amount": amounts["ala_carte"],
+        "room_charges_amount": amounts["room_charges"], "mess_charges_amount": amounts["mess_charges"],
+        "room_bill_total": room_bill, "mess_bill_total": mess_bill,
+        "room_items": [preview(i) for i in room_items],
+        "mess_items": [preview(i) for i in mess_items],
+        # No pre-payment concept, so what's owed = everything not yet billed
+        # plus the unpaid balance of any bill already generated.
+        "total": room_bill + mess_bill,
+        "outstanding_invoices": outstanding,
+        "balance_due": room_bill + mess_bill + outstanding,
+        "unpriced_items": gathered["unpriced"],
+        "room_billed": room_billed, "mess_billed": mess_billed,
+    }
 
 
 @router.get("/bookings/{booking_id}/running-balance")
 async def running_balance(booking_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    """Read-only balance for the Clerk Desk card - never mutates anything."""
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
-    _, unpriced, _, _, amounts = _gather_unbilled_items(db, booking_id)
+    return _running_balance_payload(db, booking)
+
+
+def _bill_exists(bill_type: str):
+    """EXISTS clause: this booking already has a live bill of this type.
+    Legacy 'combined' invoices cover both types."""
+    return exists().where(and_(
+        Invoice.booking_id == Booking.id,
+        Invoice.status != InvoiceStatus.VOID,
+        Invoice.bill_type.in_((bill_type, "combined")),
+    ))
+
+
+@router.get("/desk")
+async def clerk_desk(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """The Clerk Desk worklist in one request: every guest who still needs
+    billing attention, each with their running balance embedded.
+
+    - checked-in guests (HRA residents excluded - they settle via the
+      monthly Mess Bill and must never be checkout-able here),
+    - ALL checked-out bookings still missing a room or mess bill - a real
+      query, not a recent-N heuristic, so a deferred bill can never fall
+      off the list no matter how much time passes, and
+    - every generated-but-unsettled invoice, guests checking out TODAY
+      first - so payment collection lives entirely on this desk instead of
+      requiring a trip to the Billing page when the print dialog was
+      closed without recording payment."""
+    checked_in = db.query(Booking).options(joinedload(Booking.room)).filter(
+        Booking.status == "checked_in",
+        or_(Booking.nature_of_duty.is_(None), Booking.nature_of_duty != "hra"),
+    ).order_by(Booking.created_at.desc()).all()
+
+    pending_checkout = db.query(Booking).options(joinedload(Booking.room)).filter(
+        Booking.status == "checked_out",
+        ~and_(_bill_exists("room"), _bill_exists("mess")),
+    ).order_by(Booking.actual_check_out.desc()).all()
+
+    # Unsettled bills: anything live with money still owing. Legacy invoices
+    # predate the created-as-issued rule, so 'draft' is included too.
+    today = date.today()
+    open_invoices = db.query(Invoice).options(joinedload(Invoice.booking).joinedload(Booking.room)).filter(
+        Invoice.status.in_((InvoiceStatus.DRAFT, InvoiceStatus.ISSUED)),
+    ).order_by(Invoice.created_at.desc()).all()
+    unsettled = []
+    for inv in open_invoices:
+        balance = float(inv.total_amount) - float(inv.amount_paid)
+        if balance <= 0.01:
+            continue
+        b = inv.booking
+        unsettled.append({
+            "id": inv.id, "invoice_number": inv.invoice_number,
+            "bill_type": inv.bill_type or "combined",
+            "total_amount": float(inv.total_amount), "amount_paid": float(inv.amount_paid),
+            "balance_due": balance,
+            "booking_id": inv.booking_id,
+            "guest_name": b.guest_name if b else None, "rank": b.rank if b else None,
+            "room_number": b.room.room_number if b and b.room else None,
+            "issue_date": inv.issue_date,
+            # The guest is standing at the desk right now - settle these first.
+            "checking_out_now": bool(b and b.actual_check_out and b.actual_check_out.date() == today),
+        })
+    unsettled.sort(key=lambda r: not r["checking_out_now"])  # stable: keeps newest-first within each group
+
     return {
-        "room_amount": amounts["room"], "routine_meals_amount": amounts["routine_meals"],
-        "ala_carte_amount": amounts["ala_carte"], "total": sum(amounts.values()),
-        "unpriced_items": unpriced,
+        "items": [{
+            "id": b.id, "booking_reference": b.booking_reference,
+            "guest_name": b.guest_name, "rank": b.rank,
+            "room_number": b.room.room_number if b.room else None,
+            "status": b.status.value,
+            "balance": _running_balance_payload(db, b),
+        } for b in checked_in + pending_checkout],
+        "unsettled_invoices": unsettled,
+    }
+
+
+# --- Ad-hoc booking charges (Dhobi, Breakage, Allied, Extra Messing...) ---
+
+@router.get("/bookings/{booking_id}/charges")
+async def list_booking_charges(booking_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    charges = db.query(BookingCharge).filter(BookingCharge.booking_id == booking_id).order_by(BookingCharge.created_at.desc()).all()
+    return [{"id": c.id, "head": c.head, "amount": float(c.amount), "is_mess_charge": c.is_mess_charge,
+             "invoiced": c.invoiced_at is not None, "created_at": c.created_at} for c in charges]
+
+
+@router.post("/bookings/{booking_id}/charges")
+async def add_booking_charge(booking_id: int, data: BookingChargeCreate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "billing", "create"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.status.value not in ("confirmed", "checked_in"):
+        raise HTTPException(status_code=400, detail=f"Cannot add charges to a booking with status '{booking.status.value}'")
+    charge = BookingCharge(booking_id=booking_id, head=data.head.strip(), amount=data.amount,
+                           is_mess_charge=data.is_mess_charge, created_by=current_user.id)
+    db.add(charge)
+    db.commit()
+    db.refresh(charge)
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "booking_charges", charge.id,
+              after_state=serialize_model(charge), ip_address=request.client.host)
+    return {"id": charge.id, "head": charge.head, "amount": float(charge.amount), "is_mess_charge": charge.is_mess_charge}
+
+
+@router.delete("/charges/{charge_id}")
+async def delete_booking_charge(charge_id: int, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "billing", "edit"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    charge = db.query(BookingCharge).filter(BookingCharge.id == charge_id).first()
+    if not charge:
+        raise HTTPException(status_code=404, detail="Charge not found")
+    if charge.invoiced_at is not None:
+        raise HTTPException(status_code=400, detail="Charge is already on an invoice - void the invoice instead")
+    before = serialize_model(charge)
+    db.delete(charge)
+    db.commit()
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.SOFT_DELETE, "booking_charges", charge_id,
+              before_state=before, reason="Charge removed before invoicing", ip_address=request.client.host)
+    return {"message": "Charge removed"}
+
+
+def _invoice_out(inv: Invoice) -> dict:
+    return {
+        "id": inv.id, "invoice_number": inv.invoice_number, "bill_type": inv.bill_type or "combined",
+        "issue_date": inv.issue_date, "subtotal": float(inv.subtotal),
+        "total_amount": float(inv.total_amount), "amount_paid": float(inv.amount_paid),
+        "balance_due": float(inv.total_amount) - float(inv.amount_paid),
+        "status": inv.status.value,
+        "items": [{"description": i.description, "quantity": float(i.quantity),
+                   "unit_price": float(i.unit_price), "total_price": float(i.total_price)} for i in inv.items],
     }
 
 
 @router.post("/bookings/{booking_id}/instant-checkout")
-async def instant_checkout(booking_id: int, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    """Compiles room + routine-meal + a la carte charges for a checked-in
-    guest into one Invoice in a single click. Guest/booking-only - members
-    settle through the existing monthly Mess Bill cycle instead."""
+async def instant_checkout(booking_id: int, request: Request, bill_types: Optional[List[str]] = Body(default=None, embed=True),
+                            db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Compiles all unbilled charges for a checked-in guest into a room bill
+    (guest room charges + dhobi/breakage/allied...) and/or a mess bill
+    (routine meals, a la carte, extra messing...). bill_types selects which
+    to generate now - defaults to both, but either can be generated alone and
+    the other finalized later (e.g. a la carte still pending). No advance is
+    applied - payment is settled here at checkout, via the Pay Together /
+    per-bill payment actions the print dialog offers. Guest/booking-only -
+    members settle through the monthly Mess Bill cycle instead."""
     if not check_permission(current_user, "billing", "create"):
         raise HTTPException(status_code=403, detail="Permission denied")
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
@@ -197,28 +430,123 @@ async def instant_checkout(booking_id: int, request: Request, db: Session = Depe
         raise HTTPException(status_code=404, detail="Booking not found")
     if booking.status.value not in ("checked_in", "checked_out"):
         raise HTTPException(status_code=400, detail=f"Cannot check out a booking with status '{booking.status.value}' - guest must be checked in")
-    existing = db.query(Invoice).filter(Invoice.booking_id == booking_id, Invoice.status != InvoiceStatus.VOID).first()
-    if existing:
-        raise HTTPException(status_code=409, detail=f"Invoice already exists: {existing.invoice_number}")
+    if booking.nature_of_duty == "hra":
+        raise HTTPException(status_code=400, detail="HRA residents settle via the monthly Mess Bill - this residency cannot be checked out here")
 
-    items, unpriced, attendance_rows, ala_carte_orders, _ = _gather_unbilled_items(db, booking_id)
-    if not items:
+    requested = set(bill_types) if bill_types else {"room", "mess"}
+    if requested - {"room", "mess"}:
+        raise HTTPException(status_code=400, detail="bill_types must be 'room' and/or 'mess'")
+    already_billed = {inv.bill_type for inv in db.query(Invoice).filter(
+        Invoice.booking_id == booking_id, Invoice.status != InvoiceStatus.VOID, Invoice.bill_type.in_(requested),
+    ).all()}
+    if already_billed:
+        raise HTTPException(status_code=409, detail=f"Already billed: {', '.join(sorted(already_billed))}")
+
+    # Actually check the guest out FIRST (status, room freed to housekeeping,
+    # late fee assessed) so the fee lands on the room bill and the Clerk Desk
+    # card disappears. Previously this endpoint only invoiced, leaving the
+    # booking checked_in - the card stayed put and a second click 409'd.
+    late_fee = 0.0
+    if booking.status.value == "checked_in":
+        from backend.routers.bookings import perform_check_out
+        late_fee = perform_check_out(db, booking, current_user)
+
+    gathered = _gather_unbilled_items(db, booking_id)
+    room_items = gathered["room_items"] if "room" in requested else []
+    mess_items = gathered["mess_items"] if "mess" in requested else []
+    if not room_items and not mess_items:
         raise HTTPException(status_code=400, detail="Nothing to invoice for this booking")
 
     today = date.today()
-    invoice = _build_invoice(db, booking, items, current_user, today, today)
-
-    for a in attendance_rows:
-        a.invoiced_at = datetime.utcnow()
-    for o in ala_carte_orders:
-        o.invoiced_at = datetime.utcnow()
+    invoices = []
+    now = datetime.utcnow()
+    if room_items:
+        invoices.append(_build_invoice(db, booking, room_items, current_user, today, today, bill_type="room"))
+        for c in gathered["charge_rows"]:
+            if not c.is_mess_charge:
+                c.invoiced_at = now
+    if mess_items:
+        invoices.append(_build_invoice(db, booking, mess_items, current_user, today, today, bill_type="mess"))
+        for a in gathered["attendance_rows"]:
+            a.invoiced_at = now
+        for o in gathered["ala_carte_orders"]:
+            o.invoiced_at = now
+        for c in gathered["charge_rows"]:
+            if c.is_mess_charge:
+                c.invoiced_at = now
     db.commit()
 
-    log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "invoices", invoice.id, after_state=serialize_model(invoice), ip_address=request.client.host)
+    for inv in invoices:
+        log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "invoices", inv.id,
+                  after_state=serialize_model(inv), ip_address=request.client.host)
+
+    grand_total = sum(float(i.total_amount) for i in invoices)
     return {
-        "id": invoice.id, "invoice_number": invoice.invoice_number, "total_amount": float(invoice.total_amount),
-        "items": [{"description": i.description, "quantity": float(i.quantity), "unit_price": float(i.unit_price), "total_price": float(i.total_price)} for i in invoice.items],
-        "unpriced_items": unpriced,
+        "invoices": [_invoice_out(inv) for inv in invoices],
+        "booking": _booking_bill_header(booking),
+        "unpriced_items": gathered["unpriced"],
+        "late_checkout_fee": late_fee,
+        "grand_total": grand_total,
+        "balance_due": grand_total,
+    }
+
+
+def _invoice_qr_svg(payload: str) -> str:
+    """Locally generated QR (reportlab - no internet, nothing leaves the
+    LAN), returned as an inline-able SVG string."""
+    from reportlab.graphics.barcode.qr import QrCodeWidget
+    from reportlab.graphics.shapes import Drawing
+    from reportlab.graphics import renderSVG
+    qr = QrCodeWidget(payload)
+    x0, y0, x1, y1 = qr.getBounds()
+    size = 200.0
+    drawing = Drawing(size, size, transform=[size / (x1 - x0), 0, 0, size / (y1 - y0), 0, 0])
+    drawing.add(qr)
+    svg = renderSVG.drawToString(drawing)
+    return svg[svg.find("<svg"):]  # strip the XML declaration so it can be inlined in HTML
+
+
+@router.get("/invoices/{invoice_id}/print-data")
+async def invoice_print_data(invoice_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Everything needed to print one bill in the mess's paper format:
+    invoice lines, booking-register header fields, mess identity, and a QR
+    code carrying the bill summary."""
+    inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    booking = inv.booking
+
+    mess_name = get_setting_str(db, "mess_name", "EME Officers Mess")
+    mess_address = get_setting_str(db, "mess_address", "204 Firdousi Road, Rawalpindi")
+    mess_phone = get_setting_str(db, "mess_phone", "Tele No. G.H.Q 31725")
+
+    balance = float(inv.total_amount) - float(inv.amount_paid)
+    bill_label = {"room": "Room Bill", "mess": "Mess Bill"}.get(inv.bill_type or "combined", "Bill")
+    # Tamper-evident summary hash for audit: recomputable from the stored
+    # invoice, so a printed bill can be verified against the system later.
+    verify_hash = hashlib.sha256(
+        f"{inv.id}|{inv.invoice_number}|{float(inv.total_amount):.2f}|{inv.issue_date.isoformat()}".encode()
+    ).hexdigest()[:12].upper()
+    payload = "\n".join(filter(None, [
+        mess_name,
+        f"{bill_label}: {inv.invoice_number}",
+        f"Guest: {_guest_display_name(booking)}" if booking else None,
+        f"Room: {booking.room.room_number}" if booking and booking.room else None,
+        f"Stay: {booking.check_in.strftime('%d-%m-%y')} to {booking.check_out.strftime('%d-%m-%y')}" if booking else None,
+        f"Online V/No: {booking.online_voucher_no}" if booking and booking.online_voucher_no else None,
+        f"Total: Rs {float(inv.total_amount):,.0f}",
+        f"Paid: Rs {float(inv.amount_paid):,.0f}",
+        f"Balance: Rs {balance:,.0f}",
+        f"Date: {inv.issue_date.strftime('%d-%m-%Y')}",
+        f"Verify: {verify_hash}",
+    ]))
+
+    return {
+        "invoice": _invoice_out(inv),
+        "booking": _booking_bill_header(booking) if booking else None,
+        "mess": {"name": mess_name, "address": mess_address, "phone": mess_phone},
+        "verify_hash": verify_hash,
+        "qr_svg": _invoice_qr_svg(payload),
     }
 
 
@@ -234,6 +562,28 @@ async def void_invoice(invoice_id: int, reason: str, request: Request, db: Sessi
 
     before = serialize_model(inv)
     inv.status = InvoiceStatus.VOID
+
+    # Release the source rows this bill had claimed, so a corrected bill can
+    # be generated afterwards - otherwise the meals/charges stay stamped
+    # invoiced_at forever and silently vanish from any future bill.
+    if inv.booking_id:
+        bill_type = inv.bill_type or "combined"
+        if bill_type in ("mess", "combined"):
+            for a in db.query(MealAttendance).filter(
+                    MealAttendance.booking_id == inv.booking_id, MealAttendance.invoiced_at.isnot(None)).all():
+                a.invoiced_at = None
+            for o in db.query(KitchenOrder).filter(
+                    KitchenOrder.booking_id == inv.booking_id, KitchenOrder.is_ala_carte == True,
+                    KitchenOrder.invoiced_at.isnot(None)).all():
+                o.invoiced_at = None
+        charge_query = db.query(BookingCharge).filter(
+            BookingCharge.booking_id == inv.booking_id, BookingCharge.invoiced_at.isnot(None))
+        if bill_type == "mess":
+            charge_query = charge_query.filter(BookingCharge.is_mess_charge == True)
+        elif bill_type == "room":
+            charge_query = charge_query.filter(BookingCharge.is_mess_charge == False)
+        for c in charge_query.all():
+            c.invoiced_at = None
     db.commit()
 
     log_audit(db, current_user.id, current_user.full_name, AuditAction.OVERRIDE, "invoices", inv.id, before_state=before, after_state=serialize_model(inv), reason=f"Voided: {reason}", ip_address=request.client.host)
@@ -287,6 +637,46 @@ async def record_payment(invoice_id: int, data: PaymentCreate, request: Request,
     return {"id": payment.id, "amount_paid": float(inv.amount_paid), "balance_due": float(inv.total_amount) - float(inv.amount_paid), "status": inv.status.value}
 
 
+@router.get("/payments/{payment_id}/receipt-data")
+async def payment_receipt_data(payment_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Print data for the mess's cash-receipt format ('Received from ... the
+    sum of Rupees ... on account of Mess Bill ... by Cash/Cheque')."""
+    payment = db.query(InvoicePayment).filter(InvoicePayment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    inv = payment.invoice
+    booking = inv.booking if inv else None
+
+    mess_name = get_setting_str(db, "mess_name", "EME Officers Mess")
+    mess_address = get_setting_str(db, "mess_address", "204 Firdousi Road, Rawalpindi")
+    mess_phone = get_setting_str(db, "mess_phone", "Tele No. G.H.Q 31725")
+
+    guest = _guest_display_name(booking) if booking else "-"
+    payload = "\n".join([
+        mess_name,
+        f"Receipt No: {payment.id}",
+        f"Received from: {guest}",
+        f"Amount: Rs {float(payment.amount):,.0f}",
+        f"On account of: {inv.bill_type or 'mess'} bill {inv.invoice_number}" if inv else "",
+        f"By: {payment.method or 'Cash'}",
+        f"Date: {payment.created_at.strftime('%d-%m-%Y')}",
+    ])
+
+    return {
+        "receipt_no": payment.id,
+        "date": payment.created_at,
+        "received_from": guest,
+        "amount": float(payment.amount),
+        "method": payment.method or "Cash",
+        "notes": payment.notes,
+        "on_account_of": f"{({'room': 'Room Bill', 'mess': 'Mess Bill'}.get(inv.bill_type or 'combined', 'Bill'))} {inv.invoice_number}" if inv else None,
+        "invoice_number": inv.invoice_number if inv else None,
+        "room_number": booking.room.room_number if booking and booking.room else None,
+        "mess": {"name": mess_name, "address": mess_address, "phone": mess_phone},
+        "qr_svg": _invoice_qr_svg(payload),
+    }
+
+
 @router.post("/invoices/{invoice_id}/apply-discount")
 async def apply_invoice_discount(invoice_id: int, data: DiscountApplyRequest, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     # Authorization is derived entirely from the authenticated session, mirroring
@@ -318,26 +708,26 @@ async def billing_stats(db: Session = Depends(get_db), current_user=Depends(get_
     today = date.today()
     month_start = today.replace(day=1)
 
-    today_revenue = db.query(Invoice).filter(
-        Invoice.created_at >= datetime.combine(today, datetime.min.time()),
+    today_invoices = db.query(Invoice).filter(
+        Invoice.issue_date == today,
         Invoice.status.in_(["issued", "paid"]),
-    ).count()
-
-    today_total = sum(float(inv.total_amount) for inv in db.query(Invoice).filter(
-        Invoice.created_at >= datetime.combine(today, datetime.min.time()),
-        Invoice.status.in_(["issued", "paid"]),
-    ).all())
+    ).all()
 
     month_total = sum(float(inv.total_amount) for inv in db.query(Invoice).filter(
         Invoice.issue_date >= month_start,
         Invoice.status.in_(["issued", "paid"]),
     ).all())
 
-    overdue = db.query(Invoice).filter(Invoice.status == InvoiceStatus.OVERDUE).count()
+    # Overdue is derived, not a stored status: an issued bill past its due
+    # date with money still owing. (Nothing in the system ever transitions an
+    # invoice to the stored OVERDUE status.)
+    overdue = db.query(Invoice).filter(
+        Invoice.status == InvoiceStatus.ISSUED, Invoice.due_date < today,
+    ).count()
 
     return {
-        "today_revenue": today_total,
-        "today_invoice_count": today_revenue,
+        "today_revenue": sum(float(inv.total_amount) for inv in today_invoices),
+        "today_invoice_count": len(today_invoices),
         "month_revenue": month_total,
         "overdue_invoices": overdue,
     }

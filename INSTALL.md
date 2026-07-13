@@ -56,10 +56,10 @@ Open a terminal/command prompt in the application folder:
 
 ```bash
 # Windows
-pip install fastapi uvicorn sqlalchemy alembic pydantic pydantic-settings bcrypt python-jose python-multipart aiofiles openpyxl reportlab cryptography
+pip install fastapi uvicorn sqlalchemy alembic pydantic pydantic-settings passlib bcrypt python-jose python-multipart aiofiles openpyxl reportlab cryptography
 
 # Linux
-pip3 install fastapi uvicorn sqlalchemy alembic pydantic pydantic-settings bcrypt python-jose python-multipart aiofiles openpyxl reportlab cryptography
+pip3 install fastapi uvicorn sqlalchemy alembic pydantic pydantic-settings passlib bcrypt python-jose python-multipart aiofiles openpyxl reportlab cryptography
 ```
 
 ### Step 3: Seed Demo Data (Optional)

@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from backend.database import get_db
-from backend.models import Member, MemberStatus
+from backend.models import Member, MemberStatus, Booking
 from backend.schemas import MemberCreate, MemberUpdate, MemberStatusChange
 from backend.auth import get_current_user, check_permission
 from backend.audit import log_audit, serialize_model, AuditAction
@@ -29,11 +29,25 @@ async def list_members(
     total = query.count()
     members = query.order_by(Member.full_name).offset((page - 1) * page_size).limit(page_size).all()
 
+    # Current room is derived from each member's active HRA booking, not
+    # stored on Member - same "derive occupancy, don't cache it" rule the
+    # bookings module follows everywhere else, so it can never go stale.
+    member_ids = [m.id for m in members]
+    current_rooms = {}
+    if member_ids:
+        hra_bookings = db.query(Booking).filter(
+            Booking.member_id.in_(member_ids), Booking.nature_of_duty == "hra", Booking.status == "checked_in",
+        ).order_by(Booking.check_in.desc()).all()
+        for b in hra_bookings:
+            current_rooms.setdefault(b.member_id, b)
+
     return {"items": [
         {"id": m.id, "service_number": m.service_number, "full_name": m.full_name,
          "rank": m.rank, "unit": m.unit, "mess_category": m.mess_category.value,
          "client_category": m.client_category.value, "custom_discount_rate": float(m.custom_discount_rate or 0),
          "phone": m.phone, "email": m.email, "status": m.status.value,
+         "current_room_id": current_rooms[m.id].room_id if m.id in current_rooms else None,
+         "current_room_number": current_rooms[m.id].room.room_number if m.id in current_rooms else None,
          "created_at": m.created_at, "updated_at": m.updated_at} for m in members], "total": total, "page": page, "page_size": page_size}
 
 

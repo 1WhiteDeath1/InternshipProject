@@ -5,10 +5,12 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { Search, Plus, FileText, Ban, DollarSign, Receipt, Calendar, Trash2, Wallet, UtensilsCrossed } from 'lucide-react';
+import { Search, FileText, Ban, DollarSign, Receipt, Calendar, Wallet, Printer } from 'lucide-react';
+import { formatCurrency } from '@/lib/currency';
+import { BillPrintView, PaymentReceiptView } from '@/components/BillPrint';
 
 interface Invoice {
   id: number;
@@ -18,6 +20,7 @@ interface Invoice {
   total_amount: number;
   amount_paid: number;
   status: string;
+  bill_type: string;
   issue_date: string;
   items: { description: string; quantity: number; unit_price: number }[];
 }
@@ -29,36 +32,20 @@ interface BillingStats {
   overdue_invoices: number;
 }
 
-interface InvoiceLineItem {
-  description: string;
-  quantity: number;
-  unit_price: number;
-  is_meal_charge: boolean;
-}
-
-interface BookingOption {
-  id: number;
-  guest_name: string;
-  room_number: string;
-  status: string;
-}
-
-const emptyItem: InvoiceLineItem = { description: '', quantity: 1, unit_price: 0, is_meal_charge: false };
-const INVOICE_DUE_DAYS = 7;
-
-const isoDate = (d: Date) => d.toISOString().slice(0, 10);
-const addDays = (d: Date, days: number) => new Date(d.getTime() + days * 86400000);
-
+// Invoices are only created by the two flows that track what's been billed:
+// guest checkout (room/mess bills) and the monthly member Mess Bill run.
+// This page reviews, prints, settles, and voids them.
 export default function Billing() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<BillingStats | null>(null);
-  const [bookings, setBookings] = useState<BookingOption[]>([]);
-  const [dialogOpen, setDialogOpen] = useState(false);
   const [paymentDialogInvoice, setPaymentDialogInvoice] = useState<Invoice | null>(null);
   const [paymentAmount, setPaymentAmount] = useState(0);
-  const [form, setForm] = useState({ booking_id: 0, issue_date: '', due_date: '', tax_amount: 0, discount: 0, notes: '', items: [{ ...emptyItem }] as InvoiceLineItem[] });
+  const [voidDialogInvoice, setVoidDialogInvoice] = useState<Invoice | null>(null);
+  const [voidReason, setVoidReason] = useState('');
+  const [printInvoiceIds, setPrintInvoiceIds] = useState<number[] | null>(null);
+  const [receiptPaymentId, setReceiptPaymentId] = useState<number | null>(null);
 
   const fetchInvoices = async () => {
     try {
@@ -72,90 +59,22 @@ export default function Billing() {
     catch { toast.error('Failed to load billing stats'); }
   };
 
-  const fetchBookings = async () => {
-    try {
-      const [ci, co] = await Promise.all([
-        api.get('/bookings?status=checked_in&page_size=100'),
-        api.get('/bookings?status=checked_out&page_size=100'),
-      ]);
-      setBookings([...ci.data.items, ...co.data.items]);
-    } catch { toast.error('Failed to load bookings'); }
-  };
-
   useEffect(() => {
     queueMicrotask(() => {
       setLoading(true);
-      Promise.all([fetchInvoices(), fetchStats(), fetchBookings()]).finally(() => setLoading(false));
+      Promise.all([fetchInvoices(), fetchStats()]).finally(() => setLoading(false));
     });
   }, [search]);
 
-  const openCreateDialog = (open: boolean) => {
-    // Pre-fill the dates the clerk would otherwise type by hand: today and today + terms.
-    if (open) {
-      const today = new Date();
-      setForm(f => ({ ...f, issue_date: f.issue_date || isoDate(today), due_date: f.due_date || isoDate(addDays(today, INVOICE_DUE_DAYS)) }));
-    }
-    setDialogOpen(open);
-  };
-
-  const handlePullRecordedMeals = async () => {
-    if (!form.booking_id) {
-      toast.error('Enter a Booking ID first');
-      return;
-    }
+  const handleVoid = async () => {
+    if (!voidDialogInvoice) return;
+    const reason = voidReason.trim();
+    if (!reason) { toast.error('A void reason is required'); return; }
     try {
-      const res = await api.get(`/attendance?booking_id=${form.booking_id}&status=attended`);
-      const meals = res.data.items as { recipe_name: string | null; meal_type: string; date: string }[];
-      if (meals.length === 0) {
-        toast.info('No recorded meals found for this booking');
-        return;
-      }
-      const mealItems: InvoiceLineItem[] = meals.map(m => ({
-        description: `Meal: ${m.recipe_name || m.meal_type} (${m.meal_type}, ${m.date})`,
-        quantity: 1, unit_price: 0, is_meal_charge: true,
-      }));
-      const existing = form.items.filter(i => i.description.trim() || i.quantity !== 1 || i.unit_price !== 0);
-      setForm({ ...form, items: [...existing, ...mealItems] });
-      toast.success(`Pulled ${meals.length} recorded meal(s) - fill in unit prices`);
-    } catch (err) { toast.error(getErrorMessage(err, 'Failed to pull recorded meals')); }
-  };
-
-  const addLineItem = () => setForm({ ...form, items: [...form.items, { ...emptyItem }] });
-  const removeLineItem = (index: number) => setForm({ ...form, items: form.items.filter((_, i) => i !== index) });
-  const updateLineItem = (index: number, field: keyof InvoiceLineItem, value: string | number | boolean) => {
-    const items = [...form.items];
-    items[index] = { ...items[index], [field]: value };
-    setForm({ ...form, items });
-  };
-  const invoiceSubtotal = form.items.reduce((sum, i) => sum + i.quantity * i.unit_price, 0);
-  const invoiceTotal = invoiceSubtotal + form.tax_amount - form.discount;
-
-  const handleCreate = async () => {
-    if (!form.booking_id) {
-      toast.error('Booking ID is required');
-      return;
-    }
-    const validItems = form.items.filter(i => i.description.trim() && i.quantity > 0 && i.unit_price >= 0);
-    if (validItems.length === 0) {
-      toast.error('Add at least one line item with a description, quantity, and unit price');
-      return;
-    }
-    try {
-      await api.post('/billing/invoices', { ...form, subtotal: invoiceSubtotal, total_amount: invoiceTotal, items: validItems });
-      toast.success('Invoice created');
-      setDialogOpen(false);
-      setForm({ booking_id: 0, issue_date: '', due_date: '', tax_amount: 0, discount: 0, notes: '', items: [{ ...emptyItem }] });
-      fetchInvoices();
-      fetchStats();
-    } catch (err) { toast.error(getErrorMessage(err, 'Failed')); }
-  };
-
-  const handleVoid = async (id: number) => {
-    const reason = prompt('Enter void reason:');
-    if (!reason) return;
-    try {
-      await api.post(`/billing/invoices/${id}/void?reason=${encodeURIComponent(reason)}`);
-      toast.success('Invoice voided');
+      await api.post(`/billing/invoices/${voidDialogInvoice.id}/void?reason=${encodeURIComponent(reason)}`);
+      toast.success(`Invoice ${voidDialogInvoice.invoice_number} voided`);
+      setVoidDialogInvoice(null);
+      setVoidReason('');
       fetchInvoices();
       fetchStats();
     } catch (err) { toast.error(getErrorMessage(err, 'Failed')); }
@@ -167,10 +86,11 @@ export default function Billing() {
       return;
     }
     try {
-      await api.post(`/billing/invoices/${paymentDialogInvoice.id}/payments`, { amount: paymentAmount });
+      const res = await api.post(`/billing/invoices/${paymentDialogInvoice.id}/payments`, { amount: paymentAmount });
       toast.success('Payment recorded');
       setPaymentDialogInvoice(null);
       setPaymentAmount(0);
+      setReceiptPaymentId(res.data.id); // offer the printable cash receipt right away
       fetchInvoices();
       fetchStats();
     } catch (err) { toast.error(getErrorMessage(err, 'Failed to record payment')); }
@@ -185,70 +105,7 @@ export default function Billing() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Billing & Invoicing</h1>
-        <Dialog open={dialogOpen} onOpenChange={openCreateDialog}>
-          <DialogTrigger asChild><Button><Plus size={16} className="mr-1" /> Create Invoice</Button></DialogTrigger>
-          <DialogContent className="max-w-xl">
-            <DialogHeader><DialogTitle>Create Invoice</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <select className="h-10 rounded-md border border-input bg-background px-3 text-sm flex-1" value={form.booking_id} onChange={e => setForm({...form, booking_id: Number(e.target.value)})}>
-                  <option value="0">Select booking…</option>
-                  {bookings.map(b => <option key={b.id} value={b.id}>{b.guest_name} — Room {b.room_number} (#{b.id}{b.status === 'checked_out' ? ', out' : ''})</option>)}
-                </select>
-                <Button type="button" variant="outline" size="sm" onClick={handlePullRecordedMeals} title="Pull this guest's recorded meals from the Kitchen module">
-                  <UtensilsCrossed size={14} className="mr-1" /> Pull Recorded Meals
-                </Button>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><Label>Issue Date</Label><Input type="date" value={form.issue_date} onChange={e => setForm({...form, issue_date: e.target.value})} /></div>
-                <div><Label>Due Date</Label><Input type="date" value={form.due_date} onChange={e => setForm({...form, due_date: e.target.value})} /></div>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <Label>Line Items</Label>
-                  <Button size="sm" variant="outline" onClick={addLineItem}><Plus size={14} className="mr-1" /> Add Item</Button>
-                </div>
-                <div className="space-y-2">
-                  {form.items.map((line, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <Input
-                        placeholder="Description" className="flex-1"
-                        value={line.description}
-                        onChange={e => updateLineItem(i, 'description', e.target.value)}
-                      />
-                      <Input
-                        type="number" placeholder="Qty" className="w-20" min={0}
-                        value={line.quantity}
-                        onChange={e => updateLineItem(i, 'quantity', Number(e.target.value))}
-                      />
-                      <Input
-                        type="number" placeholder="Unit Price" className="w-28" min={0}
-                        value={line.unit_price}
-                        onChange={e => updateLineItem(i, 'unit_price', Number(e.target.value))}
-                      />
-                      <label className="flex items-center gap-1 text-xs text-gray-500 whitespace-nowrap cursor-pointer" title="Scales this item's price by the guest's civilian/non-civilian meal multiplier">
-                        <input type="checkbox" checked={line.is_meal_charge} onChange={e => updateLineItem(i, 'is_meal_charge', e.target.checked)} className="h-4 w-4 rounded border-gray-300" />
-                        Meal
-                      </label>
-                      <Button size="sm" variant="ghost" onClick={() => removeLineItem(i)} disabled={form.items.length === 1}>
-                        <Trash2 size={16} className="text-red-500" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div><Label>Tax</Label><Input type="number" min={0} value={form.tax_amount} onChange={e => setForm({...form, tax_amount: Number(e.target.value)})} /></div>
-                <div><Label>Discount</Label><Input type="number" min={0} value={form.discount} onChange={e => setForm({...form, discount: Number(e.target.value)})} /></div>
-              </div>
-              <p className="text-right text-sm font-semibold">Total: ${invoiceTotal.toFixed(2)}</p>
-
-              <Button onClick={handleCreate} className="w-full">Create Invoice</Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <p className="text-xs text-gray-500">Bills are generated at guest checkout (Clerk Desk / Bookings) and by the monthly Mess Bill run.</p>
       </div>
 
       {/* Record payment dialog */}
@@ -258,7 +115,7 @@ export default function Billing() {
           {paymentDialogInvoice && (
             <div className="space-y-3">
               <p className="text-sm text-gray-500">
-                Total: ${paymentDialogInvoice.total_amount.toFixed(2)} &middot; Paid: ${paymentDialogInvoice.amount_paid.toFixed(2)} &middot; Balance due: ${(paymentDialogInvoice.total_amount - paymentDialogInvoice.amount_paid).toFixed(2)}
+                Total: {formatCurrency(paymentDialogInvoice.total_amount)} &middot; Paid: {formatCurrency(paymentDialogInvoice.amount_paid)} &middot; Balance due: {formatCurrency(paymentDialogInvoice.total_amount - paymentDialogInvoice.amount_paid)}
               </p>
               <div><Label>Payment Amount</Label><Input type="number" min={0} value={paymentAmount || ''} onChange={e => setPaymentAmount(Number(e.target.value))} /></div>
               <Button onClick={handleRecordPayment} className="w-full">Record Payment</Button>
@@ -267,10 +124,29 @@ export default function Billing() {
         </DialogContent>
       </Dialog>
 
+      {/* Void invoice dialog */}
+      <Dialog open={!!voidDialogInvoice} onOpenChange={(open) => { if (!open) { setVoidDialogInvoice(null); setVoidReason(''); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Void Invoice - {voidDialogInvoice?.invoice_number}</DialogTitle></DialogHeader>
+          {voidDialogInvoice && (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-500">
+                Voiding cancels this bill permanently ({formatCurrency(voidDialogInvoice.total_amount)} for {voidDialogInvoice.guest_name}).
+                Its charges become billable again at checkout.
+              </p>
+              <div><Label>Reason</Label><Input placeholder="e.g. wrong charges, duplicate bill" value={voidReason} onChange={e => setVoidReason(e.target.value)} /></div>
+              <Button variant="destructive" onClick={handleVoid} disabled={!voidReason.trim()} className="w-full">
+                <Ban size={15} className="mr-1.5" /> Void Invoice
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Stats */}
       {stats && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[{ label: 'Today\'s Revenue', value: `$${stats.today_revenue?.toFixed(2)}`, icon: DollarSign, color: 'text-emerald-600' }, { label: 'Invoices Today', value: stats.today_invoice_count, icon: Receipt, color: 'text-blue-600' }, { label: 'Monthly Revenue', value: `$${stats.month_revenue?.toFixed(2)}`, icon: Calendar, color: 'text-purple-600' }, { label: 'Overdue', value: stats.overdue_invoices, icon: FileText, color: 'text-red-600' }].map((s, i) => (
+          {[{ label: 'Today\'s Revenue', value: formatCurrency(stats.today_revenue), icon: DollarSign, color: 'text-emerald-600' }, { label: 'Invoices Today', value: stats.today_invoice_count, icon: Receipt, color: 'text-blue-600' }, { label: 'Monthly Revenue', value: formatCurrency(stats.month_revenue), icon: Calendar, color: 'text-purple-600' }, { label: 'Overdue', value: stats.overdue_invoices, icon: FileText, color: 'text-red-600' }].map((s, i) => (
             <Card key={i}><CardContent className="p-5 flex items-center gap-4">
               <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><s.icon size={20} className={s.color} /></div>
               <div><p className="text-xs text-gray-500">{s.label}</p><p className="text-lg font-bold">{s.value}</p></div>
@@ -289,18 +165,26 @@ export default function Billing() {
               {loading && <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">Loading invoices...</TableCell></TableRow>}
               {!loading && invoices.map(inv => (
                 <TableRow key={inv.id}>
-                  <TableCell className="font-medium">{inv.invoice_number}</TableCell>
+                  <TableCell className="font-medium">
+                    {inv.invoice_number}
+                    {inv.bill_type !== 'combined' && (
+                      <Badge className={`ml-1.5 ${inv.bill_type === 'room' ? 'bg-purple-100 text-purple-800' : 'bg-orange-100 text-orange-800'}`}>
+                        {inv.bill_type === 'room' ? 'Room' : 'Mess'}
+                      </Badge>
+                    )}
+                  </TableCell>
                   <TableCell>{inv.guest_name}</TableCell>
                   <TableCell>{inv.room_number}</TableCell>
-                  <TableCell className="font-semibold">${inv.total_amount?.toFixed(2)}</TableCell>
-                  <TableCell className="text-sm text-gray-500">${inv.amount_paid?.toFixed(2) || '0.00'} / ${(inv.total_amount - (inv.amount_paid || 0)).toFixed(2)}</TableCell>
+                  <TableCell className="font-semibold">{formatCurrency(inv.total_amount)}</TableCell>
+                  <TableCell className="text-sm text-gray-500">{formatCurrency(inv.amount_paid)} / {formatCurrency(inv.total_amount - (inv.amount_paid || 0))}</TableCell>
                   <TableCell>{statusBadge(inv.status)}</TableCell>
                   <TableCell>{inv.issue_date}</TableCell>
                   <TableCell className="flex gap-1">
+                    <Button size="sm" variant="ghost" title="Print bill" onClick={() => setPrintInvoiceIds([inv.id])}><Printer size={16} className="text-gray-600" /></Button>
                     {inv.status !== 'void' && inv.status !== 'paid' && (
-                      <Button size="sm" variant="ghost" onClick={() => { setPaymentDialogInvoice(inv); setPaymentAmount(0); }}><Wallet size={16} className="text-emerald-600" /></Button>
+                      <Button size="sm" variant="ghost" title="Record payment" onClick={() => { setPaymentDialogInvoice(inv); setPaymentAmount(0); }}><Wallet size={16} className="text-emerald-600" /></Button>
                     )}
-                    {inv.status !== 'void' && <Button size="sm" variant="ghost" onClick={() => handleVoid(inv.id)}><Ban size={16} className="text-red-500" /></Button>}
+                    {inv.status !== 'void' && <Button size="sm" variant="ghost" title="Void invoice" onClick={() => { setVoidDialogInvoice(inv); setVoidReason(''); }}><Ban size={16} className="text-red-500" /></Button>}
                   </TableCell>
                 </TableRow>
               ))}
@@ -309,6 +193,9 @@ export default function Billing() {
           </Table>
         </CardContent>
       </Card>
+
+      <BillPrintView invoiceIds={printInvoiceIds} onClose={() => setPrintInvoiceIds(null)} />
+      <PaymentReceiptView paymentId={receiptPaymentId} onClose={() => setReceiptPaymentId(null)} />
     </div>
   );
 }

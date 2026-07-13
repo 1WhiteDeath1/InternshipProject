@@ -18,6 +18,147 @@ def run_startup_migrations(engine):
     _migrate_kitchen_orders_ala_carte(engine)
     _migrate_meal_attendance_invoiced(engine)
     _migrate_mess_bills_ala_carte(engine)
+    _migrate_rooms_housekeeping(engine)
+    _migrate_bookings_register_fields(engine)
+    _migrate_bookings_source_fields(engine)
+    _migrate_invoices_bill_type(engine)
+    _migrate_bookings_guest_id(engine)
+    _migrate_room_types_three_classes(engine)
+
+
+def _migrate_room_types_three_classes(engine):
+    # 2026-07 rate-card simplification: guests see three room classes
+    # (standard / suite / dg_suite). Old classes are remapped; suites keep
+    # an ac_count (1 or 2) so HRA utilities still bill 1xAC vs 29,500 2xAC
+    # per the card. Enum values are stored as NAMES (uppercase) in rooms,
+    # but as lowercase values in the rate tables' plain-string columns.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(rooms)")).fetchall()
+        if not cols:
+            return
+        if "ac_count" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE rooms ADD COLUMN ac_count INTEGER DEFAULT 1"))
+            logger.info("migration: added rooms.ac_count")
+        # Capture AC counts BEFORE the rename collapses 1xAC/2xAC into 'suite'
+        conn.execute(text("UPDATE rooms SET ac_count = 2 WHERE UPPER(room_type) IN ('SUITE_2AC', 'DG_SUITE')"))
+        remapped = 0
+        remapped += conn.execute(text(
+            "UPDATE rooms SET room_type = 'STANDARD' WHERE UPPER(room_type) IN ('SINGLE','DOUBLE','DELUXE','DORMITORY','VIP')")).rowcount
+        remapped += conn.execute(text(
+            "UPDATE rooms SET room_type = 'SUITE' WHERE UPPER(room_type) IN ('SUITE','SUITE_1AC','SUITE_2AC') AND room_type != 'SUITE'")).rowcount
+        remapped += conn.execute(text(
+            "UPDATE rooms SET room_type = 'DG_SUITE' WHERE UPPER(room_type) = 'DG_SUITE' AND room_type != 'DG_SUITE'")).rowcount
+        # Legacy demo prices (Rs 30-200) predate the rate card; lift the
+        # displayed nightly to the card's serving-officer total.
+        conn.execute(text("UPDATE rooms SET base_price = 3500 WHERE room_type = 'STANDARD' AND base_price < 3500"))
+        conn.execute(text("UPDATE rooms SET base_price = 4500 WHERE room_type IN ('SUITE','DG_SUITE') AND base_price < 4500"))
+        # Rate-card rows (plain lowercase strings): vip -> standard; the two
+        # suite classes had identical nightly rates, so drop the duplicate
+        # before renaming to avoid two 'suite' rows per category.
+        conn.execute(text("UPDATE room_rates SET room_type = 'standard' WHERE room_type = 'vip'"))
+        conn.execute(text(
+            "DELETE FROM room_rates WHERE room_type = 'suite_2ac' AND EXISTS ("
+            " SELECT 1 FROM room_rates r2 WHERE r2.room_type = 'suite_1ac'"
+            " AND r2.guest_category = room_rates.guest_category)"))
+        conn.execute(text("UPDATE room_rates SET room_type = 'suite' WHERE room_type IN ('suite_1ac','suite_2ac')"))
+        # HRA utility rows keep suite_1ac/suite_2ac keys (resolved via
+        # ac_count) - only the vip row renames.
+        conn.execute(text("UPDATE hra_utility_rates SET room_type = 'standard' WHERE room_type = 'vip'"))
+        conn.commit()
+        if remapped:
+            logger.info("migration: remapped %d rooms to the three-class room types", remapped)
+
+
+def _migrate_bookings_source_fields(engine):
+    # Online-portal booking channel (source + portal voucher number) and the
+    # arrival deadline after which an unclaimed booking may be voided. All
+    # nullable/defaulted - plain ALTER TABLE ADD COLUMN.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(bookings)")).fetchall()
+        if not cols:
+            return
+        col_names = {c[1] for c in cols}
+        additions = (
+            ("source", "VARCHAR(20) DEFAULT 'walk_in'"),
+            ("online_voucher_no", "VARCHAR(50)"),
+            ("arrival_deadline", "DATETIME"),
+            ("reference_person", "VARCHAR(100)"),
+        )
+        for name, ddl_type in additions:
+            if name not in col_names:
+                conn.execute(text(f"ALTER TABLE bookings ADD COLUMN {name} {ddl_type}"))
+                logger.info("migration: added bookings.%s", name)
+        conn.commit()
+
+
+def _migrate_invoices_bill_type(engine):
+    # Room-bill / mess-bill split at checkout. Additive with default; older
+    # single invoices remain 'combined'.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(invoices)")).fetchall()
+        if not cols:
+            return
+        if "bill_type" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN bill_type VARCHAR(20) DEFAULT 'combined'"))
+            conn.commit()
+            logger.info("migration: added invoices.bill_type")
+
+
+def _migrate_bookings_guest_id(engine):
+    # Links a booking to a persistent Guest identity (matched by CNIC/phone),
+    # so repeat visitors are recognized. guests table is new, created by
+    # create_all(); this only adds the FK column to the existing bookings table.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(bookings)")).fetchall()
+        if not cols:
+            return
+        if "guest_id" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE bookings ADD COLUMN guest_id INTEGER"))
+            conn.commit()
+            logger.info("migration: added bookings.guest_id")
+
+
+def _migrate_rooms_housekeeping(engine):
+    # Physical room readiness (clean/dirty/cleaning), independent of the
+    # occupancy status column. Additive nullable-with-default column.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(rooms)")).fetchall()
+        if not cols:
+            return
+        if "housekeeping_status" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE rooms ADD COLUMN housekeeping_status VARCHAR(20) DEFAULT 'clean'"))
+            conn.commit()
+            logger.info("migration: added rooms.housekeeping_status")
+
+
+def _migrate_bookings_register_fields(engine):
+    # Booking-register columns (rank, PA no, unit, nature of duty), extra
+    # mattress billing, actual check-in/out timestamps for late-fee math,
+    # cancellation reason, and the itemized rate snapshot. All nullable -
+    # plain ALTER TABLE ADD COLUMN, no rebuild needed.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(bookings)")).fetchall()
+        if not cols:
+            return
+        col_names = {c[1] for c in cols}
+        additions = (
+            ("rank", "VARCHAR(50)"),
+            ("pa_number", "VARCHAR(50)"),
+            ("unit_address", "VARCHAR(255)"),
+            ("nature_of_duty", "VARCHAR(20) DEFAULT 'visit'"),
+            ("da_multiplier", "NUMERIC(3, 1)"),
+            ("mattress_count", "INTEGER DEFAULT 0"),
+            ("late_checkout_fee", "NUMERIC(10, 2) DEFAULT 0"),
+            ("actual_check_in", "DATETIME"),
+            ("actual_check_out", "DATETIME"),
+            ("cancel_reason", "TEXT"),
+            ("rate_breakdown", "TEXT"),
+        )
+        for name, ddl_type in additions:
+            if name not in col_names:
+                conn.execute(text(f"ALTER TABLE bookings ADD COLUMN {name} {ddl_type}"))
+                logger.info("migration: added bookings.%s", name)
+        conn.commit()
 
 
 def _migrate_inventory_ingredient_type(engine):

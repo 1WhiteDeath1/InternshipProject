@@ -8,6 +8,7 @@ Run this script manually after installation to populate the database with demo d
 To run: python backend/seed_demo.py
 """
 import sys
+import json
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -62,13 +63,13 @@ db.commit()
 admin = User(username="admin", email="admin@samhotel.local", full_name="System Administrator",
              hashed_password=hash_password("admin123"), role_id=supervisor_role.id,
              status=UserStatus.ACTIVE, last_login=datetime.utcnow())
-front_user = User(username="frontdesk1", email="front@samhotel.local", full_name="Sarah Johnson",
+front_user = User(username="frontdesk1", email="front@samhotel.local", full_name="Sana Malik",
                   hashed_password=hash_password("front123"), role_id=front_desk_role.id, status=UserStatus.ACTIVE)
-kitchen_user = User(username="kitchen1", email="kitchen@samhotel.local", full_name="Mike Chen",
+kitchen_user = User(username="kitchen1", email="kitchen@samhotel.local", full_name="Usman Tariq",
                     hashed_password=hash_password("kitchen123"), role_id=kitchen_role.id, status=UserStatus.ACTIVE)
-procurement_user = User(username="procurement1", email="procure@samhotel.local", full_name="Lisa Wang",
+procurement_user = User(username="procurement1", email="procure@samhotel.local", full_name="Ayesha Siddiqui",
                         hashed_password=hash_password("procure123"), role_id=procurement_role.id, status=UserStatus.ACTIVE)
-security_user = User(username="security1", email="security@samhotel.local", full_name="James O'Brien",
+security_user = User(username="security1", email="security@samhotel.local", full_name="Naveed Iqbal",
                      hashed_password=hash_password("security123"), role_id=security_role.id, status=UserStatus.ACTIVE)
 db.add_all([admin, front_user, kitchen_user, procurement_user, security_user])
 db.commit()
@@ -115,9 +116,9 @@ db.commit()
 
 # --- Vendors ---
 vendors = [
-    Vendor(name="FreshFoods Distributors", contact_person="Robert Kim", phone="555-0101", email="orders@freshfoods.com", address="123 Market St", payment_terms="Net 30"),
-    Vendor(name="Global Meat Supply", contact_person="Angela Torres", phone="555-0102", email="sales@globalmeat.com", address="456 Industrial Blvd", payment_terms="Net 15"),
-    Vendor(name="DairyPure Co.", contact_person="David Park", phone="555-0103", email="dairy@dairypure.com", address="789 Farm Road", payment_terms="Net 30"),
+    Vendor(name="Imtiaz Super Market", contact_person="Ahmed Raza", phone="+92-21-111-124-224", email="orders@imtiazsuper.pk", address="Shahrah-e-Faisal, Karachi", payment_terms="Net 30"),
+    Vendor(name="Metro Cash & Carry", contact_person="Bilal Sheikh", phone="+92-42-111-635-825", email="sales@metro-pakistan.com", address="Multan Road, Lahore", payment_terms="Net 15"),
+    Vendor(name="CSD - Canteen Stores Department", contact_person="Brig (R) Tariq Mehmood", phone="+92-51-9270123", email="csd@csd.gov.pk", address="The Mall, Rawalpindi", payment_terms="Net 30"),
 ]
 db.add_all(vendors)
 db.commit()
@@ -132,29 +133,71 @@ poi2 = PurchaseOrderItem(po_id=po.id, item_id=items[4].id, quantity_ordered=50, 
 db.add_all([poi, poi2])
 db.commit()
 
-# --- Rooms ---
-room_types = [RoomType.SINGLE, RoomType.DOUBLE, RoomType.DELUXE, RoomType.SUITE, RoomType.DORMITORY]
+# --- Rooms (three classes per the rate card) ---
 rooms = []
 for floor in range(1, 4):
     for room_num in range(1, 9):
-        rt = room_types[(floor + room_num) % len(room_types)]
-        r = Room(
+        rooms.append(Room(
             room_number=f"{floor}0{room_num}",
-            room_type=rt,
+            room_type=RoomType.STANDARD,
             floor=floor,
-            capacity=2 if rt != RoomType.DORMITORY else 6,
-            base_price={RoomType.SINGLE: 50, RoomType.DOUBLE: 80, RoomType.DELUXE: 120, RoomType.SUITE: 200, RoomType.DORMITORY: 30}[rt],
-        )
-        rooms.append(r)
+            capacity=2,
+            base_price=3500,  # card total for a serving officer
+        ))
+
+# Named suites (A-C are 2xAC, D-F are 1xAC - the AC count drives the HRA
+# monthly utility figure) and the DG suite.
+for suite_name, acs in [("Suite-A", 2), ("Suite-B", 2), ("Suite-C", 2),
+                        ("Suite-D", 1), ("Suite-E", 1), ("Suite-F", 1)]:
+    rooms.append(Room(room_number=suite_name, room_type=RoomType.SUITE, ac_count=acs, floor=1, capacity=2, base_price=4500))
+rooms.append(Room(room_number="DG-Suite", room_type=RoomType.DG_SUITE, ac_count=2, floor=3, capacity=2, base_price=4500))
 db.add_all(rooms)
+db.commit()
+
+# --- Rate card (room class x guest category, itemized) ---
+from backend.services.room_pricing import (
+    DEFAULT_ROOM_RATES, DEFAULT_DUTY_RATES, RATE_COMPONENTS,
+    DEFAULT_HRA_RANK_RATES, DEFAULT_HRA_UTILITY_RATES, compute_booking_price,
+)
+for rt, cats in DEFAULT_ROOM_RATES.items():
+    for cat, values in cats.items():
+        db.add(RoomRate(room_type=rt, guest_category=cat, **dict(zip(RATE_COMPONENTS, values))))
+for band, (label, amount) in DEFAULT_DUTY_RATES.items():
+    db.add(DutyRate(rank_band=band, label=label, da_amount=amount))
+for band, (label, amount) in DEFAULT_HRA_RANK_RATES.items():
+    db.add(HraRankRate(rank_band=band, label=label, monthly_amount=amount))
+for room_type, amount in DEFAULT_HRA_UTILITY_RATES.items():
+    db.add(HraUtilityRate(room_type=room_type, monthly_amount=amount))
+db.commit()
+
+# --- Members & one demo HRA resident ---
+member = Member(service_number="PA-55201", full_name="Brig Nasir Iqbal", rank="Brig", unit="GHQ",
+                 mess_category=MessCategory.OFFICERS, client_category=ClientCategory.PERMANENT_MEMBER, status=MemberStatus.ACTIVE)
+db.add(member)
+db.commit()
+
+hra_room = next(r for r in rooms if r.room_number == "Suite-B")  # unused by the transient bookings_data above, and an actual HRA-rated room class
+hra_room.status = RoomStatus.OCCUPIED
+hra_check_in = date(2026, 1, 15)
+hra_pricing = compute_booking_price(
+    db, hra_room, check_in=hra_check_in, check_out=hra_check_in + timedelta(days=365),
+    client_category="serving_officer", nature_of_duty="hra", member_id=member.id,
+)
+hra_booking = Booking(
+    booking_reference="BK-20260115-9001", guest_name=member.full_name, member_id=member.id,
+    rank=member.rank, room_id=hra_room.id, check_in=hra_check_in, check_out=hra_check_in + timedelta(days=365),
+    status=BookingStatus.CHECKED_IN, client_category=ClientCategory.SERVING_OFFICER, nature_of_duty="hra",
+    total_amount=hra_pricing["total"], rate_breakdown=json.dumps(hra_pricing), processed_by=front_user.id,
+)
+db.add(hra_booking)
 db.commit()
 
 # --- Bookings ---
 bookings_data = [
-    {"guest_name": "John Smith", "phone": "555-1001", "room_idx": 0, "check_in": date(2026, 6, 28), "check_out": date(2026, 7, 3), "status": BookingStatus.CHECKED_IN},
-    {"guest_name": "Emily Davis", "phone": "555-1002", "room_idx": 2, "check_in": date(2026, 6, 29), "check_out": date(2026, 7, 2), "status": BookingStatus.CHECKED_IN},
-    {"guest_name": "Michael Brown", "phone": "555-1003", "room_idx": 5, "check_in": date(2026, 7, 1), "check_out": date(2026, 7, 5), "status": BookingStatus.CONFIRMED},
-    {"guest_name": "Sarah Wilson", "phone": "555-1004", "room_idx": 8, "check_in": date(2026, 7, 2), "check_out": date(2026, 7, 7), "status": BookingStatus.CONFIRMED},
+    {"guest_name": "Ahmed Hassan", "phone": "+92-300-1234567", "room_idx": 0, "check_in": date(2026, 6, 28), "check_out": date(2026, 7, 3), "status": BookingStatus.CHECKED_IN},
+    {"guest_name": "Ayesha Malik", "phone": "+92-321-2345678", "room_idx": 2, "check_in": date(2026, 6, 29), "check_out": date(2026, 7, 2), "status": BookingStatus.CHECKED_IN},
+    {"guest_name": "Bilal Chaudhry", "phone": "+92-333-3456789", "room_idx": 5, "check_in": date(2026, 7, 1), "check_out": date(2026, 7, 5), "status": BookingStatus.CONFIRMED},
+    {"guest_name": "Sana Farooqi", "phone": "+92-345-4567890", "room_idx": 8, "check_in": date(2026, 7, 2), "check_out": date(2026, 7, 7), "status": BookingStatus.CONFIRMED},
 ]
 for i, bd in enumerate(bookings_data):
     room = rooms[bd["room_idx"]]
@@ -189,7 +232,7 @@ db.add(waste)
 db.commit()
 
 # --- Security Logs ---
-sec_log = SecurityLog(event_type="check_in", guest_name="John Smith", room_number="101", processed_by=front_user.id)
+sec_log = SecurityLog(event_type="check_in", guest_name="Ahmed Hassan", room_number="101", processed_by=front_user.id)
 db.add(sec_log)
 db.commit()
 
@@ -213,5 +256,6 @@ print(f"  - {db.query(User).count()} users (admin/admin123)")
 print(f"  - {db.query(InventoryItem).count()} inventory items")
 print(f"  - {db.query(Room).count()} rooms")
 print(f"  - {db.query(Booking).count()} bookings")
+print(f"  - {db.query(Member).count()} members ({db.query(Booking).filter(Booking.nature_of_duty == 'hra').count()} HRA resident)")
 print(f"  - {db.query(Vendor).count()} vendors")
 print("Login with: admin / admin123")

@@ -9,8 +9,9 @@ DB_PATH = BASE_DIR / "hotel_mess.db"
 LOGS_DIR = BASE_DIR / "logs"
 BRANDING_FILE = BASE_DIR / "branding_config.enc"
 BACKUP_DIR = BASE_DIR / "backups"
+UPLOADS_DIR = BASE_DIR / "uploads"
 
-for d in [LOGS_DIR, BACKUP_DIR]:
+for d in [LOGS_DIR, BACKUP_DIR, UPLOADS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 class Settings(BaseSettings):

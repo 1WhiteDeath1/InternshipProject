@@ -3,7 +3,7 @@ import enum
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Float, Boolean, DateTime, Date, Text,
-    ForeignKey, Enum, Numeric, JSON, BigInteger, Index
+    ForeignKey, Enum, Numeric, JSON, BigInteger, Index, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 from backend.database import Base
@@ -23,6 +23,7 @@ class BookingStatus(str, enum.Enum):
     CHECKED_IN = "checked_in"
     CHECKED_OUT = "checked_out"
     CANCELLED = "cancelled"
+    NO_SHOW = "no_show"
 
 class RoomStatus(str, enum.Enum):
     VACANT = "vacant"
@@ -31,11 +32,14 @@ class RoomStatus(str, enum.Enum):
     MAINTENANCE = "maintenance"
 
 class RoomType(str, enum.Enum):
-    SINGLE = "single"
-    DOUBLE = "double"
-    DELUXE = "deluxe"
+    # The mess's three guest-room classes (2026 rate-card simplification).
+    # Suites carry Room.ac_count (1 or 2): guests see one "Suite" type but
+    # HRA utility charges still bill 1xAC vs 2xAC per the card. Legacy
+    # types (single/double/deluxe/dormitory/vip/suite_1ac/suite_2ac) are
+    # remapped by migrations_manual._migrate_room_types_three_classes.
+    STANDARD = "standard"
     SUITE = "suite"
-    DORMITORY = "dormitory"
+    DG_SUITE = "dg_suite"
 
 class POStatus(str, enum.Enum):
     DRAFT = "draft"
@@ -105,6 +109,10 @@ class ClientCategory(str, enum.Enum):
     PERMANENT_MEMBER = "permanent_member"
     NON_MEMBER_CIVILIAN = "non_member_civilian"
     NON_MEMBER_NON_CIVILIAN = "non_member_non_civilian"
+    # Rate-card categories: the same room bills differently per occupant type
+    SERVING_OFFICER = "serving_officer"
+    RETIRED_OFFICER = "retired_officer"
+    CIVILIAN = "civilian"
 
 class MealType(str, enum.Enum):
     BREAKFAST = "breakfast"
@@ -529,11 +537,33 @@ class Room(Base):
     room_type = Column(Enum(RoomType), nullable=False)
     floor = Column(Integer, default=1)
     capacity = Column(Integer, default=2)
+    # Suites only: number of air conditioners (1 or 2) - drives the HRA
+    # monthly utility charge (Rs 25,500 vs 29,500 on the rate card).
+    ac_count = Column(Integer, default=1)
     base_price = Column(Numeric(10, 2), nullable=False)
     amenities = Column(Text)  # JSON array
     status = Column(Enum(RoomStatus), default=RoomStatus.VACANT)
+    # Physical readiness, independent of occupancy: clean | dirty | cleaning
+    housekeeping_status = Column(String(20), default="clean")
     notes = Column(Text)
     is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Guest(Base):
+    """Persistent guest identity, matched across stays by ID number (CNIC/svc
+    no/passport) or phone, so repeat visitors can be recognized at check-in
+    and their bookings/bills traced by name. Not a full guest-management
+    module - just enough to de-duplicate and prefill."""
+    __tablename__ = "guests"
+
+    id = Column(Integer, primary_key=True)
+    full_name = Column(String(200), nullable=False)
+    phone = Column(String(50))
+    id_type = Column(String(50))
+    id_number = Column(String(100))
+    unit_address = Column(String(255))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -548,6 +578,7 @@ class Booking(Base):
     guest_email = Column(String(255))
     guest_id_type = Column(String(50))
     guest_id_number = Column(String(100))
+    guest_id = Column(Integer, ForeignKey("guests.id"), nullable=True)
     room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False)
     check_in = Column(Date, nullable=False)
     check_out = Column(Date, nullable=False)
@@ -559,11 +590,144 @@ class Booking(Base):
     processed_by = Column(Integer, ForeignKey("users.id"))
     client_category = Column(Enum(ClientCategory), default=ClientCategory.NON_MEMBER_CIVILIAN)
     member_id = Column(Integer, ForeignKey("members.id"), nullable=True)  # set when a permanent member occupies a room
+    # Booking-register fields (paper register columns the mess must keep recording)
+    rank = Column(String(50))
+    pa_number = Column(String(50))
+    unit_address = Column(String(255))
+    # "C/O" reference from the paper register (e.g. "C/O AD", "C/O Brig Cdr CES").
+    # Mandatory for civilian guests, optional for officers/institutional guests.
+    reference_person = Column(String(100))
+    nature_of_duty = Column(String(20), default="visit")  # visit | leave | official_duty | hra
+    da_multiplier = Column(Numeric(3, 1))  # 1.0 or 1.5 for official-duty DA billing
+    mattress_count = Column(Integer, default=0)
+    # Booking channel: walk_in (at the desk) or online (transcribed from the
+    # separate online portal, carrying that portal's voucher number).
+    source = Column(String(20), default="walk_in")  # walk_in | online
+    online_voucher_no = Column(String(50))
+    # Guest must physically arrive (be checked in) by this time or staff may
+    # void the booking to free the room.
+    arrival_deadline = Column(DateTime)
+    late_checkout_fee = Column(Numeric(10, 2), default=0)
+    actual_check_in = Column(DateTime)
+    actual_check_out = Column(DateTime)
+    cancel_reason = Column(Text)
+    rate_breakdown = Column(Text)  # JSON snapshot of the itemized nightly rate applied
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     room = relationship("Room")
     member = relationship("Member")
+    guest = relationship("Guest")
+
+
+class BookingCharge(Base):
+    """Ad-hoc charge against a stay, matching the paper draft bill's line
+    heads (Dhobi, Allied Charges, Breakage, Dental Kit, Extra Messing, Sui
+    Gas Charges on Messing...). is_mess_charge routes the line onto the
+    mess/food bill at checkout instead of the room bill."""
+    __tablename__ = "booking_charges"
+
+    id = Column(Integer, primary_key=True)
+    booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=False)
+    head = Column(String(100), nullable=False)
+    amount = Column(Numeric(10, 2), nullable=False)
+    is_mess_charge = Column(Boolean, default=False)
+    invoiced_at = Column(DateTime)  # set when swept into an invoice at checkout
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    booking = relationship("Booking")
+
+
+class SmsMessage(Base):
+    """Outbox for guest SMS notifications. The server itself is offline, so
+    messages queue as 'pending'; delivery happens either through an optional
+    HTTP SMS gateway (sms_gateway_url setting, e.g. a GSM-modem bridge on the
+    LAN) or manually - staff copy the text to a phone and mark it sent."""
+    __tablename__ = "sms_messages"
+
+    id = Column(Integer, primary_key=True)
+    booking_id = Column(Integer, ForeignKey("bookings.id"))
+    phone = Column(String(50), nullable=False)
+    body = Column(Text, nullable=False)
+    status = Column(String(20), default="pending")  # pending | sent | failed
+    error = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    sent_at = Column(DateTime)
+    sent_by = Column(Integer, ForeignKey("users.id"))
+
+    booking = relationship("Booking")
+
+
+class RoomRate(Base):
+    """Nightly rate matrix from the official rate card: one row per
+    room class x guest category, itemized into the components the mess
+    bills separately (rent, electricity, generator, gas, internet/cable).
+    Editable data - rates get revised by official letter."""
+    __tablename__ = "room_rates"
+    __table_args__ = (UniqueConstraint("room_type", "guest_category", name="uq_room_rate"),)
+
+    id = Column(Integer, primary_key=True)
+    room_type = Column(String(20), nullable=False)  # RoomType value
+    guest_category = Column(String(30), nullable=False)  # serving_officer | retired_officer | civilian
+    rent = Column(Numeric(10, 2), nullable=False, default=0)
+    electricity = Column(Numeric(10, 2), nullable=False, default=0)
+    generator = Column(Numeric(10, 2), nullable=False, default=0)
+    gas = Column(Numeric(10, 2), nullable=False, default=0)
+    internet = Column(Numeric(10, 2), nullable=False, default=0)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = Column(Integer, ForeignKey("users.id"))
+
+
+class DutyRate(Base):
+    """Daily-allowance room charge for serving officers on official duty,
+    per rank band. Bookings bill at da_amount x da_multiplier (1 or 1.5)."""
+    __tablename__ = "duty_rates"
+
+    id = Column(Integer, primary_key=True)
+    rank_band = Column(String(30), nullable=False, unique=True)  # maj_capt | ltcol_brig | maj_gen | ltgen_gen
+    label = Column(String(100))
+    da_amount = Column(Numeric(10, 2), nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = Column(Integer, ForeignKey("users.id"))
+
+
+class HraRankRate(Base):
+    """Monthly HRA (Hostel Rent Allowance) rate for a permanent resident
+    officer, per rank band - finer-grained than DutyRate's bands since the
+    HRA card prices Capt/Maj and Lt Col-Col/Brig separately."""
+    __tablename__ = "hra_rank_rates"
+
+    id = Column(Integer, primary_key=True)
+    rank_band = Column(String(30), nullable=False, unique=True)  # capt | maj | ltcol_col | brig | maj_gen
+    label = Column(String(100))
+    monthly_amount = Column(Numeric(10, 2), nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = Column(Integer, ForeignKey("users.id"))
+
+
+class HraUtilityRate(Base):
+    """Monthly flat utility charge (elec/gen/gas/internet bundled) for an
+    HRA resident's room class - separate from RoomRate's nightly guest
+    components."""
+    __tablename__ = "hra_utility_rates"
+
+    id = Column(Integer, primary_key=True)
+    room_type = Column(String(20), nullable=False, unique=True)  # RoomType value
+    monthly_amount = Column(Numeric(10, 2), nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = Column(Integer, ForeignKey("users.id"))
+
+
+class RoomPhoto(Base):
+    __tablename__ = "room_photos"
+
+    id = Column(Integer, primary_key=True)
+    room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False)
+    file_name = Column(String(255), nullable=False)
+    sort_order = Column(Integer, default=0)
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    uploaded_by = Column(Integer, ForeignKey("users.id"))
 
 
 class GuestMovement(Base):
@@ -595,6 +759,10 @@ class Invoice(Base):
     total_amount = Column(Numeric(10, 2), nullable=False)
     amount_paid = Column(Numeric(10, 2), default=0)
     status = Column(Enum(InvoiceStatus), default=InvoiceStatus.DRAFT)
+    # Which of the two checkout bills this is: 'room' (guest room charges,
+    # mattress, dhobi, breakage...) or 'mess' (messing/food charges). Older
+    # single-bill invoices stay 'combined'.
+    bill_type = Column(String(20), default="combined")  # room | mess | combined
     notes = Column(Text)
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)

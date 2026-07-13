@@ -18,7 +18,7 @@ SAM Hotel & Mess Management System — a production-grade, offline/on-premise ho
 - Windows: `start.bat` → `python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload`
 - Linux: `./start.sh` → `python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000`
 - Dependencies (no `requirements.txt` exists; this pip line from INSTALL.md is the source of truth):
-  `pip install fastapi uvicorn sqlalchemy alembic pydantic pydantic-settings bcrypt python-jose python-multipart aiofiles openpyxl reportlab cryptography`
+  `pip install fastapi uvicorn sqlalchemy alembic pydantic pydantic-settings passlib bcrypt python-jose python-multipart aiofiles openpyxl reportlab cryptography`
 - Seed demo data: `python backend/seed_demo.py` — creates a supervisor (`admin`/`admin123`) and 4 role-based staff accounts plus sample inventory/rooms/bookings/vendors
 - No automated test suite exists for either the backend or frontend currently.
 
