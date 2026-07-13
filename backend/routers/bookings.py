@@ -711,6 +711,11 @@ async def create_booking(data: BookingCreate, request: Request, db: Session = De
     if not room or room.status == "maintenance":
         raise HTTPException(status_code=400, detail="Room is not available")
 
+    guest_count = (data.adults or 0) + (data.children or 0)
+    if room.capacity and guest_count > room.capacity:
+        raise HTTPException(status_code=400,
+                            detail=f"Room {room.room_number} accommodates at most {room.capacity} guest(s); this booking has {guest_count} (adults + children)")
+
     pricing = compute_booking_price(
         db, room, check_in=data.check_in, check_out=check_out,
         client_category=data.client_category, nature_of_duty=data.nature_of_duty,
@@ -797,6 +802,15 @@ async def update_booking(booking_id: int, data: BookingUpdate, request: Request,
         clash = _overlap_query(db, new_room_id, new_check_in, new_check_out).filter(Booking.id != booking.id).first()
         if clash:
             raise HTTPException(status_code=409, detail=f"New dates overlap with booking {clash.booking_reference}")
+
+    if "room_id" in changes and new_room_id != booking.room_id:
+        new_room = db.query(Room).filter(Room.id == new_room_id).first()
+        if not new_room:
+            raise HTTPException(status_code=404, detail="Room not found")
+        guest_count = (booking.adults or 0) + (booking.children or 0)
+        if new_room.capacity and guest_count > new_room.capacity:
+            raise HTTPException(status_code=400,
+                                detail=f"Room {new_room.room_number} accommodates at most {new_room.capacity} guest(s); this booking has {guest_count} (adults + children)")
 
     for field, value in changes.items():
         if value is not None:

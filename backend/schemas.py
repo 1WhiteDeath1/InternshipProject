@@ -489,8 +489,8 @@ class BookingBase(BaseModel):
     room_id: int
     check_in: date
     check_out: date
-    adults: int = 1
-    children: int = 0
+    adults: int = Field(1, ge=1)
+    children: int = Field(0, ge=0)
     special_requests: Optional[str] = None
     client_category: str = "non_member_civilian"
     member_id: Optional[int] = None

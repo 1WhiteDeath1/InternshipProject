@@ -234,6 +234,11 @@ export default function RoomSection({ roomId, open, onClose, onChanged, members,
     if (form.nature_of_duty === 'hra' && !form.member_id) { toast.error('HRA residency must be linked to a member'); return; }
     if (form.source === 'online' && !form.online_voucher_no.trim()) { toast.error('Online bookings need the portal voucher number (Online V/No)'); return; }
     if (form.client_category === 'civilian' && !form.reference_person.trim()) { toast.error('Civilian guests require a reference person (C/O)'); return; }
+    const guestTotal = Math.max(1, Number(form.adults) || 1) + Math.max(0, Number(form.children) || 0);
+    if (room?.capacity && guestTotal > room.capacity) {
+      toast.error(`Room ${room.room_number} accommodates at most ${room.capacity} guest(s) — this booking has ${guestTotal}`);
+      return;
+    }
     setSaving(true);
     try {
       const res = await api.post('/bookings', {
@@ -670,7 +675,7 @@ export default function RoomSection({ roomId, open, onClose, onChanged, members,
                     <div className="flex gap-1.5">
                       <div className="flex-1">
                         <Label className="text-xs">Adults</Label>
-                        <Input type="number" min={1} value={form.adults}
+                        <Input type="number" min={1} max={room?.capacity} value={form.adults}
                           onChange={e => setForm({ ...form, adults: Number(e.target.value) })} />
                       </div>
                       <div className="flex-1">
