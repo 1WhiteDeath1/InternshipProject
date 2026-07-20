@@ -1,18 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import api, { getErrorMessage } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { toast } from 'sonner';
-import { BedDouble, Receipt, Trash2, UtensilsCrossed } from 'lucide-react';
+import { BedDouble, Receipt, UtensilsCrossed } from 'lucide-react';
 import { BillPrintView } from '@/components/BillPrint';
 import { formatCurrency } from '@/lib/currency';
 
-// The one checkout surface for the whole app: checking a guest out always
-// means reviewing and generating their bill(s) here - there is no
-// status-flip-only checkout anywhere (the backend endpoint for that was
-// removed). Opened from Clerk Desk, the Bookings dashboard/list, and the
-// room panel.
+// The Clerk's checkout surface - the only place an invoice actually gets
+// generated. Booking Staff and Mess Staff log charges elsewhere (the Room
+// Charges panel in the room view, the Guest Mess Charges tab in Kitchen) as
+// a guest incurs them; by the time a stay reaches here, the Clerk just
+// reviews the accumulated total and generates one invoice.
 
 export interface CheckoutGuest {
   id: number;
@@ -37,16 +36,6 @@ export interface RunningBalance {
   mess_billed: boolean;
 }
 
-interface Charge { id: number; head: string; amount: number; is_mess_charge: boolean; invoiced: boolean; }
-
-type BillTypeSel = ('room' | 'mess')[];
-
-// Standard charge heads from the paper draft bill, split by which bill they
-// land on. "Custom…" always appears too, for anything not on the list.
-const ROOM_CHARGE_HEADS = ['Dhobi', 'Allied Charges', 'Breakage', 'Dental Kit'];
-const MESS_CHARGE_HEADS = ['Extra Messing', 'Sui Gas Charges on Messing'];
-const CUSTOM_HEAD = '__custom__';
-
 function BillBox({ title, icon: Icon, items, total, billed, accent }: {
   title: string; icon: typeof BedDouble; items: BalanceItem[]; total: number; billed: boolean; accent: string;
 }) {
@@ -70,136 +59,62 @@ function BillBox({ title, icon: Icon, items, total, billed, accent }: {
   );
 }
 
-function ChargePanel({
-  title, accent, presetHeads, isMess, head, setHead, customLabel, setCustomLabel, amount, setAmount, onAdd, charges, onDelete,
-}: {
-  title: string; accent: string; presetHeads: string[]; isMess: boolean;
-  head: string; setHead: (v: string) => void;
-  customLabel: string; setCustomLabel: (v: string) => void;
-  amount: string; setAmount: (v: string) => void;
-  onAdd: () => void; charges: Charge[]; onDelete: (id: number) => void;
-}) {
-  return (
-    <div className={`flex-1 rounded-lg border p-3 space-y-2 min-w-0 ${accent}`}>
-      <p className="text-sm font-medium">{title}</p>
-      <select className="w-full h-9 rounded-md border border-input bg-background px-2 text-xs" value={head} onChange={e => setHead(e.target.value)}>
-        {presetHeads.map(h => <option key={h} value={h}>{h}</option>)}
-        <option value={CUSTOM_HEAD}>Custom…</option>
-      </select>
-      {head === CUSTOM_HEAD && (
-        <Input placeholder="Charge description" className="h-9 text-xs" value={customLabel} onChange={e => setCustomLabel(e.target.value)} />
-      )}
-      <div className="flex gap-1.5">
-        <Input type="number" min={1} placeholder="Rs" className="flex-1 h-9 text-xs" value={amount} onChange={e => setAmount(e.target.value)} />
-        <Button size="sm" className="h-9" onClick={onAdd}>Add</Button>
-      </div>
-      {charges.filter(c => c.is_mess_charge === isMess && !c.invoiced).map(c => (
-        <div key={c.id} className="flex items-center justify-between text-xs">
-          <span className="truncate">{c.head}</span>
-          <span className="flex items-center gap-1 shrink-0">
-            <span className="font-mono">{formatCurrency(c.amount)}</span>
-            <button type="button" className="text-red-400 hover:text-red-600" onClick={() => onDelete(c.id)}><Trash2 size={13} /></button>
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function CheckoutSheet({ guest, onOpenChange, onDone }: {
   guest: CheckoutGuest | null;
   onOpenChange: (open: boolean) => void;
   onDone?: () => void;
 }) {
   const [balance, setBalance] = useState<RunningBalance | null>(null);
-  const [charges, setCharges] = useState<Charge[]>([]);
-  const [genRoom, setGenRoom] = useState(true);
-  const [genMess, setGenMess] = useState(true);
   const [checkingOut, setCheckingOut] = useState(false);
   const [printInvoiceIds, setPrintInvoiceIds] = useState<number[] | null>(null);
-  const [roomChargeHead, setRoomChargeHead] = useState(ROOM_CHARGE_HEADS[0]);
-  const [roomChargeCustom, setRoomChargeCustom] = useState('');
-  const [roomChargeAmount, setRoomChargeAmount] = useState('');
-  const [messChargeHead, setMessChargeHead] = useState(MESS_CHARGE_HEADS[0]);
-  const [messChargeCustom, setMessChargeCustom] = useState('');
-  const [messChargeAmount, setMessChargeAmount] = useState('');
+  const [printBookingId, setPrintBookingId] = useState<number | null>(null);
 
   const guestId = guest?.id;
 
-  const fetchBalance = useCallback(async (initial = false) => {
+  const fetchBalance = useCallback(async () => {
     if (!guestId) return;
     try {
-      const [balRes, chargesRes] = await Promise.all([
-        api.get(`/billing/bookings/${guestId}/running-balance`),
-        api.get(`/billing/bookings/${guestId}/charges`),
-      ]);
-      setBalance(balRes.data);
-      setCharges(chargesRes.data);
-      if (initial) {
-        setGenRoom(!balRes.data.room_billed);
-        setGenMess(!balRes.data.mess_billed);
-      }
+      const res = await api.get(`/billing/bookings/${guestId}/running-balance`);
+      setBalance(res.data);
     } catch (err) { toast.error(getErrorMessage(err, 'Failed to load the guest\'s balance')); }
   }, [guestId]);
 
   useEffect(() => {
     queueMicrotask(() => {
-      if (!guestId) { setBalance(null); setCharges([]); return; }
+      if (!guestId) { setBalance(null); return; }
       setBalance(null);
-      setRoomChargeAmount(''); setRoomChargeCustom('');
-      setMessChargeAmount(''); setMessChargeCustom('');
-      fetchBalance(true);
+      fetchBalance();
     });
   }, [guestId, fetchBalance]);
 
-  const handleCheckout = async (types: BillTypeSel) => {
+  const openExistingInvoices = async () => {
+    if (!guest) return;
+    try {
+      const res = await api.get(`/billing/bookings/${guest.id}/master-invoice`);
+      setPrintInvoiceIds((res.data.source_invoices as { id: number }[]).map(i => i.id));
+      setPrintBookingId(guest.id);
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to load the existing invoice')); }
+  };
+
+  const handleGenerateInvoice = async () => {
     if (!guest || checkingOut) return; // guard against double-clicks racing two checkouts
-    if (types.length === 0) { toast.info('Both bills are already generated for this guest'); return; }
+    if (balance?.room_billed && balance?.mess_billed) { await openExistingInvoices(); return; }
     setCheckingOut(true);
     try {
-      const res = await api.post(`/billing/bookings/${guest.id}/instant-checkout`, { bill_types: types });
+      const res = await api.post(`/billing/bookings/${guest.id}/instant-checkout`, {});
       const invoices: { id: number; bill_type: string }[] = res.data.invoices;
       setPrintInvoiceIds(invoices.map(i => i.id));
-      toast.success(`${guest.guest_name} — ${invoices.map(i => i.bill_type).join(' & ')} bill generated`);
+      setPrintBookingId(guest.id);
+      toast.success(`${guest.guest_name} — invoice generated (Rs ${res.data.grand_total.toLocaleString('en-US')})`);
       if (res.data.late_checkout_fee > 0) toast.info(`Late checkout fee ${formatCurrency(res.data.late_checkout_fee)} added to the room bill`);
       if (res.data.unpriced_items?.length) toast.warning(`Not billed (needs pricing): ${res.data.unpriced_items.join(', ')}`);
-      await fetchBalance();
       onDone?.();
-      // Close the sheet only once nothing is left to bill; otherwise keep it
-      // open (now showing the just-billed type locked) so staff can finish
-      // the deferred one in the same sitting, or leave and return later.
-      const otherBilled = types.includes('room') ? balance?.mess_billed : balance?.room_billed;
-      if (types.length === 2 || otherBilled) onOpenChange(false);
-    } catch (err) { toast.error(getErrorMessage(err, 'Failed to generate bill')); }
+      onOpenChange(false);
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to generate invoice')); }
     finally { setCheckingOut(false); }
   };
 
-  const handleAddCharge = async (isMess: boolean) => {
-    if (!guest) return;
-    const head = isMess ? messChargeHead : roomChargeHead;
-    const customLabel = (isMess ? messChargeCustom : roomChargeCustom).trim();
-    const label = head === CUSTOM_HEAD ? customLabel : head;
-    const amount = Number(isMess ? messChargeAmount : roomChargeAmount);
-    if (!label) { toast.error('Enter a charge description'); return; }
-    if (!amount || amount <= 0) { toast.error('Enter a charge amount'); return; }
-    try {
-      await api.post(`/billing/bookings/${guest.id}/charges`, { head: label, amount, is_mess_charge: isMess });
-      toast.success(`${label} — ${formatCurrency(amount)} added to the ${isMess ? 'food' : 'room'} bill`);
-      if (isMess) { setMessChargeAmount(''); setMessChargeCustom(''); }
-      else { setRoomChargeAmount(''); setRoomChargeCustom(''); }
-      fetchBalance();
-      onDone?.();
-    } catch (err) { toast.error(getErrorMessage(err, 'Failed to add charge')); }
-  };
-
-  const handleDeleteCharge = async (chargeId: number) => {
-    try {
-      await api.delete(`/billing/charges/${chargeId}`);
-      toast.success('Charge removed');
-      fetchBalance();
-      onDone?.();
-    } catch (err) { toast.error(getErrorMessage(err, 'Failed to remove charge')); }
-  };
+  const alreadyFullyBilled = !!balance?.room_billed && !!balance?.mess_billed;
 
   return (
     <>
@@ -227,6 +142,9 @@ export function CheckoutSheet({ guest, onOpenChange, onDone }: {
                       <BillBox title="Food Bill" icon={UtensilsCrossed} items={balance.mess_items}
                         total={balance.mess_bill_total} billed={balance.mess_billed} accent="border-orange-300 dark:border-orange-800" />
                     </div>
+                    <p className="text-xs text-gray-500">
+                      Room and mess charges are logged by Booking Staff and Mess Staff as the stay goes on (Room Charges panel / Kitchen's Guest Mess Charges tab) — this total reflects everything logged so far.
+                    </p>
                     <div className="rounded-lg border p-3 text-sm space-y-1">
                       {balance.outstanding_invoices > 0 && (
                         <div className="flex justify-between text-xs text-gray-500">
@@ -240,50 +158,13 @@ export function CheckoutSheet({ guest, onOpenChange, onDone }: {
                   </>
                 ) : <p className="text-sm text-gray-500">Loading balance…</p>}
 
-                <div className="flex gap-3 flex-col sm:flex-row">
-                  <ChargePanel title="Add room charge" accent="border-purple-200 dark:border-purple-900"
-                    presetHeads={ROOM_CHARGE_HEADS} isMess={false}
-                    head={roomChargeHead} setHead={setRoomChargeHead}
-                    customLabel={roomChargeCustom} setCustomLabel={setRoomChargeCustom}
-                    amount={roomChargeAmount} setAmount={setRoomChargeAmount}
-                    onAdd={() => handleAddCharge(false)} charges={charges} onDelete={handleDeleteCharge} />
-                  <ChargePanel title="Add food charge" accent="border-orange-200 dark:border-orange-900"
-                    presetHeads={MESS_CHARGE_HEADS} isMess={true}
-                    head={messChargeHead} setHead={setMessChargeHead}
-                    customLabel={messChargeCustom} setCustomLabel={setMessChargeCustom}
-                    amount={messChargeAmount} setAmount={setMessChargeAmount}
-                    onAdd={() => handleAddCharge(true)} charges={charges} onDelete={handleDeleteCharge} />
-                </div>
-
                 <div className="rounded-lg border p-3 space-y-2">
-                  <p className="text-sm font-medium">Generate bill(s)</p>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input type="checkbox" checked={balance?.room_billed ? true : genRoom}
-                      disabled={!!balance?.room_billed} onChange={e => setGenRoom(e.target.checked)} />
-                    Room Bill {balance?.room_billed && <span className="text-xs text-gray-400">(already billed)</span>}
-                  </label>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input type="checkbox" checked={balance?.mess_billed ? true : genMess}
-                      disabled={!!balance?.mess_billed} onChange={e => setGenMess(e.target.checked)} />
-                    Food Bill {balance?.mess_billed && <span className="text-xs text-gray-400">(already billed)</span>}
-                  </label>
-                  <Button className="w-full" disabled={checkingOut || !balance || (!genRoom && !genMess)}
-                    onClick={() => {
-                      const types: BillTypeSel = [];
-                      if (genRoom && !balance?.room_billed) types.push('room');
-                      if (genMess && !balance?.mess_billed) types.push('mess');
-                      handleCheckout(types);
-                    }}>
+                  <Button className="w-full" disabled={checkingOut || !balance} onClick={handleGenerateInvoice}>
                     <Receipt size={15} className="mr-1.5" />
-                    {checkingOut ? 'Working…'
-                      : guest.status === 'checked_in' && genRoom && genMess ? 'Checkout — Generate Both Bills'
-                      : genRoom && genMess ? 'Generate Both Bills'
-                      : genRoom ? (guest.status === 'checked_in' ? 'Checkout — Generate Room Bill' : 'Generate Room Bill')
-                      : genMess ? (guest.status === 'checked_in' ? 'Checkout — Generate Food Bill' : 'Generate Food Bill')
-                      : 'Select a bill to generate'}
+                    {checkingOut ? 'Working…' : alreadyFullyBilled ? 'View Invoice' : guest.status === 'checked_in' ? 'Checkout — Generate Invoice' : 'Generate Invoice'}
                   </Button>
-                  {guest.status === 'checked_in' && (
-                    <p className="text-xs text-gray-500">Generating a bill checks the guest out and sends the room to the housekeeping queue.</p>
+                  {guest.status === 'checked_in' && !alreadyFullyBilled && (
+                    <p className="text-xs text-gray-500">Generating the invoice checks the guest out and sends the room to the housekeeping queue.</p>
                   )}
                 </div>
               </div>
@@ -292,7 +173,8 @@ export function CheckoutSheet({ guest, onOpenChange, onDone }: {
         </SheetContent>
       </Sheet>
 
-      <BillPrintView invoiceIds={printInvoiceIds} onClose={() => setPrintInvoiceIds(null)}
+      <BillPrintView invoiceIds={printInvoiceIds} bookingId={printBookingId ?? undefined}
+        onClose={() => { setPrintInvoiceIds(null); setPrintBookingId(null); }}
         allowPayments onPaymentsChanged={() => { fetchBalance(); onDone?.(); }} />
     </>
   );

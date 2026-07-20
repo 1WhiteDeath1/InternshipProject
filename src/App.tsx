@@ -7,12 +7,15 @@ import SplashScreen from '@/pages/SplashScreen';
 import Login from '@/pages/Login';
 import Layout from '@/components/Layout';
 import Dashboard from '@/pages/Dashboard';
-import Inventory from '@/pages/Inventory';
-import Procurement from '@/pages/Procurement';
+import StockManagement from '@/pages/StockManagement';
 import Bookings from '@/pages/Bookings';
 import Billing from '@/pages/Billing';
 import ClerkDesk from '@/pages/ClerkDesk';
+import Guests from '@/pages/Guests';
+import Attendants from '@/pages/Attendants';
+import Tariffs from '@/pages/Tariffs';
 import Members from '@/pages/Members';
+import MemberLedger from '@/pages/MemberLedger';
 import Attendance from '@/pages/Attendance';
 import MessBilling from '@/pages/MessBilling';
 import Kitchen from '@/pages/Kitchen';
@@ -37,12 +40,15 @@ function App() {
               <Route path="/login" element={<Login />} />
               <Route element={<Layout />}>
                 <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/inventory" element={<Inventory />} />
-                <Route path="/procurement" element={<Procurement />} />
+                <Route path="/stock" element={<StockManagement />} />
                 <Route path="/bookings" element={<Bookings />} />
                 <Route path="/billing" element={<Billing />} />
                 <Route path="/clerk-desk" element={<ClerkDesk />} />
+                <Route path="/guests" element={<Guests />} />
+                <Route path="/attendants" element={<Attendants />} />
+                <Route path="/tariffs" element={<Tariffs />} />
                 <Route path="/members" element={<Members />} />
+                <Route path="/members/:id" element={<MemberLedger />} />
                 <Route path="/attendance" element={<Attendance />} />
                 <Route path="/mess-billing" element={<MessBilling />} />
                 <Route path="/kitchen" element={<Kitchen />} />

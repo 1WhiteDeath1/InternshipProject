@@ -7,7 +7,12 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { todayISO, addDays, fmtDay, type CalendarDaySummary, type RoomWeekData, type RoomWeekRoom } from './shared';
 
-type ViewMode = 'week' | 'month';
+type ViewMode = 'week' | 'month' | 'room-month';
+
+interface RoomGridData {
+  dates: string[];
+  rooms: RoomWeekRoom[];
+}
 
 interface CalendarTabProps {
   onOpenRoom: (roomId: number) => void;
@@ -43,7 +48,10 @@ function intensity(occupied: number, total: number): string {
   return 'bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-900';
 }
 
-function RoomWeekGrid({ data, onOpenRoom }: { data: RoomWeekData; onOpenRoom: (roomId: number) => void }) {
+// Shared by the Week view (7 columns) and the Room Month view (1..31 columns)
+// - both are just a room-rows x date-columns grid, differing only in the
+// date range fetched.
+function RoomWeekGrid({ data, onOpenRoom }: { data: RoomGridData; onOpenRoom: (roomId: number) => void }) {
   const today = todayISO();
 
   const floorGroups = useMemo(() => {
@@ -166,6 +174,7 @@ export default function CalendarTab({ onOpenRoom }: CalendarTabProps) {
   const [anchor, setAnchor] = useState(todayISO());
   const [weekData, setWeekData] = useState<RoomWeekData | null>(null);
   const [monthDays, setMonthDays] = useState<CalendarDaySummary[]>([]);
+  const [roomMonthData, setRoomMonthData] = useState<RoomGridData | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchData = useCallback(async () => {
@@ -175,6 +184,10 @@ export default function CalendarTab({ onOpenRoom }: CalendarTabProps) {
         const start = startOfWeek(anchor);
         const res = await api.get(`/bookings/room-week?start=${start}`);
         setWeekData(res.data);
+      } else if (viewMode === 'room-month') {
+        const [y, m] = startOfMonth(anchor).split('-').map(Number);
+        const res = await api.get(`/bookings/room-month?year=${y}&month=${m}`);
+        setRoomMonthData({ dates: res.data.dates, rooms: res.data.rooms });
       } else {
         const start = startOfMonth(anchor);
         const end = addMonths(start, 1);
@@ -189,6 +202,7 @@ export default function CalendarTab({ onOpenRoom }: CalendarTabProps) {
 
   const stepBack = () => setAnchor(viewMode === 'week' ? addDays(anchor, -7) : addMonths(anchor, -1));
   const stepForward = () => setAnchor(viewMode === 'week' ? addDays(anchor, 7) : addMonths(anchor, 1));
+  const viewLabels: Record<ViewMode, string> = { week: 'Week', month: 'Month', 'room-month': 'Rooms (Month)' };
 
   const periodLabel = useMemo(() => {
     if (viewMode === 'week') {
@@ -209,10 +223,10 @@ export default function CalendarTab({ onOpenRoom }: CalendarTabProps) {
           <p className="text-sm font-semibold ml-2">{periodLabel}</p>
         </div>
         <div className="flex rounded-md border overflow-hidden">
-          {(['week', 'month'] as ViewMode[]).map(m => (
+          {(['week', 'month', 'room-month'] as ViewMode[]).map(m => (
             <button key={m} type="button" onClick={() => setViewMode(m)}
-              className={`px-3 py-1.5 text-xs font-medium capitalize ${viewMode === m ? 'bg-black text-white dark:bg-white dark:text-black' : 'bg-transparent hover:bg-gray-100 dark:hover:bg-gray-800'}`}>
-              {m}
+              className={`px-3 py-1.5 text-xs font-medium whitespace-nowrap ${viewMode === m ? 'bg-black text-white dark:bg-white dark:text-black' : 'bg-transparent hover:bg-gray-100 dark:hover:bg-gray-800'}`}>
+              {viewLabels[m]}
             </button>
           ))}
         </div>
@@ -221,6 +235,7 @@ export default function CalendarTab({ onOpenRoom }: CalendarTabProps) {
       {loading && <p className="text-sm text-gray-500">Loading…</p>}
       {!loading && viewMode === 'week' && weekData && <RoomWeekGrid data={weekData} onOpenRoom={onOpenRoom} />}
       {!loading && viewMode === 'month' && <MonthGrid days={monthDays} onOpenRoom={onOpenRoom} />}
+      {!loading && viewMode === 'room-month' && roomMonthData && <RoomWeekGrid data={roomMonthData} onOpenRoom={onOpenRoom} />}
 
       {!loading && viewMode === 'month' && (
         <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
@@ -231,7 +246,7 @@ export default function CalendarTab({ onOpenRoom }: CalendarTabProps) {
           <span>A = arrivals, D = departures</span>
         </div>
       )}
-      {!loading && viewMode === 'week' && (
+      {!loading && (viewMode === 'week' || viewMode === 'room-month') && (
         <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-red-100 dark:bg-red-900 inline-block" /> Occupied</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-blue-100 dark:bg-blue-900 inline-block" /> Reserved</span>

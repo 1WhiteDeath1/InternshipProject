@@ -5,19 +5,24 @@ import { useTheme } from '@/contexts/useTheme';
 import { useFeatures } from '@/contexts/useFeatures';
 import api from '@/lib/api';
 import {
-  LayoutDashboard, Package, ShoppingCart, BedDouble, Receipt,
+  LayoutDashboard, Package, BedDouble, Receipt,
   Shield, Users, UserCog, ClipboardList, Bell, BarChart3,
   Settings, FileUp, LogOut, Sun, Moon, ChevronLeft, ChevronRight,
-  IdCard, UtensilsCrossed, Wallet, ChefHat, LayoutGrid, Menu, X
+  IdCard, UtensilsCrossed, Wallet, ChefHat, LayoutGrid, Menu, X, Contact, UserCircle2, TrendingUp,
+  Plus, Receipt as ReceiptIcon,
 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { QuickBookingModal } from '@/components/QuickBookingModal';
+import { QuickChargeModal } from '@/components/QuickChargeModal';
 
 const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, requiresSupervisor: false },
-  { path: '/inventory', label: 'Inventory', icon: Package, feature: null },
-  { path: '/procurement', label: 'Procurement', icon: ShoppingCart, feature: null },
+  { path: '/stock', label: 'Inventory & Procurement', icon: Package, feature: null },
   { path: '/bookings', label: 'Bookings', icon: BedDouble, feature: null },
   { path: '/billing', label: 'Billing', icon: Receipt, feature: null },
   { path: '/clerk-desk', label: 'Clerk Desk', icon: LayoutGrid, feature: 'clerk_desk' },
+  { path: '/guests', label: 'Guests', icon: Contact, feature: null },
+  { path: '/attendants', label: 'Attendants', icon: UserCircle2, feature: null },
   { path: '/members', label: 'Members', icon: IdCard, feature: 'mess_members' },
   { path: '/attendance', label: 'Attendance', icon: UtensilsCrossed, feature: 'mess_attendance' },
   { path: '/mess-billing', label: 'Mess Billing', icon: Wallet, feature: 'mess_billing' },
@@ -27,6 +32,7 @@ const navItems = [
   { path: '/roles', label: 'Roles', icon: UserCog, requiresSupervisor: true },
   { path: '/audit-log', label: 'Audit Log', icon: ClipboardList, requiresSupervisor: true },
   { path: '/alerts', label: 'Alerts', icon: Bell, badge: 'alertCount' },
+  { path: '/tariffs', label: 'Tariffs', icon: TrendingUp, requiresSupervisor: true },
   { path: '/reports', label: 'Reports', icon: BarChart3, requiresSupervisor: true },
   { path: '/import-export', label: 'Import / Export', icon: FileUp, requiresSupervisor: true },
   { path: '/settings', label: 'Settings', icon: Settings, requiresSupervisor: true },
@@ -43,6 +49,8 @@ export default function Layout() {
   // hamburger button; it closes on navigation or backdrop tap.
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [alertCount, setAlertCount] = useState(0);
+  const [quickBookingOpen, setQuickBookingOpen] = useState(false);
+  const [quickChargeOpen, setQuickChargeOpen] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) navigate('/login');
@@ -173,6 +181,14 @@ export default function Layout() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+            <div className="hidden sm:flex items-center gap-2">
+              <Button size="sm" onClick={() => setQuickBookingOpen(true)}>
+                <Plus size={15} className="mr-1" /> New Booking
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => setQuickChargeOpen(true)}>
+                <ReceiptIcon size={15} className="mr-1" /> Log Charge
+              </Button>
+            </div>
             {user.is_supervisor && (
               <button
                 onClick={() => navigate('/alerts')}
@@ -203,6 +219,9 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+
+      <QuickBookingModal open={quickBookingOpen} onOpenChange={setQuickBookingOpen} />
+      <QuickChargeModal open={quickChargeOpen} onOpenChange={setQuickChargeOpen} />
     </div>
   );
 }

@@ -44,11 +44,48 @@ async def list_members(
     return {"items": [
         {"id": m.id, "service_number": m.service_number, "full_name": m.full_name,
          "rank": m.rank, "unit": m.unit, "mess_category": m.mess_category.value,
-         "client_category": m.client_category.value, "custom_discount_rate": float(m.custom_discount_rate or 0),
+         "client_category": m.client_category.value, "is_womens_bloc": bool(m.is_womens_bloc),
+         "custom_discount_rate": float(m.custom_discount_rate or 0),
          "phone": m.phone, "email": m.email, "status": m.status.value,
          "current_room_id": current_rooms[m.id].room_id if m.id in current_rooms else None,
          "current_room_number": current_rooms[m.id].room.room_number if m.id in current_rooms else None,
          "created_at": m.created_at, "updated_at": m.updated_at} for m in members], "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/{member_id}")
+async def get_member(member_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    member = db.query(Member).filter(Member.id == member_id).first()
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+    current_hra = db.query(Booking).filter(
+        Booking.member_id == member.id, Booking.nature_of_duty == "hra", Booking.status == "checked_in",
+    ).order_by(Booking.check_in.desc()).first()
+    return {
+        "id": member.id, "service_number": member.service_number, "full_name": member.full_name,
+        "rank": member.rank, "unit": member.unit, "mess_category": member.mess_category.value,
+        "client_category": member.client_category.value, "is_womens_bloc": bool(member.is_womens_bloc),
+        "custom_discount_rate": float(member.custom_discount_rate or 0),
+        "phone": member.phone, "email": member.email, "status": member.status.value,
+        "current_room_id": current_hra.room_id if current_hra else None,
+        "current_room_number": current_hra.room.room_number if current_hra else None,
+        "created_at": member.created_at, "updated_at": member.updated_at,
+    }
+
+
+@router.get("/{member_id}/residencies")
+async def get_member_residencies(member_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """HRA booking history for the Room Allocation tab of the Member Ledger
+    Portal - current and past residencies, most recent first. Read-only."""
+    if not db.query(Member).filter(Member.id == member_id).first():
+        raise HTTPException(status_code=404, detail="Member not found")
+    bookings = db.query(Booking).filter(
+        Booking.member_id == member_id, Booking.nature_of_duty == "hra",
+    ).order_by(Booking.check_in.desc()).all()
+    return [{
+        "id": b.id, "room_id": b.room_id, "room_number": b.room.room_number if b.room else None,
+        "room_type": getattr(b.room.room_type, "value", b.room.room_type) if b.room else None,
+        "check_in": b.check_in, "check_out": b.check_out, "status": b.status.value,
+    } for b in bookings]
 
 
 @router.post("")

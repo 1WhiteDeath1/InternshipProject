@@ -1,15 +1,16 @@
 """Meal attendance/booking and member-leave router."""
+from typing import List
 from datetime import datetime, date, time, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import (
-    MealAttendance, MemberLeave, Member, MemberStatus, Booking, AttendanceStatus, LeaveStatus,
+    MealAttendance, MemberLeave, Member, MemberStatus, Booking, AttendanceStatus, LeaveStatus, Room,
 )
 from backend.schemas import (
-    MealAttendanceCreate, AttendanceMarkRequest, BulkAttendanceCreate, MemberLeaveCreate,
-    RosterSetRequest,
+    MealAttendanceCreate, MealAttendanceOut, AttendanceMarkRequest, BulkAttendanceCreate, MemberLeaveCreate,
+    RosterSetRequest, AttendanceLookupResult, ServeAttendanceRequest, NoShowSweepResult,
 )
 from backend.auth import get_current_user, check_permission
 from backend.audit import log_audit, serialize_model, AuditAction
@@ -45,6 +46,17 @@ def _has_active_leave(db: Session, member_id: int, on_date: date) -> bool:
         MemberLeave.start_date <= on_date,
         MemberLeave.end_date >= on_date,
     ).first() is not None
+
+
+def _attendance_out(record: MealAttendance) -> MealAttendanceOut:
+    return MealAttendanceOut(
+        id=record.id, member_id=record.member_id, booking_id=record.booking_id, recipe_id=record.recipe_id,
+        date=record.date, meal_type=record.meal_type.value, method=record.method, status=record.status.value,
+        booked_at=record.booked_at, marked_at=record.marked_at, marked_by=record.marked_by,
+        member_name=record.member.full_name if record.member else None,
+        guest_name=record.booking.guest_name if record.booking else None,
+        recipe_name=record.recipe.name if record.recipe else None,
+    )
 
 
 def _create_attendance(db: Session, member_id: int | None, booking_id: int | None, meal_date: date, meal_type: str, method: str, recipe_id: int | None = None) -> MealAttendance:
@@ -142,6 +154,168 @@ async def bulk_book_attendance(data: BulkAttendanceCreate, request: Request, db:
     log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "meal_attendance", None,
               after_state={"count": len(succeeded), "date": str(data.date), "meal_type": data.meal_type}, ip_address=request.client.host)
     return {"booked": succeeded, "failed": failed}
+
+
+# --- Meal Service (omnibar search, per-person serve, no-show sweep) ---
+
+@router.get("/lookup", response_model=List[AttendanceLookupResult])
+async def lookup_attendance(
+    q: str = Query(..., min_length=2), date_: str = Query(..., alias="date"), meal_type: str = Query(...),
+    db: Session = Depends(get_db), current_user=Depends(get_current_user),
+):
+    """Omnibar data source: matches active members (name/service number) and
+    checked-in guests (name/room number), annotated with their attendance
+    status for the given date/meal so the UI can render the Intent pill
+    without a second round trip."""
+    try:
+        lookup_date = date.fromisoformat(date_)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be an ISO date (YYYY-MM-DD)")
+
+    results: List[AttendanceLookupResult] = []
+
+    members = db.query(Member).filter(
+        Member.status == MemberStatus.ACTIVE,
+        (Member.full_name.contains(q)) | (Member.service_number.contains(q)),
+    ).order_by(Member.full_name).limit(8).all()
+    member_ids = [m.id for m in members]
+    member_rows = {}
+    if member_ids:
+        member_rows = {r.member_id: r for r in db.query(MealAttendance).filter(
+            MealAttendance.member_id.in_(member_ids), MealAttendance.date == lookup_date,
+            MealAttendance.meal_type == meal_type,
+        ).all()}
+    for m in members:
+        rec = member_rows.get(m.id)
+        results.append(AttendanceLookupResult(
+            kind="member", id=m.id, name=m.full_name, sub_label=m.service_number,
+            recipe_id=rec.recipe_id if rec else None,
+            attendance_id=rec.id if rec else None,
+            attendance_status=rec.status.value if rec else None,
+        ))
+
+    bookings = db.query(Booking).join(Room, Booking.room_id == Room.id).filter(
+        Booking.status == "checked_in",
+        (Booking.guest_name.contains(q)) | (Room.room_number.contains(q)),
+    ).order_by(Booking.guest_name).limit(8).all()
+    booking_ids = [b.id for b in bookings]
+    booking_rows = {}
+    if booking_ids:
+        booking_rows = {r.booking_id: r for r in db.query(MealAttendance).filter(
+            MealAttendance.booking_id.in_(booking_ids), MealAttendance.date == lookup_date,
+            MealAttendance.meal_type == meal_type,
+        ).all()}
+    for b in bookings:
+        rec = booking_rows.get(b.id)
+        results.append(AttendanceLookupResult(
+            kind="booking", id=b.id, name=b.guest_name, sub_label=b.room.room_number if b.room else None,
+            recipe_id=rec.recipe_id if rec else None,
+            attendance_id=rec.id if rec else None,
+            attendance_status=rec.status.value if rec else None,
+        ))
+
+    return results
+
+
+@router.post("/serve", response_model=MealAttendanceOut)
+async def serve_meal(data: ServeAttendanceRequest, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Point-of-service action: confirm attendance for someone already booked,
+    or create+confirm in one step for a walk-up with no advance intent. Unlike
+    POST /attendance, this never checks the advance-booking cutoff - serving
+    someone right now is not a future booking."""
+    if not check_permission(current_user, "attendance", "create"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    if data.member_id and not db.query(Member).filter(Member.id == data.member_id).first():
+        raise HTTPException(status_code=404, detail="Member not found")
+    if data.booking_id:
+        booking = db.query(Booking).filter(Booking.id == data.booking_id).first()
+        if not booking:
+            raise HTTPException(status_code=404, detail="Booking not found")
+        if booking.status.value != "checked_in":
+            raise HTTPException(status_code=400, detail="Guest must be checked in to record a meal")
+
+    query = db.query(MealAttendance).filter(MealAttendance.date == data.date, MealAttendance.meal_type == data.meal_type)
+    query = query.filter(MealAttendance.member_id == data.member_id) if data.member_id else query.filter(MealAttendance.booking_id == data.booking_id)
+    record = query.first()
+
+    if record and record.status in (AttendanceStatus.CANCELLED, AttendanceStatus.EXCLUDED):
+        # Explicit cancellation/leave shouldn't be silently overridden by a serve click -
+        # the frontend intercepts this exact status code and shows why, not a generic error.
+        raise HTTPException(status_code=409, detail=record.status.value)
+    if record and record.status == AttendanceStatus.ATTENDED:
+        return _attendance_out(record)  # idempotent double-click safety
+    if record is None and data.member_id and _has_active_leave(db, data.member_id, data.date):
+        raise HTTPException(status_code=409, detail="excluded")
+
+    before = serialize_model(record) if record else None
+    if record is None:
+        record = MealAttendance(member_id=data.member_id, booking_id=data.booking_id, recipe_id=data.recipe_id,
+                                 date=data.date, meal_type=data.meal_type, method="manual")
+        db.add(record)
+    elif data.recipe_id is not None:
+        record.recipe_id = data.recipe_id
+    record.status = AttendanceStatus.ATTENDED
+    record.marked_at = datetime.utcnow()
+    record.marked_by = current_user.id
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="This member/guest already has a booking for that meal/date")
+    db.refresh(record)
+
+    action = AuditAction.CREATE if before is None else AuditAction.UPDATE
+    log_audit(db, current_user.id, current_user.full_name, action, "meal_attendance", record.id,
+              before_state=before, after_state=serialize_model(record), ip_address=request.client.host)
+    return _attendance_out(record)
+
+
+@router.post("/no-show-sweep", response_model=NoShowSweepResult)
+async def no_show_sweep(
+    request: Request,
+    date_: str = Query(..., alias="date"), meal_type: str = Query(...),
+    db: Session = Depends(get_db), current_user=Depends(get_current_user),
+):
+    """Manual sweep (no background scheduler in this app - matches the
+    lazy-recompute pattern already used for a la carte SLA timers): flips
+    stale BOOKED rows past the meal window + grace period to NO_SHOW."""
+    if not check_permission(current_user, "attendance", "edit"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    try:
+        sweep_date = date.fromisoformat(date_)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be an ISO date (YYYY-MM-DD)")
+    meal_time = MEAL_TIMES.get(meal_type)
+    if not meal_time:
+        raise HTTPException(status_code=400, detail=f"meal_type must be one of {sorted(MEAL_TIMES)}")
+
+    grace_minutes = get_setting_float(db, "no_show_grace_minutes", 60)
+    grace_end = datetime.combine(sweep_date, meal_time) + timedelta(minutes=grace_minutes)
+    if datetime.utcnow() < grace_end:
+        raise HTTPException(status_code=400, detail="This meal window hasn't closed yet")
+
+    rows = db.query(MealAttendance).filter(
+        MealAttendance.date == sweep_date, MealAttendance.meal_type == meal_type,
+        MealAttendance.status == AttendanceStatus.BOOKED,
+    ).all()
+
+    items: List[AttendanceLookupResult] = []
+    for r in rows:
+        before = serialize_model(r)
+        r.status = AttendanceStatus.NO_SHOW
+        r.marked_at = datetime.utcnow()
+        r.marked_by = current_user.id
+        items.append(AttendanceLookupResult(
+            kind="member" if r.member_id else "booking",
+            id=r.member_id or r.booking_id,
+            name=r.member.full_name if r.member else (r.booking.guest_name if r.booking else "Unknown"),
+            sub_label=None, recipe_id=r.recipe_id, attendance_id=r.id, attendance_status=r.status.value,
+        ))
+        log_audit(db, current_user.id, current_user.full_name, AuditAction.OVERRIDE, "meal_attendance", r.id,
+                  before_state=before, after_state=serialize_model(r), reason="no-show sweep", ip_address=request.client.host)
+
+    db.commit()
+    return NoShowSweepResult(count=len(items), items=items)
 
 
 # --- Roster (single-tap present/absent grid) ---

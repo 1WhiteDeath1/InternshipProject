@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api, { getErrorMessage } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -7,7 +8,6 @@ import { LogIn, LogOut, Sparkles, MessageSquare, Copy, Check, RefreshCw, TimerOf
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { formatCurrency } from '@/lib/currency';
 import { useTheme } from '@/contexts/useTheme';
-import { CheckoutSheet, type CheckoutGuest } from '@/components/CheckoutSheet';
 import { ConfirmDialog, type ConfirmRequest } from '@/components/ConfirmDialog';
 import { RoomStatusDonut } from '@/components/RoomStatusDonut';
 import { type OccupancyData, type SmsOutboxItem, type CalendarMonthSummary } from './shared';
@@ -88,10 +88,10 @@ function YearlyAnalytics() {
 }
 
 export default function DashboardTab({ onOpenRoom, onChanged }: DashboardTabProps) {
+  const navigate = useNavigate();
   const [occupancy, setOccupancy] = useState<OccupancyData | null>(null);
   const [smsOutbox, setSmsOutbox] = useState<SmsOutboxItem[]>([]);
   const [copiedSmsId, setCopiedSmsId] = useState<number | null>(null);
-  const [checkoutGuest, setCheckoutGuest] = useState<CheckoutGuest | null>(null);
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
 
   const fetchOccupancy = useCallback(async () => {
@@ -205,8 +205,8 @@ export default function DashboardTab({ onOpenRoom, onChanged }: DashboardTabProp
                     </span>
                   )}
                 </button>
-                <Button size="sm" variant="ghost" title="Checkout & bill"
-                  onClick={() => setCheckoutGuest({ id: d.booking_id, guest_name: d.guest_name, room_number: d.room_number, status: 'checked_in' })}>
+                <Button size="sm" variant="ghost" title="Send to Clerk Desk to bill"
+                  onClick={() => navigate('/clerk-desk')}>
                   <LogOut size={17} className={d.overdue ? 'text-red-600' : 'text-blue-600'} />
                 </Button>
               </div>
@@ -268,9 +268,6 @@ export default function DashboardTab({ onOpenRoom, onChanged }: DashboardTabProp
 
       <YearlyAnalytics />
 
-      <CheckoutSheet guest={checkoutGuest}
-        onOpenChange={v => { if (!v) setCheckoutGuest(null); }}
-        onDone={refresh} />
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
     </div>
   );

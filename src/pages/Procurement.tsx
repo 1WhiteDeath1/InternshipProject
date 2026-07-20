@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api, { getErrorMessage } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -39,6 +39,15 @@ interface InventoryItemOption {
   id: number;
   name: string;
   sku: string;
+  last_unit_cost: number | null;
+  last_vendor_id: number | null;
+  last_vendor_name: string | null;
+  last_purchased_at: string | null;
+}
+
+interface Category {
+  id: number;
+  name: string;
 }
 
 interface ThreeWayMatch {
@@ -59,11 +68,13 @@ interface POLineItem {
 }
 
 const emptyLineItem: POLineItem = { item_id: 0, quantity_ordered: 1, unit_price: 0 };
+const emptyNewItemForm = { sku: '', name: '', category_id: 0, unit: '' };
 
 export default function Procurement() {
   const [pos, setPos] = useState<PurchaseOrder[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [inventoryItems, setInventoryItems] = useState<InventoryItemOption[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [matches, setMatches] = useState<ThreeWayMatch[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -74,6 +85,11 @@ export default function Procurement() {
   const [receiveDialogPO, setReceiveDialogPO] = useState<PurchaseOrder | null>(null);
   const [confirmDialogPO, setConfirmDialogPO] = useState<PurchaseOrder | null>(null);
   const [qtyByItem, setQtyByItem] = useState<Record<number, number>>({});
+  const quantityRefs = useRef<(HTMLInputElement | null)[]>([]);
+  // Inline "+ New Item" - which line item row (if any) is showing the quick
+  // create-item form instead of its normal item/qty/price inputs.
+  const [creatingItemForIndex, setCreatingItemForIndex] = useState<number | null>(null);
+  const [newItemForm, setNewItemForm] = useState(emptyNewItemForm);
 
   const fetchPOs = async () => {
     try {
@@ -103,10 +119,17 @@ export default function Procurement() {
     } catch { toast.error('Failed to load three-way match data'); }
   };
 
+  const fetchCategories = async () => {
+    try {
+      const res = await api.get('/inventory/categories');
+      setCategories(res.data);
+    } catch { toast.error('Failed to load categories'); }
+  };
+
   useEffect(() => {
     queueMicrotask(() => {
       setLoading(true);
-      Promise.all([fetchPOs(), fetchVendors(), fetchInventoryItems(), fetchMatches()]).finally(() => setLoading(false));
+      Promise.all([fetchPOs(), fetchVendors(), fetchInventoryItems(), fetchMatches(), fetchCategories()]).finally(() => setLoading(false));
     });
   }, []);
 
@@ -117,7 +140,68 @@ export default function Procurement() {
     items[index] = { ...items[index], [field]: value };
     setPoForm({ ...poForm, items });
   };
+  // Price Memory: selecting an item pre-fills last-known unit price and jumps
+  // focus to Quantity with its value selected, so a keystroke overwrites the
+  // default instantly instead of requiring a backspace first.
+  const selectLineItem = (index: number, itemId: number) => {
+    const picked = inventoryItems.find(it => it.id === itemId);
+    const items = [...poForm.items];
+    items[index] = {
+      ...items[index], item_id: itemId,
+      // Always reflect the newly selected item's own history, even resetting
+      // to 0 when it has none - carrying forward a different item's stale
+      // price across a swap would be actively misleading, not "manual".
+      unit_price: picked?.last_unit_cost ?? 0,
+    };
+    setPoForm({ ...poForm, items });
+    // Focus/select the Quantity field, re-asserted a beat later: right after
+    // creating a new item inline, the row is still the create-item Card in
+    // this tick (quantityRefs[index] is stale until it swaps back to the
+    // normal row), AND Radix Dialog's FocusScope reclaims focus onto the
+    // dialog container once the previously-focused "Create & Use" button is
+    // removed from the DOM by that swap - a single deferred call (rAF, or
+    // rAF+0ms timeout) consistently loses that race. Re-asserting again
+    // ~150ms later - comfortably after Radix's own reclaim has already
+    // fired - is what actually wins, for both the plain-select and the
+    // inline-create-then-select paths.
+    const focusQty = () => {
+      const el = quantityRefs.current[index];
+      el?.focus();
+      el?.select();
+    };
+    requestAnimationFrame(focusQty);
+    setTimeout(focusQty, 150);
+  };
   const poTotal = poForm.items.reduce((sum, i) => sum + i.quantity_ordered * i.unit_price, 0);
+
+  // Redundancy fix: without this, ordering an item that's never been bought
+  // before meant abandoning the PO dialog, creating it on the separate
+  // Inventory page, then coming back and starting the PO over. Mirrors the
+  // "+ Create new recipe" inline pattern already used in Kitchen's a la
+  // carte dialog - same idea, applied here.
+  const openNewItemForm = (index: number) => {
+    setCreatingItemForIndex(index);
+    setNewItemForm(emptyNewItemForm);
+  };
+
+  const cancelNewItemForm = () => setCreatingItemForIndex(null);
+
+  const handleCreateItemInline = async (index: number) => {
+    if (!newItemForm.name.trim() || !newItemForm.sku.trim() || !newItemForm.unit.trim() || !newItemForm.category_id) {
+      toast.error('Name, SKU, category, and unit are required');
+      return;
+    }
+    try {
+      const res = await api.post('/inventory/items', newItemForm);
+      toast.success('Item created');
+      await fetchInventoryItems();
+      setCreatingItemForIndex(null);
+      // Brand new item has no purchase history, so this correctly leaves
+      // unit_price at 0 (same fallback selectLineItem already uses for any
+      // item with no last_unit_cost) while still focusing Quantity.
+      selectLineItem(index, res.data.id);
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to create item')); }
+  };
 
   const statusBadge = (status: string) => {
     const map: Record<string, string> = {
@@ -236,31 +320,71 @@ export default function Procurement() {
                     <Button size="sm" variant="outline" onClick={addLineItem}><Plus size={14} className="mr-1" /> Add Item</Button>
                   </div>
                   <div className="space-y-2">
-                    {poForm.items.map((line, i) => (
-                      <div key={i} className="flex items-center gap-2">
-                        <select
-                          className="flex-1 h-10 rounded-md border border-input bg-background px-3 text-sm"
-                          value={line.item_id}
-                          onChange={e => updateLineItem(i, 'item_id', Number(e.target.value))}
-                        >
-                          <option value="0">Select item</option>
-                          {inventoryItems.map(item => <option key={item.id} value={item.id}>{item.name} ({item.sku})</option>)}
-                        </select>
-                        <Input
-                          type="number" placeholder="Qty" className="w-24" min={0}
-                          value={line.quantity_ordered}
-                          onChange={e => updateLineItem(i, 'quantity_ordered', Number(e.target.value))}
-                        />
-                        <Input
-                          type="number" placeholder="Unit Price" className="w-28" min={0}
-                          value={line.unit_price}
-                          onChange={e => updateLineItem(i, 'unit_price', Number(e.target.value))}
-                        />
-                        <Button size="sm" variant="ghost" onClick={() => removeLineItem(i)} disabled={poForm.items.length === 1}>
-                          <Trash2 size={16} className="text-red-500" />
-                        </Button>
+                    {poForm.items.map((line, i) => {
+                      const picked = inventoryItems.find(it => it.id === line.item_id);
+                      if (creatingItemForIndex === i) {
+                        return (
+                          <Card key={i}>
+                            <CardContent className="p-3 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <Label className="text-xs">New Inventory Item</Label>
+                                <Button size="sm" variant="ghost" onClick={cancelNewItemForm}>Cancel</Button>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <Input placeholder="Name" value={newItemForm.name} onChange={e => setNewItemForm({ ...newItemForm, name: e.target.value })} />
+                                <Input placeholder="SKU" value={newItemForm.sku} onChange={e => setNewItemForm({ ...newItemForm, sku: e.target.value })} />
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={newItemForm.category_id} onChange={e => setNewItemForm({ ...newItemForm, category_id: Number(e.target.value) })}>
+                                  <option value="0">Select category</option>
+                                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                </select>
+                                <Input placeholder="Unit (kg, l, pcs...)" value={newItemForm.unit} onChange={e => setNewItemForm({ ...newItemForm, unit: e.target.value })} />
+                              </div>
+                              <Button size="sm" onClick={() => handleCreateItemInline(i)} className="w-full">Create &amp; Use</Button>
+                            </CardContent>
+                          </Card>
+                        );
+                      }
+                      return (
+                      <div key={i} className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <select
+                            className="flex-1 h-10 rounded-md border border-input bg-background px-3 text-sm"
+                            value={line.item_id}
+                            onChange={e => selectLineItem(i, Number(e.target.value))}
+                          >
+                            <option value="0">Select item</option>
+                            {inventoryItems.map(item => <option key={item.id} value={item.id}>{item.name} ({item.sku})</option>)}
+                          </select>
+                          <Input
+                            ref={el => { quantityRefs.current[i] = el; }}
+                            type="number" placeholder="Qty" className="w-24" min={0}
+                            value={line.quantity_ordered}
+                            onChange={e => updateLineItem(i, 'quantity_ordered', Number(e.target.value))}
+                          />
+                          <Input
+                            type="number" placeholder="Unit Price" className="w-28" min={0}
+                            value={line.unit_price}
+                            onChange={e => updateLineItem(i, 'unit_price', Number(e.target.value))}
+                          />
+                          <Button size="sm" variant="ghost" onClick={() => removeLineItem(i)} disabled={poForm.items.length === 1}>
+                            <Trash2 size={16} className="text-red-500" />
+                          </Button>
+                        </div>
+                        <div className="flex items-center justify-between pl-1">
+                          {picked?.last_unit_cost != null ? (
+                            <p className="text-xs text-gray-400">
+                              Last: {formatCurrency(picked.last_unit_cost)}{picked.last_vendor_name ? ` from ${picked.last_vendor_name}` : ''}{picked.last_purchased_at ? ` (${picked.last_purchased_at})` : ''}
+                            </p>
+                          ) : <span />}
+                          <button type="button" className="text-xs text-blue-600 hover:underline" onClick={() => openNewItemForm(i)}>
+                            + New Item
+                          </button>
+                        </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                   <p className="text-right text-sm font-semibold mt-2">Total: {formatCurrency(poTotal)}</p>
                 </div>

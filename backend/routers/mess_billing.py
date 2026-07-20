@@ -1,4 +1,5 @@
 """Communal per-head mess billing for permanent members."""
+import hashlib
 from datetime import datetime, date, timedelta
 from calendar import monthrange
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -6,14 +7,15 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import (
     Member, MemberStatus, MessBill, MessBillStatus, GuestMealCharge,
-    PurchaseOrder, POStatus, Booking, KitchenOrder, Room,
+    PurchaseOrder, POStatus, Booking, KitchenOrder, Room, Alert, AlertStatus, AlertSeverity,
 )
 from backend.schemas import GuestMealChargeCreate, DiscountApplyRequest
 from backend.auth import get_current_user, check_permission
 from backend.audit import log_audit, serialize_model, AuditAction
 from backend.logging_config import get_logger
-from backend.services.mess_billing_calc import get_man_days, get_setting_float
-from backend.services.room_pricing import get_hra_rank_rate, get_hra_utility_rate
+from backend.alerts import create_alert
+from backend.services.mess_billing_calc import get_man_days, get_setting_float, get_setting_str
+from backend.services.room_pricing import get_hra_rank_rate, get_hra_utility_rate, get_womens_bloc_rank_rate
 
 logger = get_logger("app")
 router = APIRouter()
@@ -47,6 +49,106 @@ async def list_bills(
          "total_amount": float(b.total_amount), "status": b.status.value, "generated_at": b.generated_at} for b in bills], "total": total}
 
 
+def _invoice_qr_svg(payload: str) -> str:
+    """Locally generated QR (reportlab - no internet, nothing leaves the
+    LAN), returned as an inline-able SVG string. Duplicated from
+    billing.py's helper of the same name rather than imported - both are
+    small, self-contained, and this keeps the guest-billing and mess-billing
+    domains decoupled."""
+    from reportlab.graphics.barcode.qr import QrCodeWidget
+    from reportlab.graphics.shapes import Drawing
+    from reportlab.graphics import renderSVG
+    qr = QrCodeWidget(payload)
+    x0, y0, x1, y1 = qr.getBounds()
+    size = 200.0
+    drawing = Drawing(size, size, transform=[size / (x1 - x0), 0, 0, size / (y1 - y0), 0, 0])
+    drawing.add(qr)
+    svg = renderSVG.drawToString(drawing)
+    return svg[svg.find("<svg"):]
+
+
+def _mess_identity(db: Session) -> dict:
+    return {
+        "name": get_setting_str(db, "mess_name", "EME Officers Mess"),
+        "address": get_setting_str(db, "mess_address", "204 Firdousi Road, Rawalpindi"),
+        "phone": get_setting_str(db, "mess_phone", "Tele No. G.H.Q 31725"),
+    }
+
+
+@router.get("/room-lease-dispatch")
+async def room_lease_dispatch(month: int = Query(..., ge=1, le=12), year: int = Query(...), db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Pipeline A (Month-End Split): aggregate org-facing document combining
+    every member's room/HRA charge (MessBill.stay_amount) for a period into
+    one dispatch, split into regular-HRA vs Women's Bloc subtotals. Purely a
+    read/presentation view over already-generated MessBill rows - changes
+    nothing about how the underlying bills were computed or are owed."""
+    bills = db.query(MessBill).filter(MessBill.month == month, MessBill.year == year).order_by(MessBill.member_id).all()
+    if not bills:
+        raise HTTPException(status_code=404, detail="No mess bills generated yet for this period")
+
+    members, hra_subtotal, womens_bloc_subtotal = [], 0.0, 0.0
+    for b in bills:
+        stay = float(b.stay_amount or 0)
+        if stay == 0:
+            continue
+        member = b.member
+        is_wb = bool(member.is_womens_bloc) if member else False
+        members.append({
+            "member_name": member.full_name if member else None,
+            "service_number": member.service_number if member else None,
+            "is_womens_bloc": is_wb, "stay_amount": stay,
+        })
+        if is_wb:
+            womens_bloc_subtotal += stay
+        else:
+            hra_subtotal += stay
+    total = hra_subtotal + womens_bloc_subtotal
+
+    mess = _mess_identity(db)
+    period_label = date(year, month, 1).strftime("%B %Y")
+    verify_hash = hashlib.sha256(f"{month}-{year}|{total:.2f}".encode()).hexdigest()[:12].upper()
+
+    return {
+        "period": {"month": month, "year": year, "label": period_label},
+        "members": members,
+        "hra_subtotal": hra_subtotal, "womens_bloc_subtotal": womens_bloc_subtotal, "total": total,
+        "mess": mess,
+        "verify_hash": verify_hash,
+        "qr_svg": _invoice_qr_svg(f"{mess['name']}\nRoom-Lease Dispatch: {period_label}\nTotal: Rs {total:,.0f}\nVerify: {verify_hash}"),
+    }
+
+
+@router.get("/bills/{bill_id}/diet-invoice")
+async def diet_invoice(bill_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Pipeline B (Month-End Split): per-member printable dining-only
+    breakdown of one MessBill - excludes the room/HRA (stay_amount) side
+    entirely, since that's dispatched separately via room-lease-dispatch."""
+    bill = db.query(MessBill).filter(MessBill.id == bill_id).first()
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    member = bill.member
+
+    dining_total = (float(bill.base_menu_amount or 0) - float(bill.discount_amount or 0)
+                    + float(bill.extra_meals_amount or 0) + float(bill.ala_carte_amount or 0))
+
+    mess = _mess_identity(db)
+    period_label = date(bill.year, bill.month, 1).strftime("%B %Y")
+    verify_hash = hashlib.sha256(f"{bill.id}|{dining_total:.2f}".encode()).hexdigest()[:12].upper()
+
+    return {
+        "bill_id": bill.id,
+        "member": {"full_name": member.full_name if member else None, "service_number": member.service_number if member else None},
+        "period": {"month": bill.month, "year": bill.year, "label": period_label},
+        "man_days": bill.man_days, "per_head_rate": float(bill.per_head_rate),
+        "base_menu_amount": float(bill.base_menu_amount), "extra_meals_amount": float(bill.extra_meals_amount or 0),
+        "ala_carte_amount": float(bill.ala_carte_amount or 0), "discount_amount": float(bill.discount_amount or 0),
+        "dining_total": dining_total, "status": bill.status.value,
+        "mess": mess,
+        "verify_hash": verify_hash,
+        "qr_svg": _invoice_qr_svg(f"{mess['name']}\nDiet Invoice: {period_label}\nMember: {member.full_name if member else ''}\nTotal: Rs {dining_total:,.0f}\nVerify: {verify_hash}"),
+    }
+
+
 def _hra_charge_and_renew(db: Session, member: Member, period_start: date, period_end: date) -> float:
     """HRA residents are billed fresh each period from the current rank +
     room-class rate (not a stored booking total, so a rank correction or
@@ -70,9 +172,27 @@ def _hra_charge_and_renew(db: Session, member: Member, period_start: date, perio
 
     room = db.query(Room).filter(Room.id == booking.room_id).first()
     room_type = getattr(room.room_type, "value", room.room_type) if room else None
-    hra_rate = get_hra_rank_rate(db, member.rank)
+    hra_rate = get_womens_bloc_rank_rate(db, member.rank) if member.is_womens_bloc else get_hra_rank_rate(db, member.rank)
     utility_rate = get_hra_utility_rate(db, room_type, (room.ac_count if room else 1) or 1) if room_type else None
     amount = (hra_rate[1] + utility_rate) if (hra_rate and utility_rate is not None) else 0.0
+
+    # Women's Bloc rates are seeded at Rs 0 until an admin fills them in -
+    # don't let that silently bill a real resident's stay as free.
+    if member.is_womens_bloc and hra_rate and hra_rate[1] == 0:
+        logger.warning(f"Women's Bloc rate not yet set for rank band '{hra_rate[0]}' - "
+                        f"billing member #{member.id} ({member.full_name}) Rs 0 for HRA this period")
+        existing = db.query(Alert).filter(
+            Alert.entity_type == "member", Alert.entity_id == member.id,
+            Alert.status.in_([AlertStatus.NEW, AlertStatus.ACKNOWLEDGED]),
+            Alert.module == "mess_billing",
+            Alert.title.contains("Women's Bloc rate not set"),
+        ).first()
+        if not existing:
+            create_alert(
+                db, f"Women's Bloc rate not set: {member.full_name}",
+                f"Rank band '{hra_rate[0]}' has no Women's Bloc rate configured yet - this member's HRA charge was billed as Rs 0 for {period_start.strftime('%b %Y')}. Set the rate under Members > Manage Women's Bloc Rates.",
+                AlertSeverity.LOW, "mess_billing", "member", member.id,
+            )
 
     if booking.status.value == "checked_in" and booking.check_out <= period_end + timedelta(days=60):
         booking.check_out += timedelta(days=365)

@@ -10,9 +10,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Wallet, RefreshCw, CheckCircle, DollarSign, Percent, Plus } from 'lucide-react';
+import { Wallet, RefreshCw, CheckCircle, DollarSign, Percent, Plus, Printer, FileText } from 'lucide-react';
 import { defaultMealForNow } from '@/lib/mealDefaults';
 import { formatCurrency } from '@/lib/currency';
+import { RoomLeaseDispatchView, DietInvoiceView } from '@/components/MessBillPrint';
 
 interface MessBill {
   id: number;
@@ -63,6 +64,8 @@ export default function MessBilling() {
   const [discountReason, setDiscountReason] = useState('');
   const [chargeDialogOpen, setChargeDialogOpen] = useState(false);
   const [chargeForm, setChargeForm] = useState(emptyChargeForm());
+  const [dispatchOpen, setDispatchOpen] = useState(false);
+  const [dietInvoiceBillId, setDietInvoiceBillId] = useState<number | null>(null);
 
   const fetchBills = async () => {
     try {
@@ -166,6 +169,9 @@ export default function MessBilling() {
           <Button variant="outline" onClick={handleIssueAll} disabled={draftCount === 0}>
             <CheckCircle size={16} className="mr-1" /> Issue All Drafts ({draftCount})
           </Button>
+          <Button variant="outline" onClick={() => setDispatchOpen(true)} disabled={bills.length === 0}>
+            <Printer size={16} className="mr-1" /> Print Room-Lease Dispatch
+          </Button>
         </div>
       </div>
 
@@ -208,6 +214,9 @@ export default function MessBilling() {
                               <Percent size={16} className="text-purple-600" />
                             </Button>
                           )}
+                          <Button size="sm" variant="ghost" title="Print Diet Invoice" onClick={() => setDietInvoiceBillId(b.id)}>
+                            <FileText size={16} className="text-gray-600" />
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -282,6 +291,11 @@ export default function MessBilling() {
           </DialogContent>
         </Dialog>
       )}
+
+      {dispatchOpen && (
+        <RoomLeaseDispatchView month={month} year={year} onClose={() => setDispatchOpen(false)} />
+      )}
+      <DietInvoiceView billId={dietInvoiceBillId} onClose={() => setDietInvoiceBillId(null)} />
     </div>
   );
 }

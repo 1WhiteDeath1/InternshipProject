@@ -18,6 +18,7 @@ import { toast } from 'sonner';
 import {
   Search, Plus, Trash2, AlertTriangle
 } from 'lucide-react';
+import { formatCurrency } from '@/lib/currency';
 
 interface InventoryItem {
   id: number;
@@ -29,6 +30,7 @@ interface InventoryItem {
   reorder_level: number;
   total_stock: number;
   is_active: boolean;
+  last_unit_cost: number | null;
 }
 
 interface StockBatch {
@@ -173,18 +175,20 @@ export default function Inventory() {
                     <TableHead>Name</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>Total Stock</TableHead>
+                    <TableHead>Last Price</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="w-16"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {loading && <TableRow><TableCell colSpan={6} className="text-center py-8 text-gray-500">Loading inventory...</TableCell></TableRow>}
+                  {loading && <TableRow><TableCell colSpan={7} className="text-center py-8 text-gray-500">Loading inventory...</TableCell></TableRow>}
                   {!loading && items.map(item => (
                     <TableRow key={item.id}>
                       <TableCell className="font-medium">{item.sku}</TableCell>
                       <TableCell>{item.name}</TableCell>
                       <TableCell>{item.category_name}</TableCell>
                       <TableCell className="font-semibold">{item.total_stock} {item.unit}</TableCell>
+                      <TableCell className="text-gray-500">{item.last_unit_cost != null ? formatCurrency(item.last_unit_cost) : '—'}</TableCell>
                       <TableCell>
                         {item.total_stock <= item.reorder_level && item.reorder_level > 0 ? (
                           <Badge variant="destructive" className="gap-1"><AlertTriangle size={12} /> Low</Badge>
@@ -198,7 +202,7 @@ export default function Inventory() {
                     </TableRow>
                   ))}
                   {!loading && items.length === 0 && (
-                    <TableRow><TableCell colSpan={6} className="text-center py-8 text-gray-500">No inventory items found</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={7} className="text-center py-8 text-gray-500">No inventory items found</TableCell></TableRow>
                   )}
                 </TableBody>
               </Table>

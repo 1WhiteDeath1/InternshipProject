@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -10,6 +11,8 @@ import RoomSection, { type InitialBooking } from './bookings/RoomSection';
 import type { Room, MemberOption } from './bookings/shared';
 
 export default function Bookings() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [members, setMembers] = useState<MemberOption[]>([]);
   const [panelRoomId, setPanelRoomId] = useState<number | null>(null);
@@ -26,6 +29,29 @@ export default function Bookings() {
   }, []);
 
   useEffect(() => { queueMicrotask(() => { fetchRooms(); fetchMembers(); }); }, [fetchRooms, fetchMembers]);
+
+  // Keep room/housekeeping status fresh across desks without a manual
+  // refresh - paused while the tab isn't visible so an idle background tab
+  // doesn't keep polling the server.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchRooms();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [fetchRooms]);
+
+  // The global "+ New Booking" shortcut (Layout.tsx) hands off the room it
+  // auto-picked via navigation state - consume it once, then clear the
+  // state so a back-navigation or remount doesn't reopen the panel.
+  useEffect(() => { queueMicrotask(() => {
+    const state = location.state as { openRoomId?: number; initialBooking?: InitialBooking } | null;
+    if (state?.openRoomId) {
+      setPanelInitialBooking(state.initialBooking);
+      setPanelRoomId(state.openRoomId);
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
 
   const openRoom = (roomId: number, initialBooking?: InitialBooking) => {
     setPanelInitialBooking(initialBooking);
@@ -49,7 +75,7 @@ export default function Bookings() {
         </TabsContent>
 
         <TabsContent value="rooms">
-          <RoomGridTab rooms={rooms} onOpenRoom={openRoom} />
+          <RoomGridTab rooms={rooms} onOpenRoom={openRoom} onChanged={fetchRooms} />
         </TabsContent>
 
         <TabsContent value="calendar">

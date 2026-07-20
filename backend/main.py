@@ -64,6 +64,9 @@ app.include_router(routers.recipes_router, prefix="/api/recipes", tags=["Recipes
 app.include_router(routers.kitchen_router, prefix="/api/kitchen", tags=["Kitchen"])
 app.include_router(routers.menu_prices_router, prefix="/api/menu-prices", tags=["Menu Prices"])
 app.include_router(routers.guests_router, prefix="/api/guests", tags=["Guests"])
+app.include_router(routers.attendants_router, prefix="/api/attendants", tags=["Attendants"])
+app.include_router(routers.tariffs_router, prefix="/api/tariffs", tags=["Tariffs"])
+app.include_router(routers.womens_bloc_rates_router, prefix="/api/womens-bloc-rates", tags=["Womens Bloc Rates"])
 
 @app.get("/api/health")
 async def health_check():

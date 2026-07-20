@@ -21,3 +21,6 @@ from backend.routers.recipes import router as recipes_router
 from backend.routers.kitchen import router as kitchen_router
 from backend.routers.menu_prices import router as menu_prices_router
 from backend.routers.guests import router as guests_router
+from backend.routers.attendants import router as attendants_router
+from backend.routers.tariffs import router as tariffs_router
+from backend.routers.womens_bloc_rates import router as womens_bloc_rates_router

@@ -16,7 +16,7 @@ from the official card) are used as a fallback when no row exists yet.
 """
 from datetime import date, timedelta
 from sqlalchemy.orm import Session
-from backend.models import RoomRate, DutyRate, HraRankRate, HraUtilityRate
+from backend.models import RoomRate, DutyRate, HraRankRate, HraUtilityRate, TariffRate, WomensBlocRankRate
 from backend.services.mess_billing_calc import get_setting_float
 
 RATE_COMPONENTS = ("rent", "electricity", "generator", "gas", "internet")
@@ -62,6 +62,16 @@ DEFAULT_HRA_RANK_RATES = {
     "ltcol_col": ("Lt Col / Col", 15325),
     "brig": ("Brig", 15758),
     "maj_gen": ("Maj Gen", 17469),
+}
+
+# Women's Bloc rank rate, same bands as HRA - placeholder Rs 0 until the mess
+# secretary enters real figures via the admin UI (see WomensBlocRankRate).
+DEFAULT_WOMENS_BLOC_RANK_RATES = {
+    "capt": ("Capt", 0),
+    "maj": ("Maj", 0),
+    "ltcol_col": ("Lt Col / Col", 0),
+    "brig": ("Brig", 0),
+    "maj_gen": ("Maj Gen", 0),
 }
 
 # Monthly flat utility charge for an HRA resident's room class. Suites are
@@ -171,6 +181,31 @@ def get_hra_rank_rate(db: Session, rank: str):
     return (band, float(default[1])) if default else None
 
 
+def get_womens_bloc_rank_rate(db: Session, rank: str):
+    """(rank_band, monthly Women's Bloc amount) for a resident's rank, or
+    None. Same rank bands as get_hra_rank_rate, separate table - orthogonal
+    dimension, not a replacement for the regular HRA rate."""
+    band = hra_rank_to_band(rank)
+    if not band:
+        return None
+    row = db.query(WomensBlocRankRate).filter(WomensBlocRankRate.rank_band == band).first()
+    if row:
+        return band, float(row.monthly_amount)
+    default = DEFAULT_WOMENS_BLOC_RANK_RATES.get(band)
+    return (band, float(default[1])) if default else None
+
+
+def get_tariff_rate(db: Session, rank: str, room_type: str, stay_type: str):
+    """Nightly rate for an exact rank x room_type x stay_type match, or None
+    if the mess hasn't entered a tariff for this combination."""
+    if not (rank and room_type and stay_type):
+        return None
+    row = db.query(TariffRate).filter(
+        TariffRate.rank == rank, TariffRate.room_type == room_type, TariffRate.stay_type == stay_type,
+    ).first()
+    return float(row.nightly_rate) if row else None
+
+
 def get_hra_utility_rate(db: Session, room_type: str, ac_count: int = 1):
     """Monthly flat utility charge for an HRA resident's room class, or None.
     A 'suite' resolves to the 1xAC or 2xAC figure via the room's ac_count."""
@@ -205,6 +240,7 @@ def reprice_for_departure(db: Session, booking, departure: date):
         client_category=booking.client_category, nature_of_duty=booking.nature_of_duty,
         rank=booking.rank, da_multiplier=float(booking.da_multiplier) if booking.da_multiplier else None,
         mattress_count=booking.mattress_count or 0, member_id=booking.member_id,
+        stay_type=booking.stay_type,
     )
     return effective, pricing
 
@@ -213,6 +249,7 @@ def compute_booking_price(
     db: Session, room, *, check_in: date, check_out: date,
     client_category: str, nature_of_duty: str = "visit", rank: str = None,
     da_multiplier: float = None, mattress_count: int = 0, member_id: int = None,
+    stay_type: str = None,
 ) -> dict:
     nights = max((check_out - check_in).days, 1)
     category = normalize_category(client_category)
@@ -225,22 +262,31 @@ def compute_booking_price(
     note = None
     skip_mattress = False
 
-    if nature_of_duty == "hra":
+    tariff_nightly = get_tariff_rate(db, rank, room_type, stay_type) if nature_of_duty != "hra" else None
+    if tariff_nightly is not None:
+        nightly = tariff_nightly
+        components = {"tariff_rate": nightly}
+        mode = "tariff_matrix"
+        note = f"{rank} · {room_type} · {stay_type} tariff (Rs {nightly:,.0f}/night)"
+    elif nature_of_duty == "hra":
         mode = "hra_monthly"
         skip_mattress = True
         hra_rank = rank
+        is_womens_bloc = False
         if member_id:
             from backend.models import Member  # local import: avoid a pricing<->models circular import at module load
             member = db.query(Member).filter(Member.id == member_id).first()
             if member:
                 hra_rank = member.rank
-        hra_rate = get_hra_rank_rate(db, hra_rank)
+                is_womens_bloc = bool(member.is_womens_bloc)
+        hra_rate = get_womens_bloc_rank_rate(db, hra_rank) if is_womens_bloc else get_hra_rank_rate(db, hra_rank)
         utility_rate = get_hra_utility_rate(db, room_type, getattr(room, "ac_count", 1) or 1)
         if hra_rate and utility_rate is not None:
             band, hra_amount = hra_rate
             components = {"hra_rank_rate": hra_amount, "utility_charge": utility_rate}
             monthly_total = round(hra_amount + utility_rate, 2)
-            note = f"{DEFAULT_HRA_RANK_RATES.get(band, (band,))[0]} HRA (Rs {hra_amount:,.0f}) + room utilities (Rs {utility_rate:,.0f}) - charged monthly via the mess bill, not per night"
+            rate_label = "Women's Bloc" if is_womens_bloc else DEFAULT_HRA_RANK_RATES.get(band, (band,))[0]
+            note = f"{rate_label} HRA (Rs {hra_amount:,.0f}) + room utilities (Rs {utility_rate:,.0f}) - charged monthly via the mess bill, not per night"
         else:
             note = "No HRA rate found for this rank/room class yet - link a member with a recognised rank so the mess bill can price this residency"
     elif nature_of_duty == "official_duty" and (duty := get_duty_rate(db, rank)):

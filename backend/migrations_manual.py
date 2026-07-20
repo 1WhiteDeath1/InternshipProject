@@ -24,6 +24,115 @@ def run_startup_migrations(engine):
     _migrate_invoices_bill_type(engine)
     _migrate_bookings_guest_id(engine)
     _migrate_room_types_three_classes(engine)
+    _migrate_invoices_complimentary(engine)
+    _migrate_rooms_attendant(engine)
+    _migrate_bookings_attendant(engine)
+    _migrate_bookings_stay_type(engine)
+    _migrate_attendants_on_duty(engine)
+    _migrate_rooms_maintenance_until(engine)
+    _migrate_members_womens_bloc(engine)
+
+
+def _migrate_invoices_complimentary(engine):
+    # Lets staff mark an invoice fully complimentary (Rs 0) with a reason,
+    # distinct from a partial discount. Additive, nullable/defaulted.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(invoices)")).fetchall()
+        if not cols:
+            return
+        col_names = {c[1] for c in cols}
+        if "is_complimentary" not in col_names:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN is_complimentary BOOLEAN DEFAULT 0"))
+            logger.info("migration: added invoices.is_complimentary")
+        if "complimentary_reason" not in col_names:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN complimentary_reason TEXT"))
+            logger.info("migration: added invoices.complimentary_reason")
+        conn.commit()
+
+
+def _migrate_rooms_attendant(engine):
+    # Default responsible attendant for the room (1 attendant -> many rooms).
+    # attendants table itself is new and created by create_all().
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(rooms)")).fetchall()
+        if not cols:
+            return
+        if "attendant_id" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE rooms ADD COLUMN attendant_id INTEGER REFERENCES attendants(id)"))
+            conn.commit()
+            logger.info("migration: added rooms.attendant_id")
+
+
+def _migrate_bookings_attendant(engine):
+    # Snapshot of which attendant was responsible during this specific stay -
+    # kept separate from rooms.attendant_id so reassigning a room's default
+    # attendant later doesn't rewrite history for past bookings.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(bookings)")).fetchall()
+        if not cols:
+            return
+        if "attendant_id" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE bookings ADD COLUMN attendant_id INTEGER REFERENCES attendants(id)"))
+            conn.commit()
+            logger.info("migration: added bookings.attendant_id")
+
+
+def _migrate_members_womens_bloc(engine):
+    # First-ever ALTER on members - orthogonal to mess_category, drives which
+    # rank-rate table (HraRankRate vs WomensBlocRankRate) HRA billing uses.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(members)")).fetchall()
+        if not cols:
+            return
+        if "is_womens_bloc" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE members ADD COLUMN is_womens_bloc BOOLEAN DEFAULT 0"))
+            conn.commit()
+            logger.info("migration: added members.is_womens_bloc")
+
+
+def _migrate_attendants_on_duty(engine):
+    # Clock-in state, separate from the static `shift` label and from
+    # `is_active` (roster membership) - lets the attendant picker default to
+    # who's actually on the floor right now.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(attendants)")).fetchall()
+        if not cols:
+            return
+        col_names = {c[1] for c in cols}
+        if "on_duty" not in col_names:
+            conn.execute(text("ALTER TABLE attendants ADD COLUMN on_duty BOOLEAN DEFAULT 0"))
+            logger.info("migration: added attendants.on_duty")
+        if "on_duty_since" not in col_names:
+            conn.execute(text("ALTER TABLE attendants ADD COLUMN on_duty_since DATETIME"))
+            logger.info("migration: added attendants.on_duty_since")
+        conn.commit()
+
+
+def _migrate_rooms_maintenance_until(engine):
+    # Est. completion date captured by the "Send to Maintenance" overlay -
+    # notes (issue description) already exists on rooms.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(rooms)")).fetchall()
+        if not cols:
+            return
+        if "maintenance_until" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE rooms ADD COLUMN maintenance_until DATE"))
+            conn.commit()
+            logger.info("migration: added rooms.maintenance_until")
+
+
+def _migrate_bookings_stay_type(engine):
+    # Official / private / family - the third axis of the rank x room-type x
+    # stay-type tariff matrix, independent of nature_of_duty (which governs
+    # which pricing engine/billing mode applies).
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(bookings)")).fetchall()
+        if not cols:
+            return
+        if "stay_type" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE bookings ADD COLUMN stay_type VARCHAR(20)"))
+            conn.commit()
+            logger.info("migration: added bookings.stay_type")
 
 
 def _migrate_room_types_three_classes(engine):

@@ -26,11 +26,13 @@ db = SessionLocal()
 
 # --- Roles ---
 supervisor_role = Role(name="Supervisor", description="Full system access", is_supervisor=True)
-front_desk_role = Role(name="Front Desk", description="Booking and guest management")
+front_desk_role = Role(name="Front Desk", description="Booking and room-charge logging")
+mess_staff_role = Role(name="Mess Staff", description="Attendance and mess-charge logging")
+clerk_role = Role(name="Clerk", description="Generates final invoices, discounts, and complimentary bills")
 kitchen_role = Role(name="Kitchen Clerk", description="Inventory and kitchen operations")
 procurement_role = Role(name="Procurement Officer", description="Purchase orders and vendors")
 security_role = Role(name="Night Security", description="Security and incident management")
-db.add_all([supervisor_role, front_desk_role, kitchen_role, procurement_role, security_role])
+db.add_all([supervisor_role, front_desk_role, mess_staff_role, clerk_role, kitchen_role, procurement_role, security_role])
 db.commit()
 
 # --- Permissions ---
@@ -40,6 +42,25 @@ front_perms = [
     RolePermission(role_id=front_desk_role.id, module="bookings", action="edit"),
     RolePermission(role_id=front_desk_role.id, module="billing", action="view"),
     RolePermission(role_id=front_desk_role.id, module="billing", action="create"),
+    RolePermission(role_id=front_desk_role.id, module="attendants", action="view"),
+    RolePermission(role_id=front_desk_role.id, module="attendants", action="create"),
+    RolePermission(role_id=front_desk_role.id, module="attendants", action="edit"),
+    RolePermission(role_id=front_desk_role.id, module="guests", action="view"),
+]
+mess_staff_perms = [
+    RolePermission(role_id=mess_staff_role.id, module="attendance", action="view"),
+    RolePermission(role_id=mess_staff_role.id, module="attendance", action="create"),
+    RolePermission(role_id=mess_staff_role.id, module="attendance", action="edit"),
+    RolePermission(role_id=mess_staff_role.id, module="mess_billing", action="view"),
+    RolePermission(role_id=mess_staff_role.id, module="mess_billing", action="create"),
+    RolePermission(role_id=mess_staff_role.id, module="mess_billing", action="edit"),
+]
+clerk_perms = [
+    RolePermission(role_id=clerk_role.id, module="clerk_desk", action="view"),
+    RolePermission(role_id=clerk_role.id, module="clerk_desk", action="create"),
+    RolePermission(role_id=clerk_role.id, module="clerk_desk", action="edit"),
+    RolePermission(role_id=clerk_role.id, module="clerk_desk", action="approve"),
+    RolePermission(role_id=clerk_role.id, module="bookings", action="view"),
 ]
 kitchen_perms = [
     RolePermission(role_id=kitchen_role.id, module="inventory", action="view"),
@@ -56,7 +77,7 @@ security_perms = [
     RolePermission(role_id=security_role.id, module="security", action="view"),
     RolePermission(role_id=security_role.id, module="security", action="create"),
 ]
-db.add_all(front_perms + kitchen_perms + procurement_perms + security_perms)
+db.add_all(front_perms + mess_staff_perms + clerk_perms + kitchen_perms + procurement_perms + security_perms)
 db.commit()
 
 # --- Users ---
@@ -65,13 +86,17 @@ admin = User(username="admin", email="admin@samhotel.local", full_name="System A
              status=UserStatus.ACTIVE, last_login=datetime.utcnow())
 front_user = User(username="frontdesk1", email="front@samhotel.local", full_name="Sana Malik",
                   hashed_password=hash_password("front123"), role_id=front_desk_role.id, status=UserStatus.ACTIVE)
+mess_staff_user = User(username="messstaff1", email="mess@samhotel.local", full_name="Bilal Ahmed",
+                       hashed_password=hash_password("mess123"), role_id=mess_staff_role.id, status=UserStatus.ACTIVE)
+clerk_user = User(username="clerk1", email="clerk@samhotel.local", full_name="Imran Khalid",
+                  hashed_password=hash_password("clerk123"), role_id=clerk_role.id, status=UserStatus.ACTIVE)
 kitchen_user = User(username="kitchen1", email="kitchen@samhotel.local", full_name="Usman Tariq",
                     hashed_password=hash_password("kitchen123"), role_id=kitchen_role.id, status=UserStatus.ACTIVE)
 procurement_user = User(username="procurement1", email="procure@samhotel.local", full_name="Ayesha Siddiqui",
                         hashed_password=hash_password("procure123"), role_id=procurement_role.id, status=UserStatus.ACTIVE)
 security_user = User(username="security1", email="security@samhotel.local", full_name="Naveed Iqbal",
                      hashed_password=hash_password("security123"), role_id=security_role.id, status=UserStatus.ACTIVE)
-db.add_all([admin, front_user, kitchen_user, procurement_user, security_user])
+db.add_all([admin, front_user, mess_staff_user, clerk_user, kitchen_user, procurement_user, security_user])
 db.commit()
 
 # --- Feature Flags (will be auto-created by API, but let's add defaults here) ---

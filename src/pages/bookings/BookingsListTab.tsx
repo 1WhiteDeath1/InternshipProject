@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api, { getErrorMessage } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,7 +8,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { toast } from 'sonner';
 import { Search, LogIn, LogOut, Ban, UserX, TimerOff, Globe } from 'lucide-react';
 import { formatCurrency } from '@/lib/currency';
-import { CheckoutSheet, type CheckoutGuest } from '@/components/CheckoutSheet';
 import { ConfirmDialog, type ConfirmRequest } from '@/components/ConfirmDialog';
 import { todayISO, type Booking } from './shared';
 import { StatusBadge } from './badges';
@@ -17,10 +17,10 @@ interface BookingsListTabProps {
 }
 
 export default function BookingsListTab({ onChanged }: BookingsListTabProps) {
+  const navigate = useNavigate();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
-  const [checkoutGuest, setCheckoutGuest] = useState<CheckoutGuest | null>(null);
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
 
   const fetchBookings = useCallback(async () => {
@@ -114,8 +114,8 @@ export default function BookingsListTab({ onChanged }: BookingsListTabProps) {
                     <div className="flex gap-0.5">
                       {b.status === 'confirmed' && <Button size="sm" variant="ghost" title="Check in" onClick={() => handleCheckIn(b.id)}><LogIn size={16} className="text-green-600" /></Button>}
                       {b.status === 'checked_in' && b.nature_of_duty !== 'hra' && (
-                        <Button size="sm" variant="ghost" title="Checkout & bill"
-                          onClick={() => setCheckoutGuest({ id: b.id, guest_name: b.guest_name, rank: b.rank, room_number: b.room_number, status: b.status })}>
+                        <Button size="sm" variant="ghost" title="Send to Clerk Desk to bill"
+                          onClick={() => navigate('/clerk-desk')}>
                           <LogOut size={16} className="text-blue-600" />
                         </Button>
                       )}
@@ -132,9 +132,6 @@ export default function BookingsListTab({ onChanged }: BookingsListTabProps) {
         </CardContent>
       </Card>
 
-      <CheckoutSheet guest={checkoutGuest}
-        onOpenChange={v => { if (!v) setCheckoutGuest(null); }}
-        onDone={refresh} />
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
     </div>
   );

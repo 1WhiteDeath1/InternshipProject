@@ -17,7 +17,7 @@ from backend.config import UPLOADS_DIR
 from backend.models import (
     Room, Booking, GuestMovement, RoomStatus, BookingStatus,
     RoomRate, DutyRate, RoomPhoto, Member, MemberStatus, SmsMessage, Guest,
-    Invoice, BookingCharge,
+    Invoice, BookingCharge, Attendant,
 )
 from backend.services import sms as sms_service
 from backend.schemas import BookingCreate, BookingUpdate
@@ -124,6 +124,8 @@ async def list_rooms(
             "arrival_nature_of_duty": arrival.nature_of_duty if arrival else None,
             "is_active": r.is_active,
             "photos": _photo_list(db, r.id),
+            "attendant_id": r.attendant_id,
+            "attendant_name": r.attendant.full_name if r.attendant else None,
         })
 
     return {"items": result, "total": total, "page": page, "page_size": page_size}
@@ -214,6 +216,34 @@ async def set_housekeeping(room_id: int, data: dict, request: Request, db: Sessi
     return {"message": f"Room {room.room_number} marked {new_status}", "housekeeping_status": new_status}
 
 
+@router.put("/rooms/{room_id}/attendant")
+async def set_room_attendant(room_id: int, data: dict, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Quick-reassign the room's default attendant - a high-frequency action,
+    deliberately a single lightweight call rather than the full room-update
+    endpoint. Does NOT touch any currently in-progress stay's own
+    attendant_id snapshot (that only changes at check-in)."""
+    if not check_permission(current_user, "bookings", "edit"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    room = db.query(Room).filter(Room.id == room_id).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    attendant_id = data.get("attendant_id")
+    if attendant_id is not None:
+        attendant = db.query(Attendant).filter(Attendant.id == attendant_id, Attendant.is_active == True).first()
+        if not attendant:
+            raise HTTPException(status_code=400, detail="Attendant not found or inactive")
+
+    before = room.attendant_id
+    room.attendant_id = attendant_id
+    db.commit()
+
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "rooms", room.id,
+              before_state={"attendant_id": before}, after_state={"attendant_id": attendant_id},
+              reason="Attendant reassignment", ip_address=request.client.host)
+    return {"message": "Attendant updated", "attendant_id": attendant_id}
+
+
 @router.put("/rooms/{room_id}")
 async def update_room(room_id: int, data: dict, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     if not check_permission(current_user, "bookings", "edit"):
@@ -223,9 +253,11 @@ async def update_room(room_id: int, data: dict, request: Request, db: Session = 
         raise HTTPException(status_code=404, detail="Room not found")
 
     before = serialize_model(room)
-    for field in ["room_type", "floor", "capacity", "ac_count", "base_price", "amenities", "status"]:
+    for field in ["room_type", "floor", "capacity", "ac_count", "base_price", "amenities", "status", "notes"]:
         if field in data:
             setattr(room, field, data[field])
+    if "maintenance_until" in data:
+        room.maintenance_until = date.fromisoformat(data["maintenance_until"]) if data["maintenance_until"] else None
     db.commit()
     db.refresh(room)
 
@@ -268,6 +300,10 @@ async def room_calendar(
             "base_price": float(room.base_price),
             "status": states["status"], "housekeeping_status": room.housekeeping_status or "clean",
             "photos": _photo_list(db, room.id),
+            "attendant_id": room.attendant_id,
+            "attendant_name": room.attendant.full_name if room.attendant else None,
+            "notes": room.notes,
+            "maintenance_until": room.maintenance_until,
         },
         "current_booking": {
             "id": current.id, "booking_reference": current.booking_reference,
@@ -302,7 +338,8 @@ async def availability(
     check_in: date, check_out: date,
     client_category: str = "civilian", nature_of_duty: str = "visit",
     rank: str = "", da_multiplier: float = 0, mattress_count: int = 0,
-    member_id: int = 0, include_booked: bool = False, room_id: int = 0,
+    member_id: int = 0, include_booked: bool = False, room_id: int = 0, stay_type: str = "",
+    room_type: str = "",
     db: Session = Depends(get_db), current_user=Depends(get_current_user),
 ):
     """All rooms priced for a prospective stay, with conflicts computed by
@@ -319,6 +356,8 @@ async def availability(
     if room_id:
         query = query.filter(Room.id == room_id)
         include_booked = True
+    if room_type:
+        query = query.filter(Room.room_type == room_type)
     rooms = query.order_by(Room.room_number).all()
     room_ids = [r.id for r in rooms]
     if room_id and not rooms:
@@ -354,6 +393,7 @@ async def availability(
             client_category=client_category, nature_of_duty=nature_of_duty,
             rank=rank or None, da_multiplier=da_multiplier or None,
             mattress_count=mattress_count, member_id=member_id or None,
+            stay_type=stay_type or None,
         )
         items.append({
             "id": r.id, "room_number": r.room_number, "room_type": r.room_type.value,
@@ -503,6 +543,61 @@ async def room_week(
     return {"start": start, "dates": date_list, "rooms": result}
 
 
+@router.get("/room-month")
+async def room_month(
+    year: int = 0, month: int = 0, db: Session = Depends(get_db), current_user=Depends(get_current_user),
+):
+    """Per-room, per-day state over a full calendar month (days 1..N) - the
+    bird's-eye room-by-room month view. Same cell/status logic as
+    /room-week (occupied covers both checked_in and checked_out so a stay
+    still shows correctly on its past dates after the guest checks out)."""
+    today = date.today()
+    year = year or today.year
+    month = month or today.month
+    if not 1 <= month <= 12:
+        raise HTTPException(status_code=400, detail="month must be 1-12")
+    month_start = date(year, month, 1)
+    month_end = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    date_list = [month_start + timedelta(days=i) for i in range((month_end - month_start).days)]
+
+    rooms = db.query(Room).filter(Room.is_active == True).order_by(Room.floor, Room.room_number).all()
+    room_ids = [r.id for r in rooms]
+
+    by_room_day = {}
+    if room_ids:
+        bookings = db.query(Booking).filter(
+            Booking.room_id.in_(room_ids), Booking.status.in_(("confirmed", "checked_in", "checked_out")),
+            Booking.check_in < month_end, Booking.check_out > month_start,
+        ).all()
+        priority = {"checked_in": 3, "checked_out": 2, "confirmed": 1}
+        for b in bookings:
+            for d in date_list:
+                if b.check_in <= d < b.check_out:
+                    slot = by_room_day.setdefault((b.room_id, d), None)
+                    if slot is None or priority.get(b.status.value, 0) > priority.get(slot.status.value, 0):
+                        by_room_day[(b.room_id, d)] = b
+
+    result = []
+    for r in rooms:
+        in_maintenance = r.status == RoomStatus.MAINTENANCE
+        cells = []
+        for d in date_list:
+            booking = by_room_day.get((r.id, d))
+            if in_maintenance:
+                cells.append({"date": d, "status": "maintenance", "guest_name": None, "booking_reference": None})
+            elif booking:
+                status = "occupied" if booking.status.value in ("checked_in", "checked_out") else "reserved"
+                cells.append({"date": d, "status": status, "guest_name": booking.guest_name, "booking_reference": booking.booking_reference})
+            else:
+                cells.append({"date": d, "status": "vacant", "guest_name": None, "booking_reference": None})
+        result.append({
+            "id": r.id, "room_number": r.room_number, "room_type": r.room_type.value,
+            "floor": r.floor, "cells": cells,
+        })
+
+    return {"year": year, "month": month, "dates": date_list, "rooms": result}
+
+
 # --- Rate card ---
 
 @router.get("/rates")
@@ -625,10 +720,12 @@ def _overlap_query(db: Session, room_id: int, check_in: date, check_out: date):
     )
 
 
-def _do_check_in(db: Session, booking: Booking, current_user):
+def _do_check_in(db: Session, booking: Booking, current_user, attendant_id: int | None = None):
     booking.status = BookingStatus.CHECKED_IN
     booking.actual_check_in = datetime.now()
     booking.room.status = RoomStatus.OCCUPIED
+    if attendant_id is not None:
+        booking.attendant_id = attendant_id
     db.commit()
     db.add(GuestMovement(
         booking_id=booking.id, movement_type="check_in",
@@ -721,6 +818,7 @@ async def create_booking(data: BookingCreate, request: Request, db: Session = De
         client_category=data.client_category, nature_of_duty=data.nature_of_duty,
         rank=(member.rank if member else data.rank), da_multiplier=data.da_multiplier,
         mattress_count=data.mattress_count, member_id=data.member_id,
+        stay_type=data.stay_type,
     )
 
     guest = _find_or_create_guest(db, data)
@@ -769,11 +867,17 @@ async def create_booking(data: BookingCreate, request: Request, db: Session = De
     # with a warning instead; the desk checks the guest in once the room is clean.
     warning = None
     if data.check_in_now:
+        effective_attendant_id = data.attendant_id if data.attendant_id is not None else room.attendant_id
         if (room.housekeeping_status or "clean") != "clean":
             warning = (f"Room {room.room_number} is not ready ({room.housekeeping_status}) - "
                        f"booking saved without check-in. Mark the room clean, then check in from the Dashboard.")
+        elif effective_attendant_id is None:
+            warning = (f"No attendant assigned to room {room.room_number} - "
+                       f"booking saved without check-in. Assign an attendant, then check in from the Dashboard.")
         else:
-            _do_check_in(db, booking, current_user)
+            if data.attendant_id is not None and data.attendant_id != room.attendant_id:
+                room.attendant_id = data.attendant_id
+            _do_check_in(db, booking, current_user, attendant_id=effective_attendant_id)
 
     sms = sms_service.queue_booking_sms(db, booking)
 
@@ -823,7 +927,7 @@ async def update_booking(booking_id: int, data: BookingUpdate, request: Request,
 
 
 @router.post("/{booking_id}/check-in")
-async def check_in(booking_id: int, request: Request, force: bool = False, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+async def check_in(booking_id: int, request: Request, force: bool = False, attendant_id: int | None = None, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     if not check_permission(current_user, "bookings", "edit"):
         raise HTTPException(status_code=403, detail="Permission denied")
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
@@ -848,7 +952,18 @@ async def check_in(booking_id: int, request: Request, force: bool = False, db: S
     if (room.housekeeping_status or "clean") != "clean":
         raise HTTPException(status_code=400, detail=f"Room {room.room_number} is not ready ({room.housekeeping_status}). Mark it clean before checking in.")
 
-    _do_check_in(db, booking, current_user)
+    # An attendant must be responsible for the room before a guest checks in -
+    # either explicitly selected now, or already the room's default assignment.
+    effective_attendant_id = attendant_id if attendant_id is not None else room.attendant_id
+    if effective_attendant_id is None:
+        raise HTTPException(status_code=400, detail="Select a room attendant before checking in.")
+    attendant = db.query(Attendant).filter(Attendant.id == effective_attendant_id, Attendant.is_active == True).first()
+    if not attendant:
+        raise HTTPException(status_code=400, detail="Selected attendant was not found or is inactive.")
+    if attendant_id is not None and attendant_id != room.attendant_id:
+        room.attendant_id = attendant_id
+
+    _do_check_in(db, booking, current_user, attendant_id=effective_attendant_id)
     log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "bookings", booking.id, reason="Check-in", ip_address=request.client.host)
     return {"message": "Guest checked in successfully"}
 

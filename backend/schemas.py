@@ -214,6 +214,10 @@ class InventoryItemOut(InventoryItemBase):
     created_at: datetime
     category_name: Optional[str] = None
     total_stock: float = 0
+    last_unit_cost: Optional[float] = None
+    last_vendor_id: Optional[int] = None
+    last_vendor_name: Optional[str] = None
+    last_purchased_at: Optional[str] = None
 
 class StockBatchBase(BaseModel):
     item_id: int
@@ -263,6 +267,24 @@ class CycleCountCreate(BaseModel):
     expected_quantity: float
     actual_quantity: float
     notes: Optional[str] = None
+
+
+class StockIntakeCreate(BaseModel):
+    item_id: int
+    quantity: float = Field(..., gt=0)
+    total_cost: float = Field(..., gt=0)
+
+
+class ReceiptConfirmLine(BaseModel):
+    item_id: int
+    quantity: float = Field(..., gt=0)
+    total_cost: float = Field(..., gt=0)
+    raw_name: Optional[str] = None  # kept for the audit log, not used for lookup
+
+
+class ReceiptConfirmRequest(BaseModel):
+    lines: List[ReceiptConfirmLine]
+    receipt_batch_id: Optional[str] = None
 
 
 # --- Recipe Schemas ---
@@ -441,6 +463,39 @@ class ThreeWayMatchOut(BaseModel):
     created_at: datetime
 
 
+# --- Attendant Schemas ---
+
+class AttendantBase(BaseModel):
+    full_name: str = Field(..., min_length=1, max_length=200)
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    shift: Optional[str] = None
+
+class AttendantCreate(AttendantBase):
+    pass
+
+class AttendantUpdate(BaseModel):
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    shift: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class AttendantOut(AttendantBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    is_active: bool
+    on_duty: bool = False
+    on_duty_since: Optional[datetime] = None
+    photo_url: Optional[str] = None
+    room_count: int = 0
+    created_at: datetime
+
+
+class AttendantDuty(BaseModel):
+    on_duty: bool
+
+
 # --- Room & Booking Schemas ---
 
 class RoomBase(BaseModel):
@@ -480,6 +535,55 @@ class GuestOut(BaseModel):
     unit_address: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
+class GuestListItem(BaseModel):
+    id: int
+    full_name: str
+    id_number: Optional[str] = None
+    phone: Optional[str] = None
+    classification: Optional[str] = None  # latest booking's client_category
+    rank: Optional[str] = None  # latest booking's rank, if any
+    last_arrival_date: Optional[date] = None
+    total_arrivals: int = 0
+
+class GuestListResponse(BaseModel):
+    items: List[GuestListItem]
+    total: int
+    page: int
+    page_size: int
+
+class GuestBookingSummary(BaseModel):
+    id: int
+    booking_reference: str
+    room_number: Optional[str] = None
+    check_in: date
+    check_out: date
+    status: str
+    rank: Optional[str] = None
+    client_category: str
+    total_amount: Optional[float] = None
+
+class GuestInvoiceSummary(BaseModel):
+    id: int
+    invoice_number: str
+    bill_type: str
+    issue_date: date
+    total_amount: float
+    amount_paid: float
+    status: str
+    is_complimentary: bool = False
+
+class GuestProfileOut(BaseModel):
+    id: int
+    full_name: str
+    phone: Optional[str] = None
+    id_type: Optional[str] = None
+    id_number: Optional[str] = None
+    unit_address: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    bookings: List[GuestBookingSummary] = []
+    invoices: List[GuestInvoiceSummary] = []
+
 class BookingBase(BaseModel):
     guest_name: str = Field(..., min_length=1, max_length=200)
     guest_phone: Optional[str] = None
@@ -504,6 +608,8 @@ class BookingBase(BaseModel):
     source: str = "walk_in"
     online_voucher_no: Optional[str] = Field(None, max_length=50)
     reference_person: Optional[str] = Field(None, max_length=100)
+    attendant_id: Optional[int] = None
+    stay_type: Optional[str] = None
 
     @model_validator(mode="after")
     def _check_dates(self):
@@ -712,6 +818,7 @@ class MemberBase(BaseModel):
     rank: str = Field(..., min_length=1, max_length=50)
     unit: Optional[str] = None
     mess_category: str
+    is_womens_bloc: bool = False
     phone: Optional[str] = None
     email: Optional[str] = None
     custom_discount_rate: float = Field(0, ge=0, le=100)
@@ -724,6 +831,7 @@ class MemberUpdate(BaseModel):
     rank: Optional[str] = None
     unit: Optional[str] = None
     mess_category: Optional[str] = None
+    is_womens_bloc: Optional[bool] = None
     phone: Optional[str] = None
     email: Optional[str] = None
     status: Optional[str] = None
@@ -793,6 +901,34 @@ class RosterSetRequest(BaseModel):
     reason: Optional[str] = None
 
     _check_meal_type = field_validator("meal_type")(_ensure_meal_type)
+
+class AttendanceLookupResult(BaseModel):
+    kind: str  # "member" | "booking"
+    id: int
+    name: str
+    sub_label: Optional[str] = None
+    recipe_id: Optional[int] = None
+    attendance_id: Optional[int] = None
+    attendance_status: Optional[str] = None
+
+class ServeAttendanceRequest(BaseModel):
+    member_id: Optional[int] = None
+    booking_id: Optional[int] = None
+    date: date
+    meal_type: str
+    recipe_id: Optional[int] = None
+
+    _check_meal_type = field_validator("meal_type")(_ensure_meal_type)
+
+    @model_validator(mode="after")
+    def _exactly_one_consumer(self):
+        if (self.member_id is None) == (self.booking_id is None):
+            raise ValueError("Provide exactly one of member_id or booking_id")
+        return self
+
+class NoShowSweepResult(BaseModel):
+    count: int
+    items: List[AttendanceLookupResult] = []
 
 class MemberLeaveBase(BaseModel):
     member_id: int
@@ -864,3 +1000,31 @@ class DiscountApplyRequest(BaseModel):
         if (self.discount_rate is None) == (self.discount_amount is None):
             raise ValueError("Provide exactly one of discount_rate or discount_amount")
         return self
+
+class ComplimentaryRequest(BaseModel):
+    is_complimentary: bool = True
+    reason: str = Field(..., min_length=1)
+
+
+# --- Tariff Schemas ---
+
+class TariffRateCreate(BaseModel):
+    rank: str = Field(..., min_length=1, max_length=50)
+    room_type: str = Field(..., min_length=1, max_length=20)
+    stay_type: str = Field(..., min_length=1, max_length=20)
+    nightly_rate: float = Field(..., ge=0)
+
+class TariffRateOut(TariffRateCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    updated_at: datetime
+
+class WomensBlocRankRateCreate(BaseModel):
+    rank_band: str = Field(..., min_length=1, max_length=30)
+    label: Optional[str] = None
+    monthly_amount: float = Field(..., ge=0)
+
+class WomensBlocRankRateOut(WomensBlocRankRateCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    updated_at: datetime

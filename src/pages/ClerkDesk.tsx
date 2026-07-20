@@ -4,9 +4,9 @@ import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { LayoutGrid, DoorOpen, IdCard, Receipt, Wallet, BedDouble, UtensilsCrossed } from 'lucide-react';
+import { LayoutGrid, DoorOpen, IdCard, Receipt, Wallet, BedDouble, UtensilsCrossed, FileStack } from 'lucide-react';
 import { CheckoutSheet, type CheckoutGuest, type RunningBalance } from '@/components/CheckoutSheet';
-import { BillPrintView } from '@/components/BillPrint';
+import { BillPrintView, MasterInvoiceView } from '@/components/BillPrint';
 import { formatCurrency } from '@/lib/currency';
 
 interface DeskGuest extends CheckoutGuest {
@@ -42,6 +42,8 @@ export default function ClerkDesk() {
   const [loading, setLoading] = useState(true);
   const [checkoutGuest, setCheckoutGuest] = useState<CheckoutGuest | null>(null);
   const [settleInvoiceIds, setSettleInvoiceIds] = useState<number[] | null>(null);
+  const [settleBookingId, setSettleBookingId] = useState<number | null>(null);
+  const [masterInvoiceBookingId, setMasterInvoiceBookingId] = useState<number | null>(null);
   const navigate = useNavigate();
 
   const fetchAll = useCallback(async () => {
@@ -120,7 +122,12 @@ export default function ClerkDesk() {
                       ))}
                     </div>
                     <p className="text-lg font-bold font-mono">{formatCurrency(balance)}</p>
-                    <Button size="sm" onClick={() => setSettleInvoiceIds(group.map(i => i.id))}>
+                    {group.length > 1 && first.booking_id && (
+                      <Button size="sm" variant="outline" onClick={() => setMasterInvoiceBookingId(first.booking_id)}>
+                        <FileStack size={14} className="mr-1" /> Master Invoice
+                      </Button>
+                    )}
+                    <Button size="sm" onClick={() => { setSettleInvoiceIds(group.map(i => i.id)); setSettleBookingId(first.booking_id); }}>
                       <Wallet size={14} className="mr-1" /> Settle & Print
                     </Button>
                   </CardContent>
@@ -187,8 +194,11 @@ export default function ClerkDesk() {
         onOpenChange={v => { if (!v) setCheckoutGuest(null); }}
         onDone={fetchAll} />
 
-      <BillPrintView invoiceIds={settleInvoiceIds} onClose={() => setSettleInvoiceIds(null)}
+      <BillPrintView invoiceIds={settleInvoiceIds} bookingId={settleBookingId ?? undefined}
+        onClose={() => { setSettleInvoiceIds(null); setSettleBookingId(null); }}
         allowPayments onPaymentsChanged={fetchAll} />
+
+      <MasterInvoiceView bookingId={masterInvoiceBookingId} onClose={() => setMasterInvoiceBookingId(null)} />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api, { getErrorMessage } from '@/lib/api';
 import { useAuth } from '@/contexts/useAuth';
 import { Button } from '@/components/ui/button';
@@ -9,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { Search, Plus, IdCard, ArrowRightLeft } from 'lucide-react';
+import { Search, Plus, IdCard, ArrowRightLeft, Settings2, Receipt } from 'lucide-react';
 
 interface Member {
   id: number;
@@ -19,6 +20,7 @@ interface Member {
   unit: string | null;
   mess_category: string;
   client_category: string;
+  is_womens_bloc: boolean;
   custom_discount_rate: number;
   phone: string | null;
   email: string | null;
@@ -27,16 +29,26 @@ interface Member {
   current_room_number: string | null;
 }
 
-const emptyForm = { service_number: '', full_name: '', rank: '', unit: '', mess_category: 'officers', phone: '', email: '', custom_discount_rate: 0 };
+const emptyForm = { service_number: '', full_name: '', rank: '', unit: '', mess_category: 'officers', is_womens_bloc: false, phone: '', email: '', custom_discount_rate: 0 };
+
+// Fixed set of 5 rank bands - same as the HRA table, always all 5 editable
+// rows (missing ones just default to Rs 0 via the backend fallback), unlike
+// Tariffs' open-ended rank x room_type x stay_type matrix.
+const WOMENS_BLOC_BANDS: [string, string][] = [
+  ['capt', 'Capt'], ['maj', 'Maj'], ['ltcol_col', 'Lt Col / Col'], ['brig', 'Brig'], ['maj_gen', 'Maj Gen'],
+];
 
 export default function Members() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [members, setMembers] = useState<Member[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const [wbRatesOpen, setWbRatesOpen] = useState(false);
+  const [wbRates, setWbRates] = useState<Record<string, number>>({});
 
   const fetchMembers = async () => {
     try {
@@ -62,7 +74,7 @@ export default function Members() {
     setEditingId(m.id);
     setForm({
       service_number: m.service_number, full_name: m.full_name, rank: m.rank,
-      unit: m.unit || '', mess_category: m.mess_category, phone: m.phone || '',
+      unit: m.unit || '', mess_category: m.mess_category, is_womens_bloc: m.is_womens_bloc, phone: m.phone || '',
       email: m.email || '', custom_discount_rate: m.custom_discount_rate,
     });
     setDialogOpen(true);
@@ -71,8 +83,8 @@ export default function Members() {
   const handleSave = async () => {
     try {
       if (editingId) {
-        const { full_name, rank, unit, mess_category, phone, email, custom_discount_rate } = form;
-        await api.put(`/members/${editingId}`, { full_name, rank, unit, mess_category, phone, email, custom_discount_rate });
+        const { full_name, rank, unit, mess_category, is_womens_bloc, phone, email, custom_discount_rate } = form;
+        await api.put(`/members/${editingId}`, { full_name, rank, unit, mess_category, is_womens_bloc, phone, email, custom_discount_rate });
         toast.success('Member updated');
       } else {
         await api.post('/members', form);
@@ -81,6 +93,24 @@ export default function Members() {
       setDialogOpen(false);
       fetchMembers();
     } catch (err) { toast.error(getErrorMessage(err, 'Failed to save member')); }
+  };
+
+  const fetchWbRates = async () => {
+    try {
+      const res = await api.get('/womens-bloc-rates');
+      const map: Record<string, number> = {};
+      for (const r of res.data) map[r.rank_band] = r.monthly_amount;
+      setWbRates(map);
+    } catch { toast.error("Failed to load Women's Bloc rates"); }
+  };
+
+  const openWbRates = () => { fetchWbRates(); setWbRatesOpen(true); };
+
+  const saveWbRate = async (band: string, label: string) => {
+    try {
+      await api.put('/womens-bloc-rates', { rank_band: band, label, monthly_amount: wbRates[band] ?? 0 });
+      toast.success(`${label} rate saved`);
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to save rate')); }
   };
 
   const handleStatusChange = async (id: number, status: string) => {
@@ -104,6 +134,26 @@ export default function Members() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><IdCard size={24} /> Member Management</h1>
+        <div className="flex gap-2">
+        {user?.is_supervisor && (
+          <Dialog open={wbRatesOpen} onOpenChange={setWbRatesOpen}>
+            <DialogTrigger asChild><Button variant="outline" onClick={openWbRates}><Settings2 size={16} className="mr-1" /> Women's Bloc Rates</Button></DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader><DialogTitle>Women's Bloc Rank Rates</DialogTitle></DialogHeader>
+              <div className="space-y-3">
+                <p className="text-xs text-gray-500">Monthly HRA rate for a Women's Bloc resident, by rank - used instead of the standard HRA rate for members flagged Women's Bloc. Unset bands bill at Rs 0 until saved here.</p>
+                {WOMENS_BLOC_BANDS.map(([band, label]) => (
+                  <div key={band} className="flex items-center gap-2">
+                    <Label className="flex-1">{label}</Label>
+                    <Input type="number" min={0} className="w-32" value={wbRates[band] ?? 0}
+                      onChange={e => setWbRates({...wbRates, [band]: Number(e.target.value)})} />
+                    <Button size="sm" onClick={() => saveWbRate(band, label)}>Save</Button>
+                  </div>
+                ))}
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild><Button onClick={openCreate}><Plus size={16} className="mr-1" /> Add Member</Button></DialogTrigger>
           <DialogContent className="max-w-lg">
@@ -135,10 +185,17 @@ export default function Members() {
                   <Input type="number" min={0} max={100} value={form.custom_discount_rate} onChange={e => setForm({...form, custom_discount_rate: Number(e.target.value)})} />
                 </div>
               )}
+              {user?.is_supervisor && (
+                <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                  <input type="checkbox" checked={form.is_womens_bloc} onChange={e => setForm({...form, is_womens_bloc: e.target.checked})} className="h-4 w-4 rounded border-gray-300" />
+                  Women's Bloc resident (uses the Women's Bloc rank rate for HRA billing instead of the standard HRA rate)
+                </label>
+              )}
               <Button onClick={handleSave} className="w-full">{editingId ? 'Save Changes' : 'Create Member'}</Button>
             </div>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -166,11 +223,16 @@ export default function Members() {
                   <TableCell>{m.current_room_number ? <Badge className="bg-purple-100 text-purple-800">{m.current_room_number} (HRA)</Badge> : <span className="text-gray-400">-</span>}</TableCell>
                   <TableCell>{statusBadge(m.status)}</TableCell>
                   <TableCell>
-                    {m.status === 'active' && (
-                      <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); handleStatusChange(m.id, 'transferred'); }}>
-                        <ArrowRightLeft size={16} className="text-amber-600" />
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="ghost" title="View Ledger" onClick={(e) => { e.stopPropagation(); navigate(`/members/${m.id}`); }}>
+                        <Receipt size={16} className="text-blue-600" />
                       </Button>
-                    )}
+                      {m.status === 'active' && (
+                        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); handleStatusChange(m.id, 'transferred'); }}>
+                          <ArrowRightLeft size={16} className="text-amber-600" />
+                        </Button>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

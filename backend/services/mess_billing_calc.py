@@ -27,10 +27,11 @@ def get_setting_str(db: Session, key: str, default: str) -> str:
 
 
 def get_man_days(db: Session, member_id: int, month: int, year: int) -> int:
-    """Count of attended meal-slots for a member in a given month/year.
+    """Count of attended-or-no-show meal-slots for a member in a given month/year.
 
-    Only ATTENDED counts toward billing - BOOKED (not yet marked), CANCELLED,
-    and EXCLUDED (on leave) do not consume a man-day.
+    ATTENDED and NO_SHOW both consume a man-day (a no-show is still a meal the
+    member is charged for) - BOOKED (not yet marked/swept) and CANCELLED/
+    EXCLUDED (on leave) do not.
     """
     start = date(year, month, 1)
     end = date(year, month, monthrange(year, month)[1])
@@ -38,5 +39,5 @@ def get_man_days(db: Session, member_id: int, month: int, year: int) -> int:
         MealAttendance.member_id == member_id,
         MealAttendance.date >= start,
         MealAttendance.date <= end,
-        MealAttendance.status == AttendanceStatus.ATTENDED,
+        MealAttendance.status.in_([AttendanceStatus.ATTENDED, AttendanceStatus.NO_SHOW]),
     ).count()

@@ -3,8 +3,10 @@ from datetime import datetime, timedelta
 from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from backend.models import Alert, AlertSeverity, AlertStatus, StockBatch, InventoryItem, Booking, Invoice
+from backend.models import Alert, AlertSeverity, AlertStatus, StockBatch, InventoryItem, Booking, Invoice, Recipe, MenuPrice
 from backend.logging_config import get_logger
+from backend.services.recipe_costing import compute_theoretical_recipe_cost
+from backend.services.mess_billing_calc import get_setting_float
 
 logger = get_logger("app")
 
@@ -124,10 +126,71 @@ def check_unbilled_stays(db: Session) -> int:
     return count
 
 
+def check_recipe_margins(db: Session) -> int:
+    """Compare each priced recipe's theoretical ingredient cost against its
+    guest-facing MenuPrice, flagging thin/negative margins. A recipe missing
+    active stock batches for one or more ingredients gets a separate LOW-
+    severity "cannot compute" alert instead of being silently skipped, so this
+    unattended check never fails and management still has visibility into why
+    that dish is producing no margin data. The two alert kinds are dedup'd
+    independently via a title-prefix discriminator (same technique
+    check_unbilled_stays uses), since a recipe could legitimately have one or
+    the other open at different times."""
+    threshold = get_setting_float(db, "recipe_margin_alert_threshold_pct", 20)
+    rows = db.query(Recipe, MenuPrice).join(
+        MenuPrice, MenuPrice.recipe_id == Recipe.id
+    ).filter(
+        Recipe.is_active == True, MenuPrice.is_active == True, MenuPrice.price > 0,
+    ).all()
+
+    count = 0
+    for recipe, menu_price in rows:
+        cost = compute_theoretical_recipe_cost(db, recipe)
+
+        if cost is None:
+            existing = db.query(Alert).filter(
+                Alert.entity_type == "recipe", Alert.entity_id == recipe.id,
+                Alert.status.in_([AlertStatus.NEW, AlertStatus.ACKNOWLEDGED]),
+                Alert.module == "procurement",
+                Alert.title.contains("Cannot compute margin"),
+            ).first()
+            if not existing:
+                create_alert(
+                    db, f"Cannot compute margin: {recipe.name}",
+                    "Missing ingredient stock inventory logs - one or more ingredients has no active stock batch to cost against.",
+                    AlertSeverity.LOW, "procurement", "recipe", recipe.id,
+                )
+                count += 1
+            continue
+
+        price = float(menu_price.price)
+        margin_pct = (price - cost) / price * 100
+        if margin_pct >= threshold:
+            continue
+
+        existing = db.query(Alert).filter(
+            Alert.entity_type == "recipe", Alert.entity_id == recipe.id,
+            Alert.status.in_([AlertStatus.NEW, AlertStatus.ACKNOWLEDGED]),
+            Alert.module == "procurement",
+            Alert.title.contains("Cost Alert"),
+        ).first()
+        if not existing:
+            create_alert(
+                db, f"Cost Alert: {recipe.name}",
+                f"Production cost is Rs {cost:.2f} against a menu price of Rs {price:.2f} ({margin_pct:.1f}% margin).",
+                AlertSeverity.CRITICAL if margin_pct < 0 else AlertSeverity.HIGH,
+                "procurement", "recipe", recipe.id,
+            )
+            count += 1
+
+    return count
+
+
 def run_all_checks(db: Session) -> dict:
     """Run all alert checks and return summary."""
     return {
         "low_stock": check_low_stock(db),
         "expiring_items": check_expiring_items(db),
         "unbilled_stays": check_unbilled_stays(db),
+        "recipe_margins": check_recipe_margins(db),
     }

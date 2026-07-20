@@ -125,6 +125,7 @@ class AttendanceStatus(str, enum.Enum):
     ATTENDED = "attended"
     CANCELLED = "cancelled"
     EXCLUDED = "excluded"
+    NO_SHOW = "no_show"
 
 class LeaveStatus(str, enum.Enum):
     ACTIVE = "active"
@@ -546,7 +547,35 @@ class Room(Base):
     # Physical readiness, independent of occupancy: clean | dirty | cleaning
     housekeeping_status = Column(String(20), default="clean")
     notes = Column(Text)
+    # Estimated day maintenance ends - set alongside `notes` (used as the
+    # issue description) when a room is sent to maintenance from the drawer.
+    maintenance_until = Column(Date, nullable=True)
     is_active = Column(Boolean, default=True)
+    attendant_id = Column(Integer, ForeignKey("attendants.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    attendant = relationship("Attendant")
+
+
+class Attendant(Base):
+    """Room attendant/housekeeping staff. One attendant -> many rooms
+    (Room.attendant_id is the default/current assignment); Booking.attendant_id
+    is a separate snapshot of who was responsible during a specific stay, so
+    reassigning a room's attendant later doesn't rewrite past-stay history."""
+    __tablename__ = "attendants"
+
+    id = Column(Integer, primary_key=True)
+    full_name = Column(String(200), nullable=False)
+    phone = Column(String(50))
+    email = Column(String(255))
+    shift = Column(String(50))  # e.g. morning | evening | night, free text
+    photo_file_name = Column(String(255))
+    is_active = Column(Boolean, default=True)
+    # Whether this attendant is currently clocked in - distinct from `shift`
+    # (a static label) and from `is_active` (an employment/roster flag).
+    on_duty = Column(Boolean, default=False)
+    on_duty_since = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -590,6 +619,12 @@ class Booking(Base):
     processed_by = Column(Integer, ForeignKey("users.id"))
     client_category = Column(Enum(ClientCategory), default=ClientCategory.NON_MEMBER_CIVILIAN)
     member_id = Column(Integer, ForeignKey("members.id"), nullable=True)  # set when a permanent member occupies a room
+    # Snapshot of the room's attendant at check-in time - independent of
+    # rooms.attendant_id so later reassignment doesn't rewrite this stay's history.
+    attendant_id = Column(Integer, ForeignKey("attendants.id"), nullable=True)
+    # Official / private / family - third axis of the rank x room-type x
+    # stay-type tariff matrix (see TariffRate). Independent of nature_of_duty.
+    stay_type = Column(String(20))
     # Booking-register fields (paper register columns the mess must keep recording)
     rank = Column(String(50))
     pa_number = Column(String(50))
@@ -618,6 +653,7 @@ class Booking(Base):
     room = relationship("Room")
     member = relationship("Member")
     guest = relationship("Guest")
+    attendant = relationship("Attendant")
 
 
 class BookingCharge(Base):
@@ -706,6 +742,23 @@ class HraRankRate(Base):
     updated_by = Column(Integer, ForeignKey("users.id"))
 
 
+class WomensBlocRankRate(Base):
+    """Monthly rank-based rate for a resident in the Women's Bloc wing -
+    structurally identical to HraRankRate (same rank bands via
+    hra_rank_to_band/_HRA_RANK_BANDS) but a separate table, since the two are
+    orthogonal: a resident can be in the Women's Bloc wing and still keep
+    their existing officers/jcos/ors mess_category. Seeded with Rs 0
+    placeholder defaults - see DEFAULT_WOMENS_BLOC_RANK_RATES."""
+    __tablename__ = "womens_bloc_rank_rates"
+
+    id = Column(Integer, primary_key=True)
+    rank_band = Column(String(30), nullable=False, unique=True)  # capt | maj | ltcol_col | brig | maj_gen
+    label = Column(String(100))
+    monthly_amount = Column(Numeric(10, 2), nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = Column(Integer, ForeignKey("users.id"))
+
+
 class HraUtilityRate(Base):
     """Monthly flat utility charge (elec/gen/gas/internet bundled) for an
     HRA resident's room class - separate from RoomRate's nightly guest
@@ -715,6 +768,26 @@ class HraUtilityRate(Base):
     id = Column(Integer, primary_key=True)
     room_type = Column(String(20), nullable=False, unique=True)  # RoomType value
     monthly_amount = Column(Numeric(10, 2), nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = Column(Integer, ForeignKey("users.id"))
+
+
+class TariffRate(Base):
+    """Optional tiered override matrix: rank x room_type x stay_type ->
+    nightly rate. When a matching row exists, compute_booking_price uses it
+    ahead of the rate-card/duty/HRA engine above; otherwise that existing
+    engine still applies unchanged. rank/room_type/stay_type are plain
+    strings (not FKs) - the same convention RoomRate/DutyRate already use,
+    since rank has never been a first-class entity in this schema."""
+    __tablename__ = "tariff_rates"
+    __table_args__ = (UniqueConstraint("rank", "room_type", "stay_type", name="uq_tariff_rate"),)
+
+    id = Column(Integer, primary_key=True)
+    rank = Column(String(50), nullable=False)
+    room_type = Column(String(20), nullable=False)  # RoomType value
+    stay_type = Column(String(20), nullable=False)  # official | private | family
+    nightly_rate = Column(Numeric(10, 2), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     updated_by = Column(Integer, ForeignKey("users.id"))
 
@@ -763,6 +836,8 @@ class Invoice(Base):
     # mattress, dhobi, breakage...) or 'mess' (messing/food charges). Older
     # single-bill invoices stay 'combined'.
     bill_type = Column(String(20), default="combined")  # room | mess | combined
+    is_complimentary = Column(Boolean, default=False)
+    complimentary_reason = Column(Text)
     notes = Column(Text)
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -845,6 +920,10 @@ class Member(Base):
     unit = Column(String(100))
     mess_category = Column(Enum(MessCategory), nullable=False)
     client_category = Column(Enum(ClientCategory), default=ClientCategory.PERMANENT_MEMBER)
+    # Orthogonal to mess_category - a resident can be Women's Bloc AND
+    # officers/jcos/ors; when set, HRA billing uses WomensBlocRankRate
+    # instead of HraRankRate for the same rank band.
+    is_womens_bloc = Column(Boolean, default=False)
     custom_discount_rate = Column(Numeric(4, 2), default=0.00)  # per-member override, 0-100
     phone = Column(String(50))
     email = Column(String(255))

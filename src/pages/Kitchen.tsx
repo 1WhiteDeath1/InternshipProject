@@ -9,9 +9,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { ChefHat, Plus, Trash2, Flame, XCircle, Factory, AlertTriangle, UtensilsCrossed } from 'lucide-react';
+import { ChefHat, Plus, Trash2, Flame, XCircle, Factory, AlertTriangle, UtensilsCrossed, Receipt } from 'lucide-react';
 import { defaultMealForNow } from '@/lib/mealDefaults';
 import RecipeIngredientEditor, { type Ingredient, type InventoryItemOption } from '@/components/RecipeIngredientEditor';
+import { GuestChargePanel } from '@/components/GuestChargePanel';
+import { MealServiceTab } from '@/pages/kitchen/MealServiceTab';
 
 interface Recipe { id: number; name: string; description: string | null; menu_category: string | null; portions: number; is_active: boolean; ingredients: Ingredient[]; }
 interface KitchenOrder {
@@ -59,6 +61,7 @@ export default function Kitchen() {
   const [newRecipeForm, setNewRecipeForm] = useState(emptyRecipeForm);
   const [newRecipeIngredients, setNewRecipeIngredients] = useState<Ingredient[]>([]);
   const [now, setNow] = useState(() => Date.now()); // ticks every second to redraw live countdowns
+  const [chargeBookingId, setChargeBookingId] = useState(0);
 
   const fetchRecipes = async () => {
     try { const res = await api.get('/recipes?page_size=100'); setRecipes(res.data.items); }
@@ -210,12 +213,18 @@ export default function Kitchen() {
     catch (err) { toast.error(getErrorMessage(err, 'Failed to cancel order')); }
   };
 
-  const openAlaCarteDialog = () => {
-    setAlaCarteForm(emptyAlaCarteForm);
+  const openAlaCarteDialog = (preset?: { consumer_kind: 'member' | 'guest'; consumer_id: number }) => {
+    setAlaCarteForm({ ...emptyAlaCarteForm, ...preset });
     setShowNewRecipeInline(false);
     setNewRecipeForm(emptyRecipeForm);
     setNewRecipeIngredients([]);
     setAlaCarteDialogOpen(true);
+  };
+
+  // Meal Service tab's "Special Order" button - kind is "member"|"booking"
+  // from the omnibar lookup, the a la carte form uses "member"|"guest".
+  const openSpecialOrderFor = (kind: 'member' | 'booking', id: number) => {
+    openAlaCarteDialog({ consumer_kind: kind === 'member' ? 'member' : 'guest', consumer_id: id });
   };
 
   const handleCreateRecipeInline = async () => {
@@ -296,11 +305,17 @@ export default function Kitchen() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><ChefHat size={24} /> Kitchen</h1>
 
-      <Tabs defaultValue="production">
-        <TabsList className="grid grid-cols-2 max-w-xs">
+      <Tabs defaultValue="service">
+        <TabsList className="grid grid-cols-4 max-w-2xl">
+          <TabsTrigger value="service">Meal Service</TabsTrigger>
           <TabsTrigger value="production">Production</TabsTrigger>
+          <TabsTrigger value="charges">Guest Mess Charges</TabsTrigger>
           <TabsTrigger value="recipes">Recipes</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="service" className="space-y-4">
+          <MealServiceTab onSpecialOrder={openSpecialOrderFor} />
+        </TabsContent>
 
         <TabsContent value="production" className="space-y-4">
           {/* Plan the meal: what's booked + turn it into orders */}
@@ -379,75 +394,7 @@ export default function Kitchen() {
           <div className="pt-2 space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <h2 className="text-lg font-semibold flex items-center gap-2"><UtensilsCrossed size={18} /> A La Carte Orders</h2>
-              <Dialog open={alaCarteDialogOpen} onOpenChange={setAlaCarteDialogOpen}>
-                <DialogTrigger asChild><Button onClick={openAlaCarteDialog}><Plus size={16} className="mr-1" /> New A La Carte Order</Button></DialogTrigger>
-                <DialogContent className="max-w-2xl">
-                  <DialogHeader><DialogTitle>New A La Carte Order</DialogTitle></DialogHeader>
-                  <div className="space-y-3">
-                    {!showNewRecipeInline ? (
-                      <div className="flex items-end gap-2">
-                        <div className="flex-1">
-                          <Label>Recipe</Label>
-                          <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={alaCarteForm.recipe_id} onChange={e => setAlaCarteForm({ ...alaCarteForm, recipe_id: Number(e.target.value) })}>
-                            <option value="0">Select recipe</option>
-                            {recipes.filter(r => r.is_active).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                          </select>
-                        </div>
-                        <Button variant="outline" type="button" onClick={() => setShowNewRecipeInline(true)}>+ Create new recipe</Button>
-                      </div>
-                    ) : (
-                      <Card>
-                        <CardContent className="p-3 space-y-3">
-                          <div className="flex items-center justify-between">
-                            <Label>New Recipe</Label>
-                            <Button size="sm" variant="ghost" type="button" onClick={() => setShowNewRecipeInline(false)}>Cancel</Button>
-                          </div>
-                          <div className="grid grid-cols-2 gap-3">
-                            <Input placeholder="Recipe Name" value={newRecipeForm.name} onChange={e => setNewRecipeForm({ ...newRecipeForm, name: e.target.value })} />
-                            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm capitalize" value={newRecipeForm.menu_category} onChange={e => setNewRecipeForm({ ...newRecipeForm, menu_category: e.target.value })}>
-                              {MEAL_TYPES.map(mt => <option key={mt} value={mt} className="capitalize">{mt}</option>)}
-                            </select>
-                          </div>
-                          <RecipeIngredientEditor items={items} ingredients={newRecipeIngredients} onChange={setNewRecipeIngredients} />
-                          <Button size="sm" type="button" onClick={handleCreateRecipeInline}>Save Recipe & Use It</Button>
-                        </CardContent>
-                      </Card>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <Label>For</Label>
-                        <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={alaCarteForm.consumer_kind} onChange={e => setAlaCarteForm({ ...alaCarteForm, consumer_kind: e.target.value as 'member' | 'guest', consumer_id: 0 })}>
-                          <option value="guest">Guest (checked-in booking)</option>
-                          <option value="member">Member</option>
-                        </select>
-                      </div>
-                      <div>
-                        <Label>{alaCarteForm.consumer_kind === 'member' ? 'Member' : 'Guest'}</Label>
-                        <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={alaCarteForm.consumer_id} onChange={e => setAlaCarteForm({ ...alaCarteForm, consumer_id: Number(e.target.value) })}>
-                          <option value="0">Select {alaCarteForm.consumer_kind === 'member' ? 'member' : 'guest'}</option>
-                          {alaCarteForm.consumer_kind === 'member'
-                            ? members.map(m => <option key={m.id} value={m.id}>{m.full_name} ({m.service_number})</option>)
-                            : bookings.map(b => <option key={b.id} value={b.id}>{b.guest_name} (Room {b.room_number})</option>)}
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <Label>Quantity</Label>
-                        <Input type="number" min={1} value={alaCarteForm.quantity} onChange={e => setAlaCarteForm({ ...alaCarteForm, quantity: Number(e.target.value) })} />
-                      </div>
-                      <div>
-                        <Label>SLA Timer (minutes)</Label>
-                        <Input type="number" min={1} value={alaCarteForm.sla_minutes} onChange={e => setAlaCarteForm({ ...alaCarteForm, sla_minutes: Number(e.target.value) })} />
-                      </div>
-                    </div>
-
-                    <Button onClick={handleCreateAlaCarteOrder} className="w-full">Start Order</Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
+              <Button onClick={() => openAlaCarteDialog()}><Plus size={16} className="mr-1" /> New A La Carte Order</Button>
             </div>
 
             {lateOrders.length > 0 && (
@@ -493,6 +440,26 @@ export default function Kitchen() {
               ))}
             </div>
           </div>
+        </TabsContent>
+
+        <TabsContent value="charges" className="space-y-4">
+          <Card>
+            <CardContent className="p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Receipt size={18} className="text-orange-600" />
+                <p className="text-sm font-medium">Log mess charges as a guest incurs them (Extra Messing, Sui Gas...). The Clerk turns this into a bill at checkout.</p>
+              </div>
+              <select className="h-10 w-full max-w-sm rounded-md border border-input bg-background px-3 text-sm"
+                value={chargeBookingId} onChange={e => setChargeBookingId(Number(e.target.value))}>
+                <option value="0">Select a checked-in guest</option>
+                {bookings.map(b => <option key={b.id} value={b.id}>{b.guest_name} (Room {b.room_number})</option>)}
+              </select>
+            </CardContent>
+          </Card>
+
+          {chargeBookingId > 0 && (
+            <GuestChargePanel bookingId={chargeBookingId} isMess title="Mess Charges" />
+          )}
         </TabsContent>
 
         <TabsContent value="recipes" className="space-y-4">
@@ -546,6 +513,78 @@ export default function Kitchen() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Rendered outside the Tabs so it stays mounted (and thus openable from
+          the Meal Service tab's Special Order button) regardless of which
+          tab's content is currently active - Radix unmounts inactive TabsContent. */}
+      <Dialog open={alaCarteDialogOpen} onOpenChange={setAlaCarteDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle>New A La Carte Order</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            {!showNewRecipeInline ? (
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <Label>Recipe</Label>
+                  <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={alaCarteForm.recipe_id} onChange={e => setAlaCarteForm({ ...alaCarteForm, recipe_id: Number(e.target.value) })}>
+                    <option value="0">Select recipe</option>
+                    {recipes.filter(r => r.is_active).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  </select>
+                </div>
+                <Button variant="outline" type="button" onClick={() => setShowNewRecipeInline(true)}>+ Create new recipe</Button>
+              </div>
+            ) : (
+              <Card>
+                <CardContent className="p-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label>New Recipe</Label>
+                    <Button size="sm" variant="ghost" type="button" onClick={() => setShowNewRecipeInline(false)}>Cancel</Button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Input placeholder="Recipe Name" value={newRecipeForm.name} onChange={e => setNewRecipeForm({ ...newRecipeForm, name: e.target.value })} />
+                    <select className="h-10 rounded-md border border-input bg-background px-3 text-sm capitalize" value={newRecipeForm.menu_category} onChange={e => setNewRecipeForm({ ...newRecipeForm, menu_category: e.target.value })}>
+                      {MEAL_TYPES.map(mt => <option key={mt} value={mt} className="capitalize">{mt}</option>)}
+                    </select>
+                  </div>
+                  <RecipeIngredientEditor items={items} ingredients={newRecipeIngredients} onChange={setNewRecipeIngredients} />
+                  <Button size="sm" type="button" onClick={handleCreateRecipeInline}>Save Recipe & Use It</Button>
+                </CardContent>
+              </Card>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>For</Label>
+                <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={alaCarteForm.consumer_kind} onChange={e => setAlaCarteForm({ ...alaCarteForm, consumer_kind: e.target.value as 'member' | 'guest', consumer_id: 0 })}>
+                  <option value="guest">Guest (checked-in booking)</option>
+                  <option value="member">Member</option>
+                </select>
+              </div>
+              <div>
+                <Label>{alaCarteForm.consumer_kind === 'member' ? 'Member' : 'Guest'}</Label>
+                <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={alaCarteForm.consumer_id} onChange={e => setAlaCarteForm({ ...alaCarteForm, consumer_id: Number(e.target.value) })}>
+                  <option value="0">Select {alaCarteForm.consumer_kind === 'member' ? 'member' : 'guest'}</option>
+                  {alaCarteForm.consumer_kind === 'member'
+                    ? members.map(m => <option key={m.id} value={m.id}>{m.full_name} ({m.service_number})</option>)
+                    : bookings.map(b => <option key={b.id} value={b.id}>{b.guest_name} (Room {b.room_number})</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Quantity</Label>
+                <Input type="number" min={1} value={alaCarteForm.quantity} onChange={e => setAlaCarteForm({ ...alaCarteForm, quantity: Number(e.target.value) })} />
+              </div>
+              <div>
+                <Label>SLA Timer (minutes)</Label>
+                <Input type="number" min={1} value={alaCarteForm.sla_minutes} onChange={e => setAlaCarteForm({ ...alaCarteForm, sla_minutes: Number(e.target.value) })} />
+              </div>
+            </div>
+
+            <Button onClick={handleCreateAlaCarteOrder} className="w-full">Start Order</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

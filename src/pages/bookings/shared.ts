@@ -22,6 +22,15 @@ export interface Room {
   arrival_booking_id: number | null;
   arrival_nature_of_duty: string | null;
   photos: RoomPhoto[];
+  attendant_id: number | null;
+  attendant_name: string | null;
+}
+
+export interface AttendantOption {
+  id: number;
+  full_name: string;
+  is_active: boolean;
+  on_duty: boolean;
 }
 
 export interface PricingQuote {
@@ -103,6 +112,8 @@ export interface CalendarData {
   room: {
     id: number; room_number: string; room_type: string; floor: number; capacity: number;
     ac_count?: number; base_price: number; status: string; housekeeping_status: string; photos: RoomPhoto[];
+    attendant_id: number | null; attendant_name: string | null;
+    notes: string | null; maintenance_until: string | null;
   };
   current_booking: {
     id: number; booking_reference: string; guest_name: string; guest_phone: string | null;
@@ -205,6 +216,14 @@ export const ROOM_TYPE_LABELS: Record<string, string> = {
 };
 
 export const RANKS = ['Lt', 'Capt', 'Maj', 'Lt Col', 'Col', 'Brig', 'Maj Gen', 'Lt Gen', 'Gen'];
+
+// Standard ad-hoc charge heads from the paper draft bill, split by which
+// bill they land on. "Custom…" always appears too, for anything not listed.
+export const ROOM_CHARGE_HEADS = ['Dhobi', 'Allied Charges', 'Breakage', 'Dental Kit'];
+export const MESS_CHARGE_HEADS = ['Extra Messing', 'Sui Gas Charges on Messing'];
+export const CUSTOM_CHARGE_HEAD = '__custom__';
+
+export interface BookingCharge { id: number; head: string; amount: number; is_mess_charge: boolean; invoiced: boolean; }
 
 export const todayISO = () => new Date().toLocaleDateString('en-CA');
 export const addDays = (iso: string, n: number) => {

@@ -2,19 +2,21 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import api, { getErrorMessage } from '@/lib/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
-import { DoorOpen, Zap, CalendarDays, Search, Sparkles } from 'lucide-react';
-import { formatCurrency } from '@/lib/currency';
+import { Zap, CalendarDays, Search, Sparkles, ArrowUpDown, Plus } from 'lucide-react';
 import {
-  ROOM_TYPE_LABELS, todayISO, addDays, fmtDay, selectClass, ROOM_STATUS_META,
-  type Room, type AvailableRoom,
+  ROOM_TYPE_LABELS, todayISO, addDays, fmtDay, ROOM_STATUS_META,
+  type Room, type AvailableRoom, type AttendantOption,
 } from './shared';
-import { HraBadge, HousekeepingBadge, RoomStatusPill } from './badges';
+import { HraBadge, RoomStatusPill } from './badges';
 import type { InitialBooking } from './RoomSection';
 
 interface RoomGridTabProps {
   rooms: Room[];
   onOpenRoom: (roomId: number, initialBooking?: InitialBooking) => void;
+  onChanged?: () => void;
 }
 
 type SortBy = 'smart' | 'availability' | 'room_number' | 'room_type' | 'price' | 'capacity';
@@ -35,10 +37,11 @@ interface GridCard {
   statusLabel: string;
   housekeeping_status: string;
   guestLine?: string;
-  priceLine?: string;
   isHra?: boolean;
   checkoutDue?: boolean;
   arriving?: boolean;
+  attendantId?: number | null;
+  attendantName?: string | null;
 }
 
 const STATUS_PRIORITY: Record<string, number> = { vacant: 0, reserved: 1, occupied: 2, maintenance: 3 };
@@ -68,8 +71,9 @@ const FUTURE_CHIPS: { value: StatusFilter; label: string }[] = [
   { value: 'unavailable', label: 'Unavailable' },
 ];
 
-export default function RoomGridTab({ rooms, onOpenRoom }: RoomGridTabProps) {
+export default function RoomGridTab({ rooms, onOpenRoom, onChanged }: RoomGridTabProps) {
   const [mode, setMode] = useState<'instant' | 'future'>('instant');
+  const [attendants, setAttendants] = useState<AttendantOption[]>([]);
   const [futureIn, setFutureIn] = useState(addDays(todayISO(), 1));
   const [futureOut, setFutureOut] = useState(addDays(todayISO(), 2));
   const [futureRooms, setFutureRooms] = useState<AvailableRoom[]>([]);
@@ -78,6 +82,8 @@ export default function RoomGridTab({ rooms, onOpenRoom }: RoomGridTabProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [roomTypeFilter, setRoomTypeFilter] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
+  const [openAttendantPopoverId, setOpenAttendantPopoverId] = useState<number | null>(null);
+  const [showAllAttendants, setShowAllAttendants] = useState(false);
 
   const toggleRoomType = (t: string) => setRoomTypeFilter(prev => {
     const next = new Set(prev);
@@ -96,6 +102,19 @@ export default function RoomGridTab({ rooms, onOpenRoom }: RoomGridTabProps) {
     } catch (err) { toast.error(getErrorMessage(err, 'Failed to check availability')); }
     finally { setFutureLoading(false); }
   }, [futureIn, futureOut, futureValid]);
+
+  useEffect(() => { queueMicrotask(() => {
+    api.get('/attendants').then(res => setAttendants(res.data.filter((a: AttendantOption) => a.is_active))).catch(() => {});
+  }); }, []);
+
+  const reassignAttendant = async (roomId: number, attendantId: string) => {
+    setOpenAttendantPopoverId(null);
+    try {
+      await api.put(`/bookings/rooms/${roomId}/attendant`, { attendant_id: attendantId ? Number(attendantId) : null });
+      toast.success('Attendant updated');
+      onChanged?.();
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to update attendant')); }
+  };
 
   useEffect(() => { if (mode === 'future') queueMicrotask(() => fetchFuture()); }, [mode, fetchFuture]);
   // A filter chip picked for one mode ("Checkout Due", "HRA"...) doesn't mean
@@ -117,10 +136,11 @@ export default function RoomGridTab({ rooms, onOpenRoom }: RoomGridTabProps) {
         capacity: r.capacity, price: r.base_price,
         available: r.status === 'vacant', statusLabel: r.status, housekeeping_status: r.housekeeping_status,
         guestLine: r.current_guest ? r.current_guest : r.arrival_guest ? `Arriving: ${r.arrival_guest}` : undefined,
-        priceLine: `${formatCurrency(r.base_price)}/night`,
         isHra: r.current_nature_of_duty === 'hra' || r.arrival_nature_of_duty === 'hra',
         checkoutDue: r.checkout_due,
         arriving: !!r.arrival_guest,
+        attendantId: r.attendant_id,
+        attendantName: r.attendant_name,
       }));
     }
     return futureRooms.map(r => ({
@@ -129,7 +149,6 @@ export default function RoomGridTab({ rooms, onOpenRoom }: RoomGridTabProps) {
       available: r.available, housekeeping_status: r.housekeeping_status,
       statusLabel: r.available ? 'vacant' : (r.unavailable_reason === 'maintenance' ? 'maintenance' : 'reserved'),
       guestLine: !r.available ? r.unavailable_reason || undefined : (r.next_booking_start ? `Next booking ${fmtDay(r.next_booking_start)}` : 'No upcoming bookings'),
-      priceLine: r.available ? (r.pricing.pricing_mode === 'hra_monthly' ? (r.pricing.monthly_total ? `${formatCurrency(r.pricing.monthly_total)}/month` : 'HRA monthly') : `${formatCurrency(r.pricing.nightly_total)}/night · ${formatCurrency(r.pricing.total)}`) : undefined,
     }));
   }, [mode, rooms, futureRooms]);
 
@@ -209,17 +228,57 @@ export default function RoomGridTab({ rooms, onOpenRoom }: RoomGridTabProps) {
               <p className="font-bold text-lg leading-tight">{card.room_number}</p>
               <p className="text-xs text-gray-500 capitalize truncate">{ROOM_TYPE_LABELS[card.room_type] || card.room_type} · {card.capacity} guests</p>
             </div>
-            <DoorOpen size={18} className="text-gray-300 dark:text-gray-600 shrink-0 mt-0.5" />
+            <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+              {mode === 'instant' && card.housekeeping_status !== 'clean' && (
+                <span title={`Housekeeping: ${card.housekeeping_status}`}><Sparkles size={14} className="text-amber-500" /></span>
+              )}
+              {mode === 'instant' && (
+                <Popover open={openAttendantPopoverId === card.id} onOpenChange={v => setOpenAttendantPopoverId(v ? card.id : null)}>
+                  <PopoverTrigger asChild>
+                    <button type="button"
+                      title={card.attendantName || 'Assign attendant'}
+                      className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${card.attendantName ? 'bg-blue-600 text-white' : 'border border-dashed border-gray-400 text-gray-400 hover:border-blue-400 hover:text-blue-500'}`}>
+                      {card.attendantName ? card.attendantName.charAt(0).toUpperCase() : <Plus size={12} />}
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56 p-2" onClick={e => e.stopPropagation()}>
+                    <p className="text-xs font-medium text-gray-400 px-1 pb-1.5">Assign attendant</p>
+                    <div className="space-y-0.5 max-h-56 overflow-y-auto">
+                      <button type="button"
+                        className={`w-full text-left text-sm rounded px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 ${!card.attendantId ? 'font-semibold text-blue-600' : ''}`}
+                        onClick={() => reassignAttendant(card.id, '')}>
+                        No attendant
+                      </button>
+                      {(() => {
+                        const onDuty = attendants.filter(a => a.on_duty);
+                        const list = showAllAttendants || onDuty.length === 0 ? attendants : onDuty;
+                        return list.map(a => (
+                          <button key={a.id} type="button"
+                            className={`w-full text-left text-sm rounded px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-1.5 ${card.attendantId === a.id ? 'font-semibold text-blue-600' : ''}`}
+                            onClick={() => reassignAttendant(card.id, String(a.id))}>
+                            {a.on_duty && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" title="On duty" />}
+                            {a.full_name}
+                          </button>
+                        ));
+                      })()}
+                      {attendants.length === 0 && <p className="text-xs text-gray-400 px-2 py-1">No active attendants</p>}
+                    </div>
+                    {attendants.some(a => a.on_duty) && attendants.some(a => !a.on_duty) && (
+                      <button type="button" className="text-xs text-blue-600 hover:underline mt-1.5 px-1"
+                        onClick={() => setShowAllAttendants(v => !v)}>
+                        {showAllAttendants ? 'Show on-duty only' : 'Show all attendants'}
+                      </button>
+                    )}
+                  </PopoverContent>
+                </Popover>
+              )}
+            </div>
           </div>
           <div className="mt-2 flex flex-wrap gap-1">
             <RoomStatusPill status={card.statusLabel} />
             {card.isHra && <HraBadge />}
           </div>
           {card.guestLine && <p className="text-xs mt-2 truncate text-gray-600 dark:text-gray-300">{card.guestLine}</p>}
-          {card.priceLine && <p className="text-xs mt-1 font-semibold">{card.priceLine}</p>}
-          {mode === 'instant' && card.housekeeping_status !== 'clean' && (
-            <div className="mt-1.5"><HousekeepingBadge status={card.housekeeping_status} /></div>
-          )}
         </CardContent>
       </Card>
     );
@@ -254,12 +313,26 @@ export default function RoomGridTab({ rooms, onOpenRoom }: RoomGridTabProps) {
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" size={15} />
               <Input placeholder="Search room, type, guest…" className="pl-8 h-9" value={search} onChange={e => setSearch(e.target.value)} />
             </div>
-            <select className={`${selectClass} w-56`} value={sortBy} onChange={e => setSortBy(e.target.value as SortBy)}>
-              {(Object.keys(SORT_LABELS) as SortBy[]).map(k => <option key={k} value={k}>{SORT_LABELS[k]}</option>)}
-            </select>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" title={`Sort: ${SORT_LABELS[sortBy]}`}
+                  className="h-9 w-9 shrink-0 rounded-md border border-input bg-background flex items-center justify-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+                  <ArrowUpDown size={15} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuRadioGroup value={sortBy} onValueChange={v => setSortBy(v as SortBy)}>
+                  {(Object.keys(SORT_LABELS) as SortBy[]).map(k => (
+                    <DropdownMenuRadioItem key={k} value={k}>{SORT_LABELS[k]}</DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             {chips.map(chip => (
               <button key={chip.value} type="button" onClick={() => setStatusFilter(chip.value)}
                 className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === chip.value
@@ -268,22 +341,23 @@ export default function RoomGridTab({ rooms, onOpenRoom }: RoomGridTabProps) {
                 {chip.label}
               </button>
             ))}
+            {availableTypes.length > 1 && (
+              <>
+                <span className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
+                {availableTypes.map(t => (
+                  <button key={t} type="button" onClick={() => toggleRoomType(t)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${roomTypeFilter.has(t)
+                      ? 'bg-slate-700 text-white border-slate-700 dark:bg-slate-600 dark:border-slate-600'
+                      : 'bg-transparent text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-slate-400'}`}>
+                    {ROOM_TYPE_LABELS[t] || t}
+                  </button>
+                ))}
+                {roomTypeFilter.size > 0 && (
+                  <button type="button" onClick={() => setRoomTypeFilter(new Set())} className="text-xs text-blue-600 hover:underline ml-1">Clear</button>
+                )}
+              </>
+            )}
           </div>
-
-          {availableTypes.length > 1 && (
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-2 border-t">
-              <span className="text-xs font-medium text-gray-400 shrink-0">Room Type</span>
-              {availableTypes.map(t => (
-                <label key={t} className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300 cursor-pointer select-none">
-                  <input type="checkbox" className="rounded border-gray-300 dark:border-gray-600" checked={roomTypeFilter.has(t)} onChange={() => toggleRoomType(t)} />
-                  {ROOM_TYPE_LABELS[t] || t}
-                </label>
-              ))}
-              {roomTypeFilter.size > 0 && (
-                <button type="button" onClick={() => setRoomTypeFilter(new Set())} className="text-xs text-blue-600 hover:underline">Clear</button>
-              )}
-            </div>
-          )}
         </CardContent>
       </Card>
 

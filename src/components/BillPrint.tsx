@@ -19,7 +19,7 @@ export interface BillItem { description: string; quantity: number; unit_price: n
 export interface BillInvoice {
   id: number; invoice_number: string; bill_type: string; issue_date: string;
   subtotal: number; total_amount: number; amount_paid: number; balance_due: number;
-  status: string; items: BillItem[];
+  status: string; items: BillItem[]; is_complimentary?: boolean;
 }
 interface BillBooking {
   guest_name: string; rank: string | null; pa_number: string | null; unit_address: string | null;
@@ -135,10 +135,13 @@ function DraftBill({ data }: { data: PrintData }) {
     <div className="bill-page border border-gray-400 rounded-sm p-4 text-[13px] text-gray-900 bg-white space-y-2.5">
       <div className="flex justify-between items-start">
         <div className="flex-1">
-          <p className="text-[11px] text-gray-600">{data.mess.name} · {data.mess.address}</p>
+          <p className="text-[11px] text-gray-600">{data.mess.name} · {data.mess.address} · {data.mess.phone}</p>
           <p className="text-center font-bold underline decoration-2 text-sm mt-1">
             DRAFT BILL (For Office Use Only) — {BILL_LABELS[inv.bill_type] || 'BILL'}
           </p>
+          {inv.is_complimentary && (
+            <p className="text-center font-bold text-emerald-700 text-xs mt-0.5">★ COMPLIMENTARY — NO CHARGE ★</p>
+          )}
         </div>
         <div className="w-16 h-16 shrink-0 ml-2 [&>svg]:w-full [&>svg]:h-full" dangerouslySetInnerHTML={{ __html: data.qr_svg }} />
       </div>
@@ -214,7 +217,7 @@ function DraftBill({ data }: { data: PrintData }) {
       </div>
       <div className="grid grid-cols-2 gap-6 pt-4">
         <p className="border-t border-gray-500 pt-1 text-center text-[12px]">Mess JCO Sign</p>
-        <p className="text-[11px] text-gray-500 self-end text-right">{data.mess.phone}</p>
+        <p className="border-t border-gray-500 pt-1 text-center text-[12px]">Mess Secretary</p>
       </div>
     </div>
   );
@@ -226,15 +229,20 @@ interface BillPrintViewProps {
   /** Show "Pay Together" / per-bill payment actions for unpaid bills. */
   allowPayments?: boolean;
   onPaymentsChanged?: () => void;
+  /** Enables "whole stay" complimentary/discount actions (Clerk-only, applies
+      to every live invoice for this booking at once) when there's more than
+      one bill. */
+  bookingId?: number;
 }
 
 const PAYMENT_METHODS = ['Cash', 'Bank Transfer', 'Cheque', 'Online'];
 
-export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPaymentsChanged }: BillPrintViewProps) {
+export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPaymentsChanged, bookingId }: BillPrintViewProps) {
   const [bills, setBills] = useState<PrintData[]>([]);
   const [loading, setLoading] = useState(false);
   const [paying, setPaying] = useState(false);
   const [method, setMethod] = useState(PAYMENT_METHODS[0]);
+  const [markingCompId, setMarkingCompId] = useState<number | null>(null);
 
   const fetchBills = (ids: number[]) =>
     Promise.all(ids.map(id => api.get(`/billing/invoices/${id}/print-data`).then(r => r.data as PrintData)))
@@ -251,6 +259,56 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
 
   const unpaid = bills.filter(b => b.invoice.balance_due > 0.005 && b.invoice.status !== 'void');
   const unpaidTotal = unpaid.reduce((s, b) => s + b.invoice.balance_due, 0);
+  // Complimentary only makes sense before anything's been paid against the bill.
+  const complimentaryEligible = bills.filter(b => b.invoice.amount_paid < 0.005 && b.invoice.status !== 'void' && b.invoice.status !== 'paid');
+
+  const markComplimentary = async (invoiceId: number) => {
+    const reason = prompt('Reason for making this bill complimentary:');
+    if (!reason) return;
+    setMarkingCompId(invoiceId);
+    try {
+      await api.post(`/billing/invoices/${invoiceId}/complimentary`, { is_complimentary: true, reason });
+      toast.success('Bill marked complimentary');
+      if (invoiceIds) await fetchBills(invoiceIds);
+      onPaymentsChanged?.();
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to mark complimentary')); }
+    finally { setMarkingCompId(null); }
+  };
+
+  const markWholeStayComplimentary = async () => {
+    if (!bookingId) return;
+    const reason = prompt('Reason for making the WHOLE stay (room + mess) complimentary:');
+    if (!reason) return;
+    setMarkingCompId(-1);
+    try {
+      await api.post(`/billing/bookings/${bookingId}/master-invoice/complimentary`, { is_complimentary: true, reason });
+      toast.success('Whole stay marked complimentary');
+      if (invoiceIds) await fetchBills(invoiceIds);
+      onPaymentsChanged?.();
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to mark complimentary')); }
+    finally { setMarkingCompId(null); }
+  };
+
+  const applyWholeStayDiscount = async () => {
+    if (!bookingId) return;
+    const rateStr = prompt('Discount % across the whole stay (leave blank to enter a flat Rs amount instead):');
+    if (rateStr === null) return;
+    let discount_rate: number | undefined; let discount_amount: number | undefined;
+    if (rateStr.trim()) { discount_rate = Number(rateStr); }
+    else {
+      const amtStr = prompt('Flat discount amount (Rs), split proportionally across the room and mess bills:');
+      if (!amtStr) return;
+      discount_amount = Number(amtStr);
+    }
+    const reason = prompt('Reason for this discount:');
+    if (!reason) return;
+    try {
+      await api.post(`/billing/bookings/${bookingId}/master-invoice/discount`, { discount_rate, discount_amount, reason });
+      toast.success('Discount applied across the whole stay');
+      if (invoiceIds) await fetchBills(invoiceIds);
+      onPaymentsChanged?.();
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to apply discount')); }
+  };
 
   const payInvoices = async (targets: PrintData[]) => {
     setPaying(true);
@@ -279,6 +337,30 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
         <PrintArea>
           {bills.map(bd => <DraftBill key={bd.invoice.id} data={bd} />)}
         </PrintArea>
+
+        {allowPayments && complimentaryEligible.filter(b => !b.invoice.is_complimentary).length > 0 && (
+          <div className="rounded-lg border p-3 space-y-2">
+            <p className="text-sm font-medium">Complimentary / Discount</p>
+            <div className="flex flex-wrap gap-2">
+              {bookingId && complimentaryEligible.length > 1 && (
+                <>
+                  <Button size="sm" disabled={markingCompId === -1} onClick={markWholeStayComplimentary}>
+                    Mark Whole Stay Complimentary
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={applyWholeStayDiscount}>
+                    Apply Discount to Whole Stay
+                  </Button>
+                </>
+              )}
+              {complimentaryEligible.filter(b => !b.invoice.is_complimentary).map(b => (
+                <Button key={b.invoice.id} size="sm" variant="outline" disabled={markingCompId === b.invoice.id}
+                  onClick={() => markComplimentary(b.invoice.id)}>
+                  Mark {BILL_LABELS[b.invoice.bill_type] || 'Bill'} Only Complimentary
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {allowPayments && unpaid.length > 0 && (
           <div className="rounded-lg border p-3 space-y-2">
@@ -311,6 +393,124 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
         <div className="flex gap-2 pt-2">
           <Button onClick={() => window.print()} className="flex-1" disabled={loading || bills.length === 0}>
             <Printer size={16} className="mr-1" /> Print {bills.length > 1 ? 'Both Bills' : 'Invoice'}
+          </Button>
+          <Button variant="ghost" onClick={onClose}>Close</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+interface MasterInvoiceItem { source: string; source_label: string; description: string; quantity: number; unit_price: number; total_price: number; }
+interface MasterInvoiceData {
+  booking: BillBooking; source_invoices: { id: number; invoice_number: string; bill_type: string }[];
+  items: MasterInvoiceItem[]; subtotal: number; tax_amount: number; discount: number;
+  total_amount: number; amount_paid: number; balance_due: number; is_complimentary: boolean;
+  mess: MessIdentity; qr_svg: string; verify_hash: string;
+}
+
+/** Clerk consolidation: one combined document merging a stay's separately
+    generated room + mess invoices into a single master bill with one
+    grand total, instead of printing/settling them as two documents. */
+export function MasterInvoiceView({ bookingId, onClose }: { bookingId: number | null; onClose: () => void }) {
+  const [data, setData] = useState<MasterInvoiceData | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      if (!bookingId) { setData(null); return; }
+      setLoading(true);
+      api.get(`/billing/bookings/${bookingId}/master-invoice`).then(r => setData(r.data))
+        .catch(err => toast.error(getErrorMessage(err, 'Failed to load master invoice')))
+        .finally(() => setLoading(false));
+    });
+  }, [bookingId]);
+
+  if (!bookingId) return null;
+  return (
+    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <style>{PRINT_STYLE}</style>
+        <DialogHeader><DialogTitle>Master Invoice</DialogTitle></DialogHeader>
+        {loading && <p className="text-sm text-gray-500">Loading…</p>}
+        {data && (
+          <PrintArea>
+            <div className="bill-page border border-gray-400 rounded-sm p-4 text-[13px] text-gray-900 bg-white space-y-2.5">
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <p className="text-[11px] text-gray-600">{data.mess.name} · {data.mess.address} · {data.mess.phone}</p>
+                  <p className="text-center font-bold underline decoration-2 text-sm mt-1">MASTER INVOICE (Room + Mess Combined)</p>
+                  {data.is_complimentary && <p className="text-center font-bold text-emerald-700 text-xs mt-0.5">★ COMPLIMENTARY — NO CHARGE ★</p>}
+                </div>
+                <div className="w-16 h-16 shrink-0 ml-2 [&>svg]:w-full [&>svg]:h-full" dangerouslySetInnerHTML={{ __html: data.qr_svg }} />
+              </div>
+
+              <div className="flex gap-4">
+                <DottedField label="Rank:" value={data.booking.rank || '—'} />
+                <DottedField label="Name" value={data.booking.guest_name} grow />
+              </div>
+              <div className="flex gap-4">
+                <DottedField label="Room No:" value={data.booking.room_number} />
+                <DottedField label="Combines" value={data.source_invoices.map(i => i.invoice_number).join(' + ')} grow />
+              </div>
+
+              <table className="w-full border-collapse mt-1">
+                <thead>
+                  <tr>
+                    <th className="border border-gray-500 px-2 py-1 w-10 text-left">Ser</th>
+                    <th className="border border-gray-500 px-2 py-1 text-left">Details</th>
+                    <th className="border border-gray-500 px-2 py-1 w-20 text-left">Bill</th>
+                    <th className="border border-gray-500 px-2 py-1 w-32 text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.items.map((it, i) => (
+                    <tr key={i}>
+                      <td className="border border-gray-500 px-2 py-1">{i + 1}</td>
+                      <td className="border border-gray-500 px-2 py-1">{it.description}{it.quantity > 1 ? ` × ${it.quantity}` : ''}</td>
+                      <td className="border border-gray-500 px-2 py-1 text-[11px] text-gray-500">{it.source_label}</td>
+                      <td className="border border-gray-500 px-2 py-1 text-right font-mono whitespace-nowrap">{formatCurrency(it.total_price)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colSpan={3} className="border border-gray-500 px-2 py-1 font-bold text-right">Grand Total</td>
+                    <td className="border border-gray-500 px-2 py-1 text-right font-bold font-mono whitespace-nowrap">{formatCurrency(data.total_amount)}</td>
+                  </tr>
+                  {data.amount_paid > 0 && (
+                    <>
+                      <tr>
+                        <td colSpan={3} className="border border-gray-500 px-2 py-1 text-right">Less: Amount Paid</td>
+                        <td className="border border-gray-500 px-2 py-1 text-right font-mono whitespace-nowrap">− {formatCurrency(data.amount_paid)}</td>
+                      </tr>
+                      <tr>
+                        <td colSpan={3} className="border border-gray-500 px-2 py-1 font-bold text-right">Balance Due</td>
+                        <td className="border border-gray-500 px-2 py-1 text-right font-bold font-mono whitespace-nowrap">{formatCurrency(data.balance_due)}</td>
+                      </tr>
+                    </>
+                  )}
+                </tfoot>
+              </table>
+
+              <p className="text-[11px] text-gray-500">
+                Ref {data.booking.booking_reference} · Verify: {data.verify_hash}
+              </p>
+
+              <div className="grid grid-cols-2 gap-6 pt-6">
+                <p className="border-t border-gray-500 pt-1 text-center text-[12px]">GR NCO Sign</p>
+                <p className="border-t border-gray-500 pt-1 text-center text-[12px]">Catering NCO Sign</p>
+              </div>
+              <div className="grid grid-cols-2 gap-6 pt-4">
+                <p className="border-t border-gray-500 pt-1 text-center text-[12px]">Mess JCO Sign</p>
+                <p className="border-t border-gray-500 pt-1 text-center text-[12px]">Mess Secretary</p>
+              </div>
+            </div>
+          </PrintArea>
+        )}
+        <div className="flex gap-2 pt-2">
+          <Button onClick={() => window.print()} className="flex-1" disabled={loading || !data}>
+            <Printer size={16} className="mr-1" /> Print Master Invoice
           </Button>
           <Button variant="ghost" onClick={onClose}>Close</Button>
         </div>

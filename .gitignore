@@ -31,6 +31,7 @@ backend/*.db
 backend/logs
 backend/backups
 backend/branding_config.enc
+backend/uploads
 .env
 
 # Claude Code local (machine-specific) settings
