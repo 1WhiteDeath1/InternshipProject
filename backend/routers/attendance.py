@@ -6,22 +6,25 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import (
-    MealAttendance, MemberLeave, Member, MemberStatus, Booking, AttendanceStatus, LeaveStatus, Room,
+    MealAttendance, MemberLeave, Member, MemberStatus, Booking, Guest, AttendanceStatus, LeaveStatus, Room,
 )
 from backend.schemas import (
     MealAttendanceCreate, MealAttendanceOut, AttendanceMarkRequest, BulkAttendanceCreate, MemberLeaveCreate,
-    RosterSetRequest, AttendanceLookupResult, ServeAttendanceRequest, NoShowSweepResult,
+    AttendanceLookupResult, ServeAttendanceRequest, NoShowSweepResult,
 )
 from backend.auth import get_current_user, check_permission
 from backend.audit import log_audit, serialize_model, AuditAction
 from backend.logging_config import get_logger
-from backend.services.mess_billing_calc import get_man_days, get_setting_float
+from backend.services.mess_billing_calc import get_man_days, get_setting_float, get_setting_str
 
 logger = get_logger("app")
 router = APIRouter()
 
-# Fixed meal times for Tier 1 - not per-mess-configurable (only the cutoff
-# window before these times is configurable, via the meal_booking_cutoff_minutes setting).
+# Fixed meal times for Tier 1 - not per-mess-configurable, just used as a
+# fallback reference. The actual booking cutoff is the settable
+# meal_cutoff_<type> SystemSetting (see _get_meal_cutoff_time) - an absolute
+# clock time per meal, editable on the Settings page, after which that
+# meal's attendance for the day is final.
 MEAL_TIMES = {
     "breakfast": time(7, 0),
     "lunch": time(13, 0),
@@ -29,14 +32,34 @@ MEAL_TIMES = {
     "dinner": time(20, 0),
 }
 
+_DEFAULT_CUTOFFS = {
+    "breakfast": time(9, 0),
+    "lunch": time(14, 30),
+    "hitea": time(17, 30),
+    "dinner": time(21, 30),
+}
 
-def _is_past_cutoff(db: Session, meal_date: date, meal_type: str) -> bool:
-    meal_time = MEAL_TIMES.get(meal_type)
-    if not meal_time:
+
+def _get_meal_cutoff_time(db: Session, meal_type: str) -> time:
+    default = _DEFAULT_CUTOFFS.get(meal_type, time(23, 59))
+    raw = get_setting_str(db, f"meal_cutoff_{meal_type}", default.strftime("%H:%M"))
+    try:
+        hh, mm = raw.split(":")
+        return time(int(hh), int(mm))
+    except (ValueError, TypeError):
+        return default
+
+
+def _is_locked(meal_date: date, cutoff_time: time) -> bool:
+    """A meal is final (locked) for any date that's already fully elapsed,
+    or for today once the clock passes its settable cutoff time. A future
+    date is never locked - its cutoff simply hasn't arrived yet."""
+    today = date.today()
+    if meal_date < today:
+        return True
+    if meal_date > today:
         return False
-    cutoff_minutes = get_setting_float(db, "meal_booking_cutoff_minutes", 120)
-    cutoff = datetime.combine(meal_date, meal_time) - timedelta(minutes=cutoff_minutes)
-    return datetime.utcnow() > cutoff
+    return datetime.utcnow() > datetime.combine(meal_date, cutoff_time)
 
 
 def _has_active_leave(db: Session, member_id: int, on_date: date) -> bool:
@@ -50,22 +73,22 @@ def _has_active_leave(db: Session, member_id: int, on_date: date) -> bool:
 
 def _attendance_out(record: MealAttendance) -> MealAttendanceOut:
     return MealAttendanceOut(
-        id=record.id, member_id=record.member_id, booking_id=record.booking_id, recipe_id=record.recipe_id,
+        id=record.id, member_id=record.member_id, booking_id=record.booking_id, guest_id=record.guest_id, recipe_id=record.recipe_id,
         date=record.date, meal_type=record.meal_type.value, method=record.method, status=record.status.value,
         booked_at=record.booked_at, marked_at=record.marked_at, marked_by=record.marked_by,
         member_name=record.member.full_name if record.member else None,
-        guest_name=record.booking.guest_name if record.booking else None,
+        guest_name=(record.booking.guest_name if record.booking else None) or (record.guest.full_name if record.guest else None),
         recipe_name=record.recipe.name if record.recipe else None,
     )
 
 
-def _create_attendance(db: Session, member_id: int | None, booking_id: int | None, meal_date: date, meal_type: str, method: str, recipe_id: int | None = None) -> MealAttendance:
-    # Guests (booking_id set, member_id None) have no MemberLeave concept - only
-    # check for an active leave when this is a member-based row.
+def _create_attendance(db: Session, member_id: int | None, booking_id: int | None, meal_date: date, meal_type: str, method: str, recipe_id: int | None = None, guest_id: int | None = None) -> MealAttendance:
+    # Only members have a MemberLeave concept - checked-in guests and
+    # standalone walk-in guests (booking_id/guest_id) skip this check.
     status = AttendanceStatus.BOOKED
     if member_id and _has_active_leave(db, member_id, meal_date):
         status = AttendanceStatus.EXCLUDED
-    record = MealAttendance(member_id=member_id, booking_id=booking_id, recipe_id=recipe_id, date=meal_date, meal_type=meal_type, method=method, status=status)
+    record = MealAttendance(member_id=member_id, booking_id=booking_id, guest_id=guest_id, recipe_id=recipe_id, date=meal_date, meal_type=meal_type, method=method, status=status)
     db.add(record)
     db.commit()
     db.refresh(record)
@@ -119,11 +142,14 @@ async def book_attendance(data: MealAttendanceCreate, request: Request, db: Sess
             raise HTTPException(status_code=404, detail="Booking not found")
         if booking.status.value != "checked_in":
             raise HTTPException(status_code=400, detail="Guest must be checked in to record a meal")
-    if _is_past_cutoff(db, data.date, data.meal_type):
-        raise HTTPException(status_code=400, detail="Booking window closed for this meal")
+    if data.guest_id and not db.query(Guest).filter(Guest.id == data.guest_id).first():
+        raise HTTPException(status_code=404, detail="Guest not found")
+    cutoff = _get_meal_cutoff_time(db, data.meal_type)
+    if _is_locked(data.date, cutoff):
+        raise HTTPException(status_code=400, detail=f"Attendance for {data.meal_type} on {data.date} is final - booking closed at {cutoff.strftime('%H:%M')}")
 
     try:
-        record = _create_attendance(db, data.member_id, data.booking_id, data.date, data.meal_type, data.method, data.recipe_id)
+        record = _create_attendance(db, data.member_id, data.booking_id, data.date, data.meal_type, data.method, data.recipe_id, data.guest_id)
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="This member/guest already has a booking for that meal/date")
@@ -136,8 +162,9 @@ async def book_attendance(data: MealAttendanceCreate, request: Request, db: Sess
 async def bulk_book_attendance(data: BulkAttendanceCreate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     if not check_permission(current_user, "attendance", "create"):
         raise HTTPException(status_code=403, detail="Permission denied")
-    if _is_past_cutoff(db, data.date, data.meal_type):
-        raise HTTPException(status_code=400, detail="Booking window closed for this meal")
+    cutoff = _get_meal_cutoff_time(db, data.meal_type)
+    if _is_locked(data.date, cutoff):
+        raise HTTPException(status_code=400, detail=f"Attendance for {data.meal_type} on {data.date} is final - booking closed at {cutoff.strftime('%H:%M')}")
 
     succeeded, failed = [], []
     for member_id in data.member_ids:
@@ -160,24 +187,34 @@ async def bulk_book_attendance(data: BulkAttendanceCreate, request: Request, db:
 
 @router.get("/lookup", response_model=List[AttendanceLookupResult])
 async def lookup_attendance(
-    q: str = Query(..., min_length=2), date_: str = Query(..., alias="date"), meal_type: str = Query(...),
+    q: str = Query(""), date_: str = Query(..., alias="date"), meal_type: str = Query(...),
     db: Session = Depends(get_db), current_user=Depends(get_current_user),
 ):
-    """Omnibar data source: matches active members (name/service number) and
-    checked-in guests (name/room number), annotated with their attendance
-    status for the given date/meal so the UI can render the Intent pill
-    without a second round trip."""
+    """Omnibar data source: matches active members (name/service number),
+    checked-in hotel guests (name/room number), and standalone walk-in
+    guests with no room booking (name/phone) - the same one box adds any of
+    the three the same way. Annotated with attendance status for the given
+    date/meal so the UI can render the Intent pill without a second round trip.
+
+    An empty q is a deliberate "browse" mode (contains("") matches every
+    row) rather than a narrow search, so it uses a much higher limit - the
+    frontend shows this on focus, before anyone's typed anything, as a
+    preview of who's available to add."""
     try:
         lookup_date = date.fromisoformat(date_)
     except ValueError:
         raise HTTPException(status_code=400, detail="date must be an ISO date (YYYY-MM-DD)")
+
+    browsing = not q.strip()
+    person_limit = 50 if browsing else 8
+    guest_limit = 20 if browsing else 8
 
     results: List[AttendanceLookupResult] = []
 
     members = db.query(Member).filter(
         Member.status == MemberStatus.ACTIVE,
         (Member.full_name.contains(q)) | (Member.service_number.contains(q)),
-    ).order_by(Member.full_name).limit(8).all()
+    ).order_by(Member.full_name).limit(person_limit).all()
     member_ids = [m.id for m in members]
     member_rows = {}
     if member_ids:
@@ -197,7 +234,7 @@ async def lookup_attendance(
     bookings = db.query(Booking).join(Room, Booking.room_id == Room.id).filter(
         Booking.status == "checked_in",
         (Booking.guest_name.contains(q)) | (Room.room_number.contains(q)),
-    ).order_by(Booking.guest_name).limit(8).all()
+    ).order_by(Booking.guest_name).limit(person_limit).all()
     booking_ids = [b.id for b in bookings]
     booking_rows = {}
     if booking_ids:
@@ -214,15 +251,38 @@ async def lookup_attendance(
             attendance_status=rec.status.value if rec else None,
         ))
 
+    # Standalone walk-in guests: excludes anyone with an active checked-in
+    # booking, since those people are already covered above under "booking" -
+    # without this exclusion the same physical person could be added twice
+    # under two different consumer identities, double-counting them.
+    checked_in_guest_ids = {b.guest_id for b in db.query(Booking.guest_id).filter(Booking.status == "checked_in", Booking.guest_id.isnot(None)).all()}
+    guest_query = db.query(Guest).filter((Guest.full_name.contains(q)) | (Guest.phone.contains(q)))
+    if checked_in_guest_ids:
+        guest_query = guest_query.filter(~Guest.id.in_(checked_in_guest_ids))
+    guests = guest_query.order_by(Guest.updated_at.desc()).limit(guest_limit).all()
+    guest_ids = [g.id for g in guests]
+    guest_rows = {}
+    if guest_ids:
+        guest_rows = {r.guest_id: r for r in db.query(MealAttendance).filter(
+            MealAttendance.guest_id.in_(guest_ids), MealAttendance.date == lookup_date,
+            MealAttendance.meal_type == meal_type,
+        ).all()}
+    for g in guests:
+        rec = guest_rows.get(g.id)
+        results.append(AttendanceLookupResult(
+            kind="guest", id=g.id, name=g.full_name, sub_label=g.phone or "Guest",
+            recipe_id=rec.recipe_id if rec else None,
+            attendance_id=rec.id if rec else None,
+            attendance_status=rec.status.value if rec else None,
+        ))
+
     return results
 
 
 @router.post("/serve", response_model=MealAttendanceOut)
 async def serve_meal(data: ServeAttendanceRequest, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """Point-of-service action: confirm attendance for someone already booked,
-    or create+confirm in one step for a walk-up with no advance intent. Unlike
-    POST /attendance, this never checks the advance-booking cutoff - serving
-    someone right now is not a future booking."""
+    or create+confirm in one step for a walk-up with no advance intent."""
     if not check_permission(current_user, "attendance", "create"):
         raise HTTPException(status_code=403, detail="Permission denied")
     if data.member_id and not db.query(Member).filter(Member.id == data.member_id).first():
@@ -233,9 +293,16 @@ async def serve_meal(data: ServeAttendanceRequest, request: Request, db: Session
             raise HTTPException(status_code=404, detail="Booking not found")
         if booking.status.value != "checked_in":
             raise HTTPException(status_code=400, detail="Guest must be checked in to record a meal")
+    if data.guest_id and not db.query(Guest).filter(Guest.id == data.guest_id).first():
+        raise HTTPException(status_code=404, detail="Guest not found")
 
     query = db.query(MealAttendance).filter(MealAttendance.date == data.date, MealAttendance.meal_type == data.meal_type)
-    query = query.filter(MealAttendance.member_id == data.member_id) if data.member_id else query.filter(MealAttendance.booking_id == data.booking_id)
+    if data.member_id:
+        query = query.filter(MealAttendance.member_id == data.member_id)
+    elif data.booking_id:
+        query = query.filter(MealAttendance.booking_id == data.booking_id)
+    else:
+        query = query.filter(MealAttendance.guest_id == data.guest_id)
     record = query.first()
 
     if record and record.status in (AttendanceStatus.CANCELLED, AttendanceStatus.EXCLUDED):
@@ -244,12 +311,15 @@ async def serve_meal(data: ServeAttendanceRequest, request: Request, db: Session
         raise HTTPException(status_code=409, detail=record.status.value)
     if record and record.status == AttendanceStatus.ATTENDED:
         return _attendance_out(record)  # idempotent double-click safety
+    cutoff = _get_meal_cutoff_time(db, data.meal_type)
+    if _is_locked(data.date, cutoff):
+        raise HTTPException(status_code=400, detail=f"Attendance for {data.meal_type} on {data.date} is final - booking closed at {cutoff.strftime('%H:%M')}")
     if record is None and data.member_id and _has_active_leave(db, data.member_id, data.date):
         raise HTTPException(status_code=409, detail="excluded")
 
     before = serialize_model(record) if record else None
     if record is None:
-        record = MealAttendance(member_id=data.member_id, booking_id=data.booking_id, recipe_id=data.recipe_id,
+        record = MealAttendance(member_id=data.member_id, booking_id=data.booking_id, guest_id=data.guest_id, recipe_id=data.recipe_id,
                                  date=data.date, meal_type=data.meal_type, method="manual")
         db.add(record)
     elif data.recipe_id is not None:
@@ -305,10 +375,11 @@ async def no_show_sweep(
         r.status = AttendanceStatus.NO_SHOW
         r.marked_at = datetime.utcnow()
         r.marked_by = current_user.id
+        kind = "member" if r.member_id else ("booking" if r.booking_id else "guest")
         items.append(AttendanceLookupResult(
-            kind="member" if r.member_id else "booking",
-            id=r.member_id or r.booking_id,
-            name=r.member.full_name if r.member else (r.booking.guest_name if r.booking else "Unknown"),
+            kind=kind,
+            id=r.member_id or r.booking_id or r.guest_id,
+            name=r.member.full_name if r.member else (r.booking.guest_name if r.booking else (r.guest.full_name if r.guest else "Unknown")),
             sub_label=None, recipe_id=r.recipe_id, attendance_id=r.id, attendance_status=r.status.value,
         ))
         log_audit(db, current_user.id, current_user.full_name, AuditAction.OVERRIDE, "meal_attendance", r.id,
@@ -318,110 +389,64 @@ async def no_show_sweep(
     return NoShowSweepResult(count=len(items), items=items)
 
 
-# --- Roster (single-tap present/absent grid) ---
+# --- Cutoffs (per-meal settable "attendance is final" time) ---
 
-@router.get("/roster")
-async def get_roster(
+@router.get("/cutoffs")
+async def list_cutoffs(
+    date_: str = Query(..., alias="date"),
+    db: Session = Depends(get_db), current_user=Depends(get_current_user),
+):
+    """Cutoff time + lock state for each meal on one date - drives the
+    Attendance page's lock badges and disables adding/removing once a meal's
+    booking window has closed. Cutoff times themselves are edited on the
+    Settings page (meal_cutoff_breakfast/lunch/hitea/dinner)."""
+    try:
+        cutoff_date = date.fromisoformat(date_)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be an ISO date (YYYY-MM-DD)")
+
+    out = {}
+    for mt in MEAL_TIMES:
+        cutoff = _get_meal_cutoff_time(db, mt)
+        out[mt] = {"cutoff": cutoff.strftime("%H:%M"), "locked": _is_locked(cutoff_date, cutoff)}
+    return out
+
+
+# --- Attendees (unified confirmed list for one meal - the omnibar's counterpart view) ---
+
+@router.get("/attendees")
+async def list_attendees(
     date_: str = Query(..., alias="date"), meal_type: str = Query(...),
     db: Session = Depends(get_db), current_user=Depends(get_current_user),
 ):
-    """Every active member with their present/absent/on_leave state for one
-    meal, plus any guest rows recorded for it - the data behind the roster grid.
-    Present means an attendance row exists in a booked or attended state."""
+    """Everyone currently booked/attended for one date+meal, regardless of
+    whether they're a member, a checked-in hotel guest, or a standalone
+    walk-in guest - one flat list, since the frontend no longer distinguishes
+    how someone was added, only who's confirmed to eat."""
     try:
-        roster_date = date.fromisoformat(date_)
+        attendees_date = date.fromisoformat(date_)
     except ValueError:
         raise HTTPException(status_code=400, detail="date must be an ISO date (YYYY-MM-DD)")
-    members = db.query(Member).filter(Member.status == MemberStatus.ACTIVE).order_by(Member.full_name).all()
 
     rows = db.query(MealAttendance).filter(
-        MealAttendance.date == roster_date, MealAttendance.meal_type == meal_type,
+        MealAttendance.date == attendees_date, MealAttendance.meal_type == meal_type,
+        MealAttendance.status.in_([AttendanceStatus.BOOKED, AttendanceStatus.ATTENDED]),
     ).all()
-    by_member = {r.member_id: r for r in rows if r.member_id is not None}
 
-    # One leave lookup for the whole active set instead of per-member.
-    on_leave_ids = {
-        l.member_id for l in db.query(MemberLeave).filter(
-            MemberLeave.status == LeaveStatus.ACTIVE,
-            MemberLeave.start_date <= roster_date,
-            MemberLeave.end_date >= roster_date,
-        ).all()
-    }
-
-    member_out = []
-    for m in members:
-        rec = by_member.get(m.id)
-        if m.id in on_leave_ids:
-            status = "on_leave"
-        elif rec and rec.status.value in ("booked", "attended"):
-            status = "present"
+    out = []
+    for r in rows:
+        if r.member_id:
+            kind, name, sub_label = "member", r.member.full_name if r.member else "Unknown", r.member.service_number if r.member else None
+        elif r.booking_id:
+            kind, name, sub_label = "booking", r.booking.guest_name if r.booking else "Unknown", (r.booking.room.room_number if r.booking and r.booking.room else None)
         else:
-            status = "absent"
-        member_out.append({"member_id": m.id, "full_name": m.full_name,
-                           "service_number": m.service_number, "status": status})
-
-    guest_out = [
-        {"id": r.id, "booking_id": r.booking_id, "guest_name": r.booking.guest_name if r.booking else None,
-         "recipe_id": r.recipe_id, "recipe_name": r.recipe.name if r.recipe else None, "status": r.status.value}
-        for r in rows if r.booking_id is not None and r.status.value in ("booked", "attended")
-    ]
-    return {"members": member_out, "guests": guest_out}
-
-
-@router.post("/roster")
-async def set_roster(data: RosterSetRequest, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    """Bulk present/absent for a set of members - powers both a single-row
-    toggle (one id) and 'Mark all present' (all ids). Present on today/past =
-    ATTENDED, present on a future date = BOOKED (advance booking, not yet
-    billable); absent = CANCELLED. On-leave members are skipped when marking
-    present. Past-date edits require a reason and are logged as OVERRIDE,
-    matching mark_attendance."""
-    if not check_permission(current_user, "attendance", "edit"):
-        raise HTTPException(status_code=403, detail="Permission denied")
-
-    is_backdated = data.date < date.today()
-    if data.present and is_backdated and not data.reason:
-        raise HTTPException(status_code=400, detail="A reason is required to record attendance for a past date")
-
-    present_status = AttendanceStatus.BOOKED if data.date > date.today() else AttendanceStatus.ATTENDED
-    updated, skipped = [], []
-    for member_id in data.member_ids:
-        if not db.query(Member).filter(Member.id == member_id).first():
-            skipped.append(member_id)
-            continue
-        if data.present and _has_active_leave(db, member_id, data.date):
-            skipped.append(member_id)  # on leave - excluded, never auto-marked present
-            continue
-
-        record = db.query(MealAttendance).filter(
-            MealAttendance.member_id == member_id, MealAttendance.date == data.date,
-            MealAttendance.meal_type == data.meal_type,
-        ).first()
-
-        if data.present:
-            if not record:
-                record = MealAttendance(member_id=member_id, date=data.date, meal_type=data.meal_type, method="manual")
-                db.add(record)
-            record.status = present_status
-            if data.recipe_id is not None:
-                record.recipe_id = data.recipe_id
-            record.marked_at = datetime.utcnow()
-            record.marked_by = current_user.id
-        else:
-            if not record:
-                continue  # absent and never recorded - nothing to do
-            record.status = AttendanceStatus.CANCELLED
-            record.marked_at = datetime.utcnow()
-            record.marked_by = current_user.id
-        updated.append(member_id)
-
-    db.commit()
-    action = AuditAction.OVERRIDE if is_backdated else AuditAction.UPDATE
-    log_audit(db, current_user.id, current_user.full_name, action, "meal_attendance", None,
-              after_state={"date": str(data.date), "meal_type": data.meal_type, "present": data.present,
-                           "updated": len(updated), "skipped": len(skipped)},
-              reason=data.reason if is_backdated else None, ip_address=request.client.host)
-    return {"updated": updated, "skipped": skipped}
+            kind, name, sub_label = "guest", r.guest.full_name if r.guest else "Unknown", r.guest.phone if r.guest else None
+        out.append({
+            "attendance_id": r.id, "kind": kind, "name": name, "sub_label": sub_label,
+            "recipe_name": r.recipe.name if r.recipe else None, "status": r.status.value,
+        })
+    out.sort(key=lambda x: x["name"] or "")
+    return out
 
 
 @router.post("/{attendance_id}/mark")
@@ -437,6 +462,12 @@ async def mark_attendance(attendance_id: int, data: AttendanceMarkRequest, reque
     is_backdated = record.date < date.today()
     if is_backdated and not data.reason:
         raise HTTPException(status_code=400, detail="A reason is required to correct a past attendance record")
+    if not is_backdated:
+        # Today only - once locked there's no override, unlike the reasoned
+        # correction path above for genuinely past dates.
+        cutoff = _get_meal_cutoff_time(db, record.meal_type.value)
+        if _is_locked(record.date, cutoff):
+            raise HTTPException(status_code=400, detail=f"Attendance for {record.meal_type.value} on {record.date} is final - booking closed at {cutoff.strftime('%H:%M')}")
 
     before = serialize_model(record)
     record.status = data.status

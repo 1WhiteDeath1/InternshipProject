@@ -1,334 +1,204 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import api, { getErrorMessage } from '@/lib/api';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { UtensilsCrossed, Plus, XCircle, CheckCheck, UserPlus } from 'lucide-react';
-import { defaultMealForNow } from '@/lib/mealDefaults';
+import { UtensilsCrossed, XCircle, Lock } from 'lucide-react';
+import { MealAttendanceOmnibar } from '@/components/MealAttendanceOmnibar';
 
-interface RosterMember {
-  member_id: number;
-  full_name: string;
-  service_number: string;
-  status: 'present' | 'absent' | 'on_leave';
-}
-
-interface RosterGuest {
-  id: number;
-  booking_id: number;
-  guest_name: string | null;
+interface AttendeeRow {
+  attendance_id: number;
+  kind: 'member' | 'booking' | 'guest';
+  name: string;
+  sub_label: string | null;
   recipe_name: string | null;
   status: string;
 }
 
-interface MemberOption { id: number; full_name: string; service_number: string; }
-interface BookingOption { id: number; guest_name: string; room_number: string; }
 interface RecipeOption { id: number; name: string; }
+interface CutoffInfo { cutoff: string; locked: boolean; }
 
-interface Leave {
-  id: number;
-  member_id: number;
-  member_name: string | null;
-  start_date: string;
-  end_date: string;
-  reason: string | null;
-  status: string;
+const MEAL_TYPES = ['breakfast', 'lunch', 'dinner'];
+const MEAL_LABELS: Record<string, string> = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner' };
+const KIND_LABEL: Record<AttendeeRow['kind'], string> = { member: 'Member', booking: 'Guest', guest: 'Guest' };
+
+function defaultMeal(): string {
+  const hour = new Date().getHours();
+  if (hour < 11) return 'breakfast';
+  if (hour < 17) return 'lunch';
+  return 'dinner';
 }
 
-const MEAL_TYPES = ['breakfast', 'lunch', 'hitea', 'dinner'];
+function formatTime12h(hhmm: string): string {
+  const [h, m] = hhmm.split(':').map(Number);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+}
 
 export default function Attendance() {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [mealType, setMealType] = useState<string>(defaultMealForNow());
-  const [rosterMembers, setRosterMembers] = useState<RosterMember[]>([]);
-  const [guests, setGuests] = useState<RosterGuest[]>([]);
-  const [members, setMembers] = useState<MemberOption[]>([]);
-  const [checkedInBookings, setCheckedInBookings] = useState<BookingOption[]>([]);
+  const [mealType, setMealType] = useState<string>(defaultMeal());
+  const [attendeesByMeal, setAttendeesByMeal] = useState<Record<string, AttendeeRow[]>>({});
+  const [cutoffs, setCutoffs] = useState<Record<string, CutoffInfo>>({});
+  const [loading, setLoading] = useState(true);
   const [recipes, setRecipes] = useState<RecipeOption[]>([]);
   const [menuRecipeId, setMenuRecipeId] = useState(0);
-  const [leaves, setLeaves] = useState<Leave[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [search, setSearch] = useState('');
-
-  const [guestDialogOpen, setGuestDialogOpen] = useState(false);
-  const [guestBookingId, setGuestBookingId] = useState(0);
-  const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
-  const [leaveForm, setLeaveForm] = useState({ member_id: 0, start_date: '', end_date: '', reason: '' });
 
   const isPast = new Date(date) < new Date(new Date().toDateString());
 
-  const fetchRoster = async () => {
+  const fetchAttendees = useCallback(async () => {
+    setLoading(true);
     try {
-      const res = await api.get(`/attendance/roster?date=${date}&meal_type=${mealType}`);
-      setRosterMembers(res.data.members);
-      setGuests(res.data.guests);
-    } catch { toast.error('Failed to load roster'); }
-  };
+      const [attendeeResults, cutoffRes] = await Promise.all([
+        Promise.all(
+          // Explicit no-cache: this reflects live headcounts (people are added/
+          // removed constantly), and the browser has no way to know that on its
+          // own for a same-shaped GET - without this a cached response for an
+          // identical date/meal query can quietly show a stale list.
+          MEAL_TYPES.map(mt => api.get(`/attendance/attendees?date=${date}&meal_type=${mt}`, { headers: { 'Cache-Control': 'no-cache' } }).then(res => [mt, res.data] as const))
+        ),
+        api.get(`/attendance/cutoffs?date=${date}`, { headers: { 'Cache-Control': 'no-cache' } }),
+      ]);
+      const next: Record<string, AttendeeRow[]> = {};
+      for (const [mt, rows] of attendeeResults) next[mt] = Array.isArray(rows) ? rows : [];
+      setAttendeesByMeal(next);
+      setCutoffs(cutoffRes.data);
+    } catch { toast.error('Failed to load attendance'); }
+    finally { setLoading(false); }
+  }, [date]);
 
-  const fetchMembers = async () => {
-    try { const res = await api.get('/members?status=active&page_size=100'); setMembers(res.data.items); }
-    catch { toast.error('Failed to load members'); }
-  };
-
-  const fetchCheckedInBookings = async () => {
-    try { const res = await api.get('/bookings?status=checked_in'); setCheckedInBookings(res.data.items); }
-    catch { toast.error('Failed to load checked-in guests'); }
-  };
-
-  const fetchRecipes = async () => {
+  const fetchRecipes = useCallback(async () => {
     try { const res = await api.get(`/recipes?menu_category=${mealType}`); setRecipes(res.data.items); }
     catch { toast.error('Failed to load recipes'); }
-  };
-
-  const fetchLeaves = async () => {
-    try { const res = await api.get('/attendance/leaves?status=active'); setLeaves(res.data); }
-    catch { toast.error('Failed to load leaves'); }
-  };
+  }, [mealType]);
 
   useEffect(() => {
-    queueMicrotask(() => {
-      setLoading(true);
-      setMenuRecipeId(0);
-      Promise.all([fetchRoster(), fetchMembers(), fetchCheckedInBookings(), fetchRecipes(), fetchLeaves()]).finally(() => setLoading(false));
-    });
-  }, [date, mealType]);
+    queueMicrotask(() => { fetchAttendees(); });
+  }, [date, fetchAttendees]);
 
-  const askReasonIfPast = (): string | undefined | false => {
-    if (!isPast) return undefined;
-    const reason = prompt('This is a past date — enter a reason for this correction:') || undefined;
-    return reason || false; // false = user cancelled
-  };
+  useEffect(() => {
+    queueMicrotask(() => { setMenuRecipeId(0); fetchRecipes(); });
+  }, [mealType, fetchRecipes]);
 
-  const setPresence = async (memberIds: number[], present: boolean) => {
-    if (memberIds.length === 0) return;
+  const handleRemove = async (row: AttendeeRow) => {
     let reason: string | undefined;
-    if (present) {
-      const r = askReasonIfPast();
-      if (r === false) return;
-      reason = r;
+    if (isPast) {
+      reason = prompt('This is a past date — enter a reason for this correction:') || undefined;
+      if (!reason) return;
     }
-    setBusy(true);
     try {
-      await api.post('/attendance/roster', {
-        date, meal_type: mealType, member_ids: memberIds, present,
-        recipe_id: present && menuRecipeId ? menuRecipeId : null, reason,
-      });
-      fetchRoster();
-    } catch (err) { toast.error(getErrorMessage(err, 'Failed to update attendance')); }
-    finally { setBusy(false); }
+      await api.post(`/attendance/${row.attendance_id}/mark`, { status: 'cancelled', reason });
+      toast.success(`Removed ${row.name}`);
+      fetchAttendees();
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to remove')); }
   };
 
-  const handleToggle = (m: RosterMember) => {
-    if (m.status === 'on_leave') return;
-    setPresence([m.member_id], m.status !== 'present');
-  };
-
-  const handleMarkAllPresent = async () => {
-    const ids = rosterMembers.filter(m => m.status !== 'on_leave').map(m => m.member_id);
-    await setPresence(ids, true);
-    toast.success('Marked all present');
-  };
-
-  const handleAddGuestMeal = async () => {
-    if (!guestBookingId) { toast.error('Select a checked-in guest'); return; }
-    try {
-      // Guests: create a booking-based attendance row, then mark attended.
-      const res = await api.post('/attendance', {
-        member_id: null, booking_id: guestBookingId,
-        recipe_id: menuRecipeId || null, date, meal_type: mealType,
-      });
-      await api.post(`/attendance/${res.data.id}/mark`, { status: 'attended' });
-      toast.success('Guest meal recorded');
-      setGuestDialogOpen(false);
-      setGuestBookingId(0);
-      fetchRoster();
-    } catch (err) { toast.error(getErrorMessage(err, 'Failed to add guest meal')); }
-  };
-
-  const handleRemoveGuest = async (id: number) => {
-    try { await api.post(`/attendance/${id}/mark`, { status: 'cancelled' }); toast.success('Guest meal removed'); fetchRoster(); }
-    catch (err) { toast.error(getErrorMessage(err, 'Failed')); }
-  };
-
-  const handleCreateLeave = async () => {
-    try {
-      await api.post('/attendance/leaves', leaveForm);
-      toast.success('Leave recorded');
-      setLeaveDialogOpen(false);
-      setLeaveForm({ member_id: 0, start_date: '', end_date: '', reason: '' });
-      fetchLeaves();
-      fetchRoster();
-    } catch (err) { toast.error(getErrorMessage(err, 'Failed to record leave')); }
-  };
-
-  const handleCancelLeave = async (id: number) => {
-    try { await api.post(`/attendance/leaves/${id}/cancel`); toast.success('Leave cancelled'); fetchLeaves(); fetchRoster(); }
-    catch (err) { toast.error(getErrorMessage(err, 'Failed')); }
-  };
-
-  const presentCount = rosterMembers.filter(m => m.status === 'present').length;
-  const leaveCount = rosterMembers.filter(m => m.status === 'on_leave').length;
-  const filtered = rosterMembers.filter(m =>
-    m.full_name.toLowerCase().includes(search.toLowerCase()) || m.service_number.toLowerCase().includes(search.toLowerCase()));
+  const currentAttendees = attendeesByMeal[mealType] ?? [];
+  const lockedMeals: Record<string, boolean> = {};
+  for (const mt of MEAL_TYPES) lockedMeals[mt] = cutoffs[mt]?.locked ?? false;
+  // Hard-lock (no override) only applies to today once its cutoff passes -
+  // a genuinely past date keeps using the existing reason-required
+  // correction flow below, matching the backend's own distinction.
+  const currentLocked = !isPast && lockedMeals[mealType];
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><UtensilsCrossed size={24} /> Meal Attendance</h1>
-
-      <Tabs value={mealType} onValueChange={setMealType}>
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <TabsList className="grid grid-cols-4 max-w-md">
-            {MEAL_TYPES.map(mt => <TabsTrigger key={mt} value={mt} className="capitalize">{mt}</TabsTrigger>)}
-          </TabsList>
-          <div className="flex items-center gap-2">
-            <Label className="text-sm text-gray-500 whitespace-nowrap">Meal date</Label>
-            <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-40" />
-          </div>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><UtensilsCrossed size={24} /> Meal Attendance</h1>
+        <div className="flex items-center gap-2">
+          <Label className="text-sm text-gray-500 whitespace-nowrap">Date</Label>
+          <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-40" />
         </div>
+      </div>
 
-        {MEAL_TYPES.map(mt => (
-          <TabsContent key={mt} value={mt} className="space-y-4">
-            {/* Action bar */}
-            <Card>
-              <CardContent className="p-4 flex items-end gap-3 flex-wrap">
-                <div className="min-w-52 max-w-xs">
-                  <Label className="text-xs text-gray-500">Today's menu item <span className="text-gray-400">(optional)</span></Label>
-                  <select className="mt-1 w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={menuRecipeId} onChange={e => setMenuRecipeId(Number(e.target.value))}>
-                    <option value="0">Not specified</option>
-                    {recipes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                  </select>
+      {/* Meal selector - the cards double as the view, no separate tab bar */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {MEAL_TYPES.map(mt => {
+          const rows = attendeesByMeal[mt] ?? [];
+          const names = rows.map(r => r.name);
+          const isActive = mt === mealType;
+          const locked = lockedMeals[mt];
+          const cutoff = cutoffs[mt]?.cutoff;
+          return (
+            <Card
+              key={mt}
+              className={`cursor-pointer transition-colors ${isActive ? 'ring-2 ring-primary border-primary' : 'hover:border-gray-300 dark:hover:border-gray-600'}`}
+              onClick={() => setMealType(mt)}
+            >
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="font-semibold text-sm">{MEAL_LABELS[mt]}</p>
+                  <Badge className="bg-green-100 text-green-800">{loading ? '…' : names.length}</Badge>
                 </div>
-                <Button onClick={handleMarkAllPresent} disabled={busy || loading}>
-                  <CheckCheck size={16} className="mr-1" /> Mark all present
-                </Button>
-                <Dialog open={guestDialogOpen} onOpenChange={setGuestDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button variant="outline"><UserPlus size={16} className="mr-1" /> Add guest meal</Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader><DialogTitle>Add Guest Meal — {mt}, {date}</DialogTitle></DialogHeader>
-                    <div className="space-y-3">
-                      <select className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={guestBookingId} onChange={e => setGuestBookingId(Number(e.target.value))}>
-                        <option value="0">Select checked-in guest…</option>
-                        {checkedInBookings.map(b => <option key={b.id} value={b.id}>{b.guest_name} (Room {b.room_number})</option>)}
-                      </select>
-                      <Button onClick={handleAddGuestMeal} className="w-full">Record Guest Meal</Button>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-                <div className="flex-1" />
-                <div className="text-sm flex items-center gap-2 flex-wrap">
-                  <Badge className="bg-green-100 text-green-800">{presentCount} present</Badge>
-                  <Badge className="bg-amber-100 text-amber-800">{leaveCount} on leave</Badge>
-                  <Badge className="bg-blue-100 text-blue-800">{guests.length} guests</Badge>
-                </div>
+                <p className="text-xs text-gray-500 leading-relaxed min-h-8">
+                  {loading ? 'Loading…' : names.length === 0 ? 'No one confirmed yet' : (
+                    names.length <= 4 ? names.join(', ') : `${names.slice(0, 4).join(', ')} +${names.length - 4} more`
+                  )}
+                </p>
+                {cutoff && (
+                  <p className={`text-xs mt-2 flex items-center gap-1 ${locked ? 'text-amber-600 font-medium' : 'text-gray-400'}`}>
+                    {locked ? <><Lock size={11} /> Final — closed at {formatTime12h(cutoff)}</> : `Closes at ${formatTime12h(cutoff)}`}
+                  </p>
+                )}
               </CardContent>
             </Card>
+          );
+        })}
+      </div>
 
-            {isPast && <p className="text-xs text-amber-600">Editing a past date — you'll be asked for a correction reason.</p>}
-
-            <div className="relative max-w-sm">
-              <Input placeholder="Search members…" value={search} onChange={e => setSearch(e.target.value)} />
-            </div>
-
-            {/* Roster */}
-            <Card>
-              <CardContent className="p-0">
-                <Table>
-                  <TableHeader><TableRow><TableHead className="w-24">Present</TableHead><TableHead>Member</TableHead><TableHead>Service #</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
-                  <TableBody>
-                    {loading && <TableRow><TableCell colSpan={4} className="text-center py-8 text-gray-500">Loading roster…</TableCell></TableRow>}
-                    {!loading && filtered.map(m => (
-                      <TableRow key={m.member_id} className={m.status === 'on_leave' ? 'opacity-60' : 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900'} onClick={() => handleToggle(m)}>
-                        <TableCell>
-                          <input type="checkbox" className="h-5 w-5 rounded border-gray-300 cursor-pointer disabled:cursor-not-allowed"
-                            checked={m.status === 'present'} disabled={m.status === 'on_leave' || busy}
-                            onChange={() => handleToggle(m)} onClick={e => e.stopPropagation()} />
-                        </TableCell>
-                        <TableCell className="font-medium">{m.full_name}</TableCell>
-                        <TableCell className="text-sm text-gray-500">{m.service_number}</TableCell>
-                        <TableCell>
-                          {m.status === 'present' && <Badge className="bg-green-100 text-green-800">present</Badge>}
-                          {m.status === 'on_leave' && <Badge className="bg-amber-100 text-amber-800">on leave</Badge>}
-                          {m.status === 'absent' && <span className="text-sm text-gray-400">—</span>}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {!loading && filtered.length === 0 && <TableRow><TableCell colSpan={4} className="text-center py-8 text-gray-500">No active members</TableCell></TableRow>}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-
-            {/* Guests */}
-            {guests.length > 0 && (
-              <Card>
-                <CardContent className="p-0">
-                  <Table>
-                    <TableHeader><TableRow><TableHead>Guest</TableHead><TableHead>Menu Item</TableHead><TableHead className="w-20">Remove</TableHead></TableRow></TableHeader>
-                    <TableBody>
-                      {guests.map(g => (
-                        <TableRow key={g.id}>
-                          <TableCell className="font-medium">{g.guest_name} <span className="text-xs text-gray-400">(Guest)</span></TableCell>
-                          <TableCell className="text-sm text-gray-500">{g.recipe_name || '-'}</TableCell>
-                          <TableCell><Button size="sm" variant="ghost" onClick={() => handleRemoveGuest(g.id)}><XCircle size={16} className="text-red-500" /></Button></TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            )}
-          </TabsContent>
-        ))}
-      </Tabs>
-
-      {/* Member Leaves — secondary */}
+      {/* Add anyone - member or non-member, same box, same button */}
       <Card>
-        <CardContent className="p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-gray-600 dark:text-gray-300">Member Leaves <span className="text-xs font-normal text-gray-400">(auto-excludes from the roster)</span></h2>
-            <Dialog open={leaveDialogOpen} onOpenChange={setLeaveDialogOpen}>
-              <DialogTrigger asChild><Button size="sm" variant="outline"><Plus size={14} className="mr-1" /> Record Leave</Button></DialogTrigger>
-              <DialogContent>
-                <DialogHeader><DialogTitle>Record Member Leave</DialogTitle></DialogHeader>
-                <div className="space-y-3">
-                  <select className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={leaveForm.member_id} onChange={e => setLeaveForm({...leaveForm, member_id: Number(e.target.value)})}>
-                    <option value="0">Select member</option>
-                    {members.map(m => <option key={m.id} value={m.id}>{m.full_name} ({m.service_number})</option>)}
-                  </select>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div><Label>Start Date</Label><Input type="date" value={leaveForm.start_date} onChange={e => setLeaveForm({...leaveForm, start_date: e.target.value})} /></div>
-                    <div><Label>End Date</Label><Input type="date" value={leaveForm.end_date} onChange={e => setLeaveForm({...leaveForm, end_date: e.target.value})} /></div>
-                  </div>
-                  <Input placeholder="Reason" value={leaveForm.reason} onChange={e => setLeaveForm({...leaveForm, reason: e.target.value})} />
-                  <Button onClick={handleCreateLeave} className="w-full">Record Leave</Button>
-                </div>
-              </DialogContent>
-            </Dialog>
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-end gap-3 flex-wrap">
+            <div className="min-w-52 max-w-xs">
+              <Label className="text-xs text-gray-500">Today's menu item <span className="text-gray-400">(optional)</span></Label>
+              <select className="mt-1 w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={menuRecipeId} onChange={e => setMenuRecipeId(Number(e.target.value))}>
+                <option value="0">Not specified</option>
+                {recipes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </div>
+            <div className="flex-1" />
+            <Badge className="bg-green-100 text-green-800">{currentAttendees.length} confirmed for {MEAL_LABELS[mealType]}</Badge>
           </div>
-          <Table>
-            <TableHeader><TableRow><TableHead>Member</TableHead><TableHead>Start</TableHead><TableHead>End</TableHead><TableHead>Reason</TableHead><TableHead className="w-20">Actions</TableHead></TableRow></TableHeader>
-            <TableBody>
-              {leaves.map(l => (
-                <TableRow key={l.id}>
-                  <TableCell className="font-medium">{l.member_name}</TableCell>
-                  <TableCell>{l.start_date}</TableCell>
-                  <TableCell>{l.end_date}</TableCell>
-                  <TableCell>{l.reason || '-'}</TableCell>
-                  <TableCell><Button size="sm" variant="ghost" onClick={() => handleCancelLeave(l.id)}><XCircle size={16} className="text-red-500" /></Button></TableCell>
-                </TableRow>
-              ))}
-              {leaves.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-6 text-gray-500">No active leaves</TableCell></TableRow>}
-            </TableBody>
-          </Table>
+          <MealAttendanceOmnibar
+            date={date} mealType={mealType} recipeId={menuRecipeId} onAdded={fetchAttendees}
+            mealTypes={MEAL_TYPES} mealLabels={MEAL_LABELS} lockedMeals={lockedMeals}
+          />
+        </CardContent>
+      </Card>
+
+      {isPast && <p className="text-xs text-amber-600">Editing a past date — removals will ask for a correction reason.</p>}
+
+      {/* Attendees */}
+      <Card>
+        <CardContent className="p-0">
+          {loading && <p className="text-center py-8 text-gray-500">Loading…</p>}
+          {!loading && currentAttendees.length === 0 && (
+            <p className="text-center py-8 text-gray-500">No one confirmed for {MEAL_LABELS[mealType]} yet — add someone above.</p>
+          )}
+          {!loading && currentAttendees.map(row => (
+            <div key={row.attendance_id} className="flex items-center justify-between gap-3 px-4 py-3 border-b last:border-0 border-gray-100 dark:border-gray-800">
+              <div>
+                <p className="font-medium text-sm">{row.name} <span className="text-xs text-gray-400">({KIND_LABEL[row.kind]})</span></p>
+                <p className="text-xs text-gray-500">{row.sub_label}{row.recipe_name ? ` · ${row.recipe_name}` : ''}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge className={row.status === 'attended' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}>{row.status}</Badge>
+                {currentLocked ? (
+                  <span title="Final — this meal's booking window is closed" className="text-gray-300 dark:text-gray-600">
+                    <Lock size={16} />
+                  </span>
+                ) : (
+                  <button onClick={() => handleRemove(row)} className="text-gray-400 hover:text-red-500" title="Remove">
+                    <XCircle size={18} />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
         </CardContent>
       </Card>
     </div>

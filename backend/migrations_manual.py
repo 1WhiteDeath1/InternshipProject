@@ -31,6 +31,8 @@ def run_startup_migrations(engine):
     _migrate_attendants_on_duty(engine)
     _migrate_rooms_maintenance_until(engine)
     _migrate_members_womens_bloc(engine)
+    _migrate_meal_attendance_guest_id(engine)
+    _cleanup_meal_booking_cutoff_minutes(engine)
 
 
 def _migrate_invoices_complimentary(engine):
@@ -416,6 +418,34 @@ def _migrate_meal_attendance(engine):
         if member_id_not_null:
             _rebuild_meal_attendance_nullable_member(conn)
             logger.info("migration: relaxed meal_attendance.member_id to nullable")
+
+
+def _migrate_meal_attendance_guest_id(engine):
+    # Third consumer alternative alongside member_id/booking_id - lets a
+    # walk-in non-member (no room booking) be logged as fast as a member.
+    # Additive nullable FK column; guarded so the CREATE UNIQUE INDEX below
+    # only ever runs the one time the column itself is first added.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(meal_attendance)")).fetchall()
+        if not cols:
+            return
+        if "guest_id" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE meal_attendance ADD COLUMN guest_id INTEGER REFERENCES guests(id)"))
+            conn.execute(text("CREATE UNIQUE INDEX uq_attendance_guest_date_meal ON meal_attendance (guest_id, date, meal_type)"))
+            conn.commit()
+            logger.info("migration: added meal_attendance.guest_id")
+
+
+def _cleanup_meal_booking_cutoff_minutes(engine):
+    # Superseded by the per-meal meal_cutoff_<type> settings (absolute
+    # cutoff times, editable on the Settings page) - this single global
+    # offset-in-minutes setting is dead config now, just delete the row.
+    with engine.connect() as conn:
+        tables = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='system_settings'")).fetchall()
+        if not tables:
+            return
+        conn.execute(text("DELETE FROM system_settings WHERE key = 'meal_booking_cutoff_minutes'"))
+        conn.commit()
 
 
 def _rebuild_meal_attendance_nullable_member(conn):

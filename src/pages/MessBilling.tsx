@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import api, { getErrorMessage } from '@/lib/api';
 import { useAuth } from '@/contexts/useAuth';
 import { Button } from '@/components/ui/button';
@@ -53,6 +54,8 @@ const emptyChargeForm = () => ({ sponsor_member_id: 0, guest_name: '', date: tod
 
 export default function MessBilling() {
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [year, setYear] = useState(today.getFullYear());
   const [bills, setBills] = useState<MessBill[]>([]);
@@ -102,6 +105,19 @@ export default function MessBilling() {
       fetchBills();
     } catch (err) { toast.error(getErrorMessage(err, 'Failed to generate bills')); }
   };
+
+  // The global "Generate Bills" shortcut (Layout.tsx) deep-links here with
+  // navigation state - consume it once (for the current month/year already
+  // loaded above), then clear the state so a back-navigation or remount
+  // doesn't regenerate.
+  useEffect(() => { queueMicrotask(() => {
+    const state = location.state as { autoGenerate?: boolean } | null;
+    if (state?.autoGenerate) {
+      handleGenerate();
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
 
   const handleIssueAll = async () => {
     try {

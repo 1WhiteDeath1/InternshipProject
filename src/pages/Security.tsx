@@ -43,6 +43,13 @@ export default function Security() {
 
   useEffect(() => { queueMicrotask(() => { fetchLogs(); fetchIncidents(); }); }, []);
 
+  // Refresh if the global "+ Report Incident" top-bar shortcut is used
+  // while this page is already mounted.
+  useEffect(() => {
+    window.addEventListener('incidents:changed', fetchIncidents);
+    return () => window.removeEventListener('incidents:changed', fetchIncidents);
+  }, []);
+
   const handleCreate = async () => {
     try { await api.post('/security/incidents', form); toast.success('Incident reported'); setDialogOpen(false); fetchIncidents(); }
     catch { toast.error('Failed'); }

@@ -852,9 +852,14 @@ class MemberOut(MemberBase):
 
 # --- Meal Attendance & Leave Schemas ---
 
+def _check_exactly_one_consumer(member_id, booking_id, guest_id):
+    if sum(x is not None for x in (member_id, booking_id, guest_id)) != 1:
+        raise ValueError("Provide exactly one of member_id, booking_id, or guest_id")
+
 class MealAttendanceBase(BaseModel):
     member_id: Optional[int] = None
     booking_id: Optional[int] = None
+    guest_id: Optional[int] = None
     recipe_id: Optional[int] = None
     date: date
     meal_type: str
@@ -865,8 +870,7 @@ class MealAttendanceBase(BaseModel):
 class MealAttendanceCreate(MealAttendanceBase):
     @model_validator(mode="after")
     def _exactly_one_consumer(self):
-        if (self.member_id is None) == (self.booking_id is None):
-            raise ValueError("Provide exactly one of member_id or booking_id")
+        _check_exactly_one_consumer(self.member_id, self.booking_id, self.guest_id)
         return self
 
 class MealAttendanceOut(MealAttendanceBase):
@@ -892,18 +896,8 @@ class BulkAttendanceCreate(BaseModel):
 
     _check_meal_type = field_validator("meal_type")(_ensure_meal_type)
 
-class RosterSetRequest(BaseModel):
-    date: date
-    meal_type: str
-    member_ids: List[int] = Field(..., min_length=1)
-    present: bool
-    recipe_id: Optional[int] = None
-    reason: Optional[str] = None
-
-    _check_meal_type = field_validator("meal_type")(_ensure_meal_type)
-
 class AttendanceLookupResult(BaseModel):
-    kind: str  # "member" | "booking"
+    kind: str  # "member" | "booking" | "guest"
     id: int
     name: str
     sub_label: Optional[str] = None
@@ -914,6 +908,7 @@ class AttendanceLookupResult(BaseModel):
 class ServeAttendanceRequest(BaseModel):
     member_id: Optional[int] = None
     booking_id: Optional[int] = None
+    guest_id: Optional[int] = None
     date: date
     meal_type: str
     recipe_id: Optional[int] = None
@@ -922,9 +917,12 @@ class ServeAttendanceRequest(BaseModel):
 
     @model_validator(mode="after")
     def _exactly_one_consumer(self):
-        if (self.member_id is None) == (self.booking_id is None):
-            raise ValueError("Provide exactly one of member_id or booking_id")
+        _check_exactly_one_consumer(self.member_id, self.booking_id, self.guest_id)
         return self
+
+class GuestQuickCreate(BaseModel):
+    full_name: str = Field(..., min_length=1, max_length=200)
+    phone: Optional[str] = None
 
 class NoShowSweepResult(BaseModel):
     count: int

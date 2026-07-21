@@ -56,10 +56,10 @@ Open a terminal/command prompt in the application folder:
 
 ```bash
 # Windows
-pip install fastapi uvicorn sqlalchemy alembic pydantic pydantic-settings passlib bcrypt python-jose python-multipart aiofiles openpyxl reportlab cryptography rapidocr-onnxruntime opencv-python-headless rapidfuzz
+pip install -r requirements.txt
 
 # Linux
-pip3 install fastapi uvicorn sqlalchemy alembic pydantic pydantic-settings passlib bcrypt python-jose python-multipart aiofiles openpyxl reportlab cryptography rapidocr-onnxruntime opencv-python-headless rapidfuzz
+pip3 install -r requirements.txt
 ```
 
 > `rapidocr-onnxruntime` powers the receipt-scanning "Smart Intake" feature in Inventory & Procurement. It bundles its own OCR models (~15MB) via ONNX Runtime — no separate system install or admin rights required, unlike Tesseract. First use after install takes ~1s to warm up the model; after that it's instant.

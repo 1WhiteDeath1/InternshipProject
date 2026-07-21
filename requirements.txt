@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+sqlalchemy
+alembic
+pydantic
+pydantic-settings
+passlib
+bcrypt
+python-jose
+python-multipart
+aiofiles
+openpyxl
+reportlab
+cryptography
+rapidocr-onnxruntime
+opencv-python-headless
+rapidfuzz

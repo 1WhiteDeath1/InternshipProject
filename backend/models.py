@@ -959,14 +959,18 @@ class MemberLeave(Base):
 
 class MealAttendance(Base):
     """A single consumption/booking record for one meal slot. The consumer is
-    either a Member (member_id) or a non-member hotel guest (booking_id) -
-    exactly one is set, enforced in MealAttendanceCreate. recipe_id optionally
+    exactly one of: a Member (member_id), a checked-in hotel guest
+    (booking_id), or a standalone walk-in Guest with no room booking
+    (guest_id) - enforced in MealAttendanceCreate/ServeAttendanceRequest.
+    guest_id exists specifically so a non-member can be logged as fast as a
+    member, without first needing a room booking. recipe_id optionally
     records what menu item was consumed, feeding kitchen production planning."""
     __tablename__ = "meal_attendance"
 
     id = Column(Integer, primary_key=True)
     member_id = Column(Integer, ForeignKey("members.id"), nullable=True)
     booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=True)
+    guest_id = Column(Integer, ForeignKey("guests.id"), nullable=True)
     recipe_id = Column(Integer, ForeignKey("recipes.id"), nullable=True)
     date = Column(Date, nullable=False)
     meal_type = Column(Enum(MealType), nullable=False)
@@ -982,6 +986,7 @@ class MealAttendance(Base):
 
     member = relationship("Member")
     booking = relationship("Booking")
+    guest = relationship("Guest")
     recipe = relationship("Recipe")
 
     __table_args__ = (
@@ -989,6 +994,7 @@ class MealAttendance(Base):
         Index("idx_attendance_date_meal", "date", "meal_type"),
         Index("uq_attendance_member_date_meal", "member_id", "date", "meal_type", unique=True),
         Index("uq_attendance_booking_date_meal", "booking_id", "date", "meal_type", unique=True),
+        Index("uq_attendance_guest_date_meal", "guest_id", "date", "meal_type", unique=True),
     )
 
 

@@ -64,6 +64,14 @@ export default function Members() {
     });
   }, [search]);
 
+  // Refresh if the global "+ Add Member" top-bar shortcut is used while
+  // this page is already mounted. Re-subscribed whenever `search` changes
+  // so the listener always refetches with the current search term.
+  useEffect(() => {
+    window.addEventListener('members:changed', fetchMembers);
+    return () => window.removeEventListener('members:changed', fetchMembers);
+  }, [search]);
+
   const openCreate = () => {
     setEditingId(null);
     setForm(emptyForm);

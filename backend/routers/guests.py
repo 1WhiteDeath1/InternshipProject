@@ -1,11 +1,12 @@
 """Guest identity - search-as-you-type support for check-in autocomplete, plus
 the Customer Directory (list + full profile with stay/billing history)."""
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import Guest, Booking, Invoice
-from backend.schemas import GuestOut, GuestListResponse, GuestListItem, GuestProfileOut, GuestBookingSummary, GuestInvoiceSummary
+from backend.schemas import GuestOut, GuestListResponse, GuestListItem, GuestProfileOut, GuestBookingSummary, GuestInvoiceSummary, GuestQuickCreate
 from backend.auth import get_current_user
+from backend.audit import log_audit, serialize_model, AuditAction
 
 router = APIRouter()
 
@@ -15,6 +16,20 @@ async def search_guests(q: str = Query(..., min_length=2), db: Session = Depends
     return db.query(Guest).filter(
         (Guest.full_name.contains(q)) | (Guest.phone.contains(q)) | (Guest.id_number.contains(q))
     ).order_by(Guest.updated_at.desc()).limit(8).all()
+
+
+@router.post("", response_model=GuestOut)
+async def quick_create_guest(data: GuestQuickCreate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Minimal identity-only creation for a walk-in with no room booking (e.g.
+    a non-member added straight from the meal attendance omnibar) - just a
+    name, optionally a phone number. Full guest records with ID/address still
+    come from the booking check-in flow (_find_or_create_guest in bookings.py)."""
+    guest = Guest(full_name=data.full_name.strip(), phone=data.phone)
+    db.add(guest)
+    db.commit()
+    db.refresh(guest)
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "guests", guest.id, after_state=serialize_model(guest), ip_address=request.client.host)
+    return guest
 
 
 @router.get("", response_model=GuestListResponse)

@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import api, { getErrorMessage } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -79,8 +80,24 @@ interface RecentIntake {
 // ── Main Component ──
 
 export default function StockManagement() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [prefillItemId, setPrefillItemId] = useState<number | null>(null);
+  const [autoScan, setAutoScan] = useState(false);
+
+  // The global "Scan Receipt" shortcut (Layout.tsx) deep-links here with
+  // navigation state - consume it once, then clear the state so a
+  // back-navigation or remount doesn't reopen the dialog.
+  useEffect(() => { queueMicrotask(() => {
+    const state = location.state as { openScan?: boolean } | null;
+    if (state?.openScan) {
+      setActiveTab('intake');
+      setAutoScan(true);
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
 
   return (
     <div className="space-y-4">
@@ -101,7 +118,12 @@ export default function StockManagement() {
           <DashboardTab />
         </TabsContent>
         <TabsContent value="intake" className="mt-4">
-          <IntakeTab prefillItemId={prefillItemId} onPrefillConsumed={() => setPrefillItemId(null)} />
+          <IntakeTab
+            prefillItemId={prefillItemId}
+            onPrefillConsumed={() => setPrefillItemId(null)}
+            autoScan={autoScan}
+            onAutoScanConsumed={() => setAutoScan(false)}
+          />
         </TabsContent>
         <TabsContent value="stock" className="mt-4">
           <StockTab onLogIntake={(itemId) => {
@@ -316,7 +338,10 @@ function DashboardTab() {
 // TAB 2: Daily Stock Intake
 // ═══════════════════════════════════════════════════════════════════
 
-function IntakeTab({ prefillItemId, onPrefillConsumed }: { prefillItemId: number | null; onPrefillConsumed: () => void }) {
+function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsumed }: {
+  prefillItemId: number | null; onPrefillConsumed: () => void;
+  autoScan: boolean; onAutoScanConsumed: () => void;
+}) {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedItemId, setSelectedItemId] = useState('');
@@ -368,6 +393,13 @@ function IntakeTab({ prefillItemId, onPrefillConsumed }: { prefillItemId: number
       onPrefillConsumed();
     }
   }, [prefillItemId, onPrefillConsumed]);
+
+  useEffect(() => { queueMicrotask(() => {
+    if (autoScan) {
+      setScanOpen(true);
+      onAutoScanConsumed();
+    }
+  }); }, [autoScan, onAutoScanConsumed]);
 
   const selectedItem = items.find(i => String(i.id) === selectedItemId);
   const qtyNum = parseFloat(quantity);

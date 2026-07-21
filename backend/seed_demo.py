@@ -256,6 +256,41 @@ waste = WasteLog(item_id=items[2].id, quantity=2, category=WasteCategory.SPOILAG
 db.add(waste)
 db.commit()
 
+# --- Recipes / Menu Items (breakfast/lunch/hitea/dinner options for the
+# Attendance page's "Today's menu item" picker and Kitchen production) ---
+recipes = [
+    Recipe(name="Anda Paratha", description="Fried egg wrapped in a buttered paratha", menu_category="breakfast", portions=1),
+    Recipe(name="Plain Omelette", description="Two-egg omelette with butter", menu_category="breakfast", portions=1),
+    Recipe(name="Tea & Toast", description="Buttered toast with a cup of tea", menu_category="breakfast", portions=1),
+    Recipe(name="Chicken Karahi", description="Chicken cooked with tomatoes and onions", menu_category="lunch", portions=4),
+    Recipe(name="Vegetable Pulao", description="Basmati rice with sauteed onions and tomatoes", menu_category="lunch", portions=6),
+    Recipe(name="Plain Rice & Curry", description="Steamed basmati rice with mixed vegetable curry", menu_category="lunch", portions=6),
+    Recipe(name="Tea & Biscuits", description="Hi-tea service with assorted biscuits", menu_category="hitea", portions=1),
+    Recipe(name="Coffee & Samosa", description="Hi-tea service with fried samosas", menu_category="hitea", portions=1),
+    Recipe(name="Chicken Biryani", description="Layered rice with spiced chicken, onions and tomatoes", menu_category="dinner", portions=4),
+    Recipe(name="Roti & Chicken Curry", description="Wheat flatbread with chicken curry", menu_category="dinner", portions=4),
+]
+db.add_all(recipes)
+db.commit()
+
+recipe_ingredients = [
+    RecipeIngredient(recipe_id=recipes[0].id, item_id=items[3].id, quantity=1, unit="pcs"),   # Anda Paratha - Eggs
+    RecipeIngredient(recipe_id=recipes[0].id, item_id=items[8].id, quantity=0.1, unit="kg"),  # - Flour
+    RecipeIngredient(recipe_id=recipes[0].id, item_id=items[9].id, quantity=0.02, unit="kg"), # - Butter
+    RecipeIngredient(recipe_id=recipes[1].id, item_id=items[3].id, quantity=2, unit="pcs"),   # Plain Omelette - Eggs
+    RecipeIngredient(recipe_id=recipes[1].id, item_id=items[9].id, quantity=0.02, unit="kg"), # - Butter
+    RecipeIngredient(recipe_id=recipes[3].id, item_id=items[1].id, quantity=1.0, unit="kg"),  # Chicken Karahi - Chicken
+    RecipeIngredient(recipe_id=recipes[3].id, item_id=items[5].id, quantity=0.3, unit="kg"),  # - Tomatoes
+    RecipeIngredient(recipe_id=recipes[3].id, item_id=items[4].id, quantity=0.3, unit="kg"),  # - Onions
+    RecipeIngredient(recipe_id=recipes[4].id, item_id=items[0].id, quantity=1.5, unit="kg"),  # Vegetable Pulao - Rice
+    RecipeIngredient(recipe_id=recipes[4].id, item_id=items[4].id, quantity=0.2, unit="kg"),  # - Onions
+    RecipeIngredient(recipe_id=recipes[8].id, item_id=items[0].id, quantity=1.5, unit="kg"),  # Chicken Biryani - Rice
+    RecipeIngredient(recipe_id=recipes[8].id, item_id=items[1].id, quantity=1.0, unit="kg"),  # - Chicken
+    RecipeIngredient(recipe_id=recipes[8].id, item_id=items[4].id, quantity=0.3, unit="kg"),  # - Onions
+]
+db.add_all(recipe_ingredients)
+db.commit()
+
 # --- Security Logs ---
 sec_log = SecurityLog(event_type="check_in", guest_name="Ahmed Hassan", room_number="101", processed_by=front_user.id)
 db.add(sec_log)
@@ -276,6 +311,7 @@ for entry_data in [
 db.commit()
 
 print("Demo data seeded successfully!")
+print(f"  - {db.query(Recipe).count()} recipes")
 print(f"  - {db.query(Role).count()} roles")
 print(f"  - {db.query(User).count()} users (admin/admin123)")
 print(f"  - {db.query(InventoryItem).count()} inventory items")

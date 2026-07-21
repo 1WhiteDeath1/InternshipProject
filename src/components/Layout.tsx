@@ -9,11 +9,31 @@ import {
   Shield, Users, UserCog, ClipboardList, Bell, BarChart3,
   Settings, FileUp, LogOut, Sun, Moon, ChevronLeft, ChevronRight,
   IdCard, UtensilsCrossed, Wallet, ChefHat, LayoutGrid, Menu, X, Contact, UserCircle2, TrendingUp,
-  Plus, Receipt as ReceiptIcon,
+  Plus, Receipt as ReceiptIcon, Camera, ShieldAlert, RefreshCw, UtensilsCrossed as OrderIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { QuickBookingModal } from '@/components/QuickBookingModal';
 import { QuickChargeModal } from '@/components/QuickChargeModal';
+import { QuickAddAttendantModal } from '@/components/QuickAddAttendantModal';
+import { QuickAddMemberModal } from '@/components/QuickAddMemberModal';
+import { QuickIncidentModal } from '@/components/QuickIncidentModal';
+
+// Top-bar "fast action" shortcuts - each is a create/act-now action for one
+// module, restricted to the pages that belong to that module (matched by
+// path prefix) so a Kitchen order button never shows up while looking at
+// Security, and vice versa. `variant` defaults to 'default'.
+const quickActionDefs: {
+  key: string; label: string; icon: typeof Plus; match: (path: string) => boolean; variant?: 'default' | 'secondary';
+}[] = [
+  { key: 'booking', label: 'New Booking', icon: Plus, match: p => p.startsWith('/bookings') || p.startsWith('/clerk-desk') },
+  { key: 'charge', label: 'Log Charge', icon: ReceiptIcon, match: p => p.startsWith('/billing') || p.startsWith('/clerk-desk'), variant: 'secondary' },
+  { key: 'scan', label: 'Scan Receipt', icon: Camera, match: p => p.startsWith('/stock') },
+  { key: 'attendant', label: 'Add Attendant', icon: UserCircle2, match: p => p.startsWith('/attendants') },
+  { key: 'member', label: 'Add Member', icon: IdCard, match: p => p.startsWith('/members') },
+  { key: 'incident', label: 'Report Incident', icon: ShieldAlert, match: p => p.startsWith('/security') },
+  { key: 'alacarte', label: 'New À La Carte', icon: OrderIcon, match: p => p.startsWith('/kitchen') },
+  { key: 'generate', label: 'Generate Bills', icon: RefreshCw, match: p => p.startsWith('/mess-billing') },
+];
 
 const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, requiresSupervisor: false },
@@ -51,6 +71,9 @@ export default function Layout() {
   const [alertCount, setAlertCount] = useState(0);
   const [quickBookingOpen, setQuickBookingOpen] = useState(false);
   const [quickChargeOpen, setQuickChargeOpen] = useState(false);
+  const [quickAttendantOpen, setQuickAttendantOpen] = useState(false);
+  const [quickMemberOpen, setQuickMemberOpen] = useState(false);
+  const [quickIncidentOpen, setQuickIncidentOpen] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) navigate('/login');
@@ -82,6 +105,18 @@ export default function Layout() {
     if (item.feature && !isEnabled(item.feature)) return false;
     return true;
   });
+
+  const quickActionHandlers: Record<string, () => void> = {
+    booking: () => setQuickBookingOpen(true),
+    charge: () => setQuickChargeOpen(true),
+    scan: () => navigate('/stock', { state: { openScan: true } }),
+    attendant: () => setQuickAttendantOpen(true),
+    member: () => setQuickMemberOpen(true),
+    incident: () => setQuickIncidentOpen(true),
+    alacarte: () => navigate('/kitchen', { state: { openAlaCarte: true } }),
+    generate: () => navigate('/mess-billing', { state: { autoGenerate: true } }),
+  };
+  const activeQuickActions = quickActionDefs.filter(a => a.match(location.pathname));
 
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-950">
@@ -181,14 +216,18 @@ export default function Layout() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
-            <div className="hidden sm:flex items-center gap-2">
-              <Button size="sm" onClick={() => setQuickBookingOpen(true)}>
-                <Plus size={15} className="mr-1" /> New Booking
-              </Button>
-              <Button size="sm" variant="secondary" onClick={() => setQuickChargeOpen(true)}>
-                <ReceiptIcon size={15} className="mr-1" /> Log Charge
-              </Button>
-            </div>
+            {activeQuickActions.length > 0 && (
+              <div className="hidden sm:flex items-center gap-2">
+                {activeQuickActions.map(action => {
+                  const Icon = action.icon;
+                  return (
+                    <Button key={action.key} size="sm" variant={action.variant || 'default'} onClick={quickActionHandlers[action.key]}>
+                      <Icon size={15} className="mr-1" /> {action.label}
+                    </Button>
+                  );
+                })}
+              </div>
+            )}
             {user.is_supervisor && (
               <button
                 onClick={() => navigate('/alerts')}
@@ -222,6 +261,9 @@ export default function Layout() {
 
       <QuickBookingModal open={quickBookingOpen} onOpenChange={setQuickBookingOpen} />
       <QuickChargeModal open={quickChargeOpen} onOpenChange={setQuickChargeOpen} />
+      <QuickAddAttendantModal open={quickAttendantOpen} onOpenChange={setQuickAttendantOpen} />
+      <QuickAddMemberModal open={quickMemberOpen} onOpenChange={setQuickMemberOpen} />
+      <QuickIncidentModal open={quickIncidentOpen} onOpenChange={setQuickIncidentOpen} />
     </div>
   );
 }

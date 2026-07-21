@@ -43,6 +43,13 @@ export default function Attendants() {
     queueMicrotask(() => { setLoading(true); fetchAttendants().finally(() => setLoading(false)); });
   }, []);
 
+  // Refresh if the global "+ Add Attendant" top-bar shortcut is used while
+  // this page is already mounted.
+  useEffect(() => {
+    window.addEventListener('attendants:changed', fetchAttendants);
+    return () => window.removeEventListener('attendants:changed', fetchAttendants);
+  }, []);
+
   const filtered = attendants.filter(a =>
     !search.trim() || a.full_name.toLowerCase().includes(search.toLowerCase()) || (a.phone || '').includes(search));
 

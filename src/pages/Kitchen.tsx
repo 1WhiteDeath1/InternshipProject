@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import api, { getErrorMessage } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -32,6 +33,8 @@ const emptyRecipeForm = { name: '', description: '', menu_category: 'breakfast',
 const emptyAlaCarteForm = { recipe_id: 0, consumer_kind: 'guest' as 'member' | 'guest', consumer_id: 0, quantity: 1, sla_minutes: 45 };
 
 export default function Kitchen() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [items, setItems] = useState<InventoryItemOption[]>([]);
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
@@ -226,6 +229,19 @@ export default function Kitchen() {
   const openSpecialOrderFor = (kind: 'member' | 'booking', id: number) => {
     openAlaCarteDialog({ consumer_kind: kind === 'member' ? 'member' : 'guest', consumer_id: id });
   };
+
+  // The global "New A La Carte Order" shortcut (Layout.tsx) deep-links here
+  // with navigation state - consume it once, then clear the state so a
+  // back-navigation or remount doesn't reopen the dialog. The dialog is a
+  // portal overlay so it opens fine regardless of which tab is active.
+  useEffect(() => { queueMicrotask(() => {
+    const state = location.state as { openAlaCarte?: boolean } | null;
+    if (state?.openAlaCarte) {
+      openAlaCarteDialog();
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
 
   const handleCreateRecipeInline = async () => {
     if (!newRecipeForm.name.trim()) { toast.error('Recipe name is required'); return; }
