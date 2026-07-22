@@ -23,7 +23,7 @@ Before adding a model, schema, endpoint, or migration — or working with multip
 - Linux: `./start.sh` → `python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000`
 - Dependencies: `pip install -r requirements.txt` (unpinned; kept in sync with the pip line in INSTALL.md)
   (the last three - `rapidocr-onnxruntime`, `opencv-python-headless`, `rapidfuzz` - power the Smart Intake receipt-OCR feature in Inventory/Procurement — see `backend/services/receipt_ocr.py`)
-- Seed demo data: `python backend/seed_demo.py` — creates one demo user per RBAC role (`manager1`, `deputy1`, `clerk1`, `kitchennco1`, `bookingnco1`, `security1`; passwords `<role>123`) plus sample inventory/rooms/bookings/vendors
+- Seed demo data: `python backend/seed_demo.py` — creates one demo user per RBAC role (`manager`, `deputy`, `clerk`, `kitchen`, `booking`, `security`; password `123456` for all — offline demo data only, deliberately trivial) plus sample inventory/rooms/bookings/vendors
 - No automated test suite exists for either the backend or frontend currently.
 
 ## Architecture

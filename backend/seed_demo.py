@@ -35,19 +35,25 @@ front_desk_role = db.query(Role).filter(Role.name == "Booking NCO").first()
 security_role = db.query(Role).filter(Role.name == "Security Guard").first()
 
 # --- Users ---
-admin = User(username="manager1", email="manager@samhotel.local", full_name="System Manager",
-             hashed_password=hash_password("manager123"), role_id=manager_role.id,
+# One account per RBAC role, deliberately trivial credentials (username = role,
+# password = "123456" for every single one) - this is offline demo/dev data
+# only (see module docstring), never a production seed, so memorability beats
+# any password hygiene concern here. Swap to real credentials before any
+# real deployment.
+DEMO_PASSWORD = "123456"
+admin = User(username="manager", email="manager@samhotel.local", full_name="System Manager",
+             hashed_password=hash_password(DEMO_PASSWORD), role_id=manager_role.id,
              status=UserStatus.ACTIVE, last_login=datetime.utcnow())
-deputy_user = User(username="deputy1", email="deputy@samhotel.local", full_name="Farah Zaidi",
-                    hashed_password=hash_password("deputy123"), role_id=deputy_role.id, status=UserStatus.ACTIVE)
-front_user = User(username="bookingnco1", email="front@samhotel.local", full_name="Sana Malik",
-                  hashed_password=hash_password("front123"), role_id=front_desk_role.id, status=UserStatus.ACTIVE)
-clerk_user = User(username="clerk1", email="clerk@samhotel.local", full_name="Imran Khalid",
-                  hashed_password=hash_password("clerk123"), role_id=clerk_role.id, status=UserStatus.ACTIVE)
-kitchen_user = User(username="kitchennco1", email="kitchen@samhotel.local", full_name="Usman Tariq",
-                    hashed_password=hash_password("kitchen123"), role_id=kitchen_role.id, status=UserStatus.ACTIVE)
-security_user = User(username="security1", email="security@samhotel.local", full_name="Naveed Iqbal",
-                     hashed_password=hash_password("security123"), role_id=security_role.id, status=UserStatus.ACTIVE)
+deputy_user = User(username="deputy", email="deputy@samhotel.local", full_name="Farah Zaidi",
+                    hashed_password=hash_password(DEMO_PASSWORD), role_id=deputy_role.id, status=UserStatus.ACTIVE)
+front_user = User(username="booking", email="front@samhotel.local", full_name="Sana Malik",
+                  hashed_password=hash_password(DEMO_PASSWORD), role_id=front_desk_role.id, status=UserStatus.ACTIVE)
+clerk_user = User(username="clerk", email="clerk@samhotel.local", full_name="Imran Khalid",
+                  hashed_password=hash_password(DEMO_PASSWORD), role_id=clerk_role.id, status=UserStatus.ACTIVE)
+kitchen_user = User(username="kitchen", email="kitchen@samhotel.local", full_name="Usman Tariq",
+                    hashed_password=hash_password(DEMO_PASSWORD), role_id=kitchen_role.id, status=UserStatus.ACTIVE)
+security_user = User(username="security", email="security@samhotel.local", full_name="Naveed Iqbal",
+                     hashed_password=hash_password(DEMO_PASSWORD), role_id=security_role.id, status=UserStatus.ACTIVE)
 db.add_all([admin, deputy_user, front_user, clerk_user, kitchen_user, security_user])
 db.commit()
 
