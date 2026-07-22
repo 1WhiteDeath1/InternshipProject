@@ -30,6 +30,8 @@ def _to_out(db: Session, a: Attendant) -> AttendantOut:
 
 @router.get("", response_model=list[AttendantOut])
 async def list_attendants(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "attendants", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     attendants = db.query(Attendant).order_by(Attendant.full_name).all()
     return [_to_out(db, a) for a in attendants]
 

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import KitchenOrder, Recipe, MealAttendance, FeatureFlag, Member, Booking, AlertSeverity
 from backend.schemas import KitchenOrderCreate, KitchenOrderPrepareRequest
-from backend.auth import get_current_user, check_permission
+from backend.auth import get_current_user, check_permission, PermissionChecker
 from backend.audit import log_audit, serialize_model, AuditAction
 from backend.logging_config import get_logger
 from backend.services.kitchen_deduction import deduct_recipe_stock
@@ -17,7 +17,7 @@ from backend.services.mess_billing_calc import get_setting_float
 from backend.alerts import create_alert
 
 logger = get_logger("app")
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(PermissionChecker("kitchen", "view"))])
 
 
 def _is_feature_enabled(db: Session, key: str) -> bool:

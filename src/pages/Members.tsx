@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api, { getErrorMessage } from '@/lib/api';
 import { useAuth } from '@/contexts/useAuth';
+import { hasPermission } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -143,7 +144,7 @@ export default function Members() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><IdCard size={24} /> Member Management</h1>
         <div className="flex gap-2">
-        {user?.is_supervisor && (
+        {hasPermission(user, 'womens_bloc_rates', 'edit') && (
           <Dialog open={wbRatesOpen} onOpenChange={setWbRatesOpen}>
             <DialogTrigger asChild><Button variant="outline" onClick={openWbRates}><Settings2 size={16} className="mr-1" /> Women's Bloc Rates</Button></DialogTrigger>
             <DialogContent className="max-w-md">
@@ -187,13 +188,13 @@ export default function Members() {
                 <Input placeholder="Phone" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} />
                 <Input placeholder="Email" type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
               </div>
-              {user?.is_supervisor && (
+              {hasPermission(user, 'members', 'edit') && (
                 <div>
                   <Label>Assigned Member Discount (%)</Label>
                   <Input type="number" min={0} max={100} value={form.custom_discount_rate} onChange={e => setForm({...form, custom_discount_rate: Number(e.target.value)})} />
                 </div>
               )}
-              {user?.is_supervisor && (
+              {hasPermission(user, 'members', 'edit') && (
                 <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
                   <input type="checkbox" checked={form.is_womens_bloc} onChange={e => setForm({...form, is_womens_bloc: e.target.checked})} className="h-4 w-4 rounded border-gray-300" />
                   Women's Bloc resident (uses the Women's Bloc rank rate for HRA billing instead of the standard HRA rate)

@@ -18,6 +18,8 @@ async def list_members(
     page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100),
     db: Session = Depends(get_db), current_user=Depends(get_current_user),
 ):
+    if not check_permission(current_user, "members", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     query = db.query(Member)
     if status:
         query = query.filter(Member.status == status)
@@ -54,6 +56,8 @@ async def list_members(
 
 @router.get("/{member_id}")
 async def get_member(member_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "members", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     member = db.query(Member).filter(Member.id == member_id).first()
     if not member:
         raise HTTPException(status_code=404, detail="Member not found")
@@ -76,6 +80,8 @@ async def get_member(member_id: int, db: Session = Depends(get_db), current_user
 async def get_member_residencies(member_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """HRA booking history for the Room Allocation tab of the Member Ledger
     Portal - current and past residencies, most recent first. Read-only."""
+    if not check_permission(current_user, "members", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     if not db.query(Member).filter(Member.id == member_id).first():
         raise HTTPException(status_code=404, detail="Member not found")
     bookings = db.query(Booking).filter(

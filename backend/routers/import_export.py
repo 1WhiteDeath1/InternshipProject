@@ -97,6 +97,8 @@ async def import_data(module: str, file: UploadFile = File(...), request: Reques
 
 @router.get("/export/{module}")
 async def export_data(module: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, module, "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     wb = Workbook()
     ws = wb.active
 

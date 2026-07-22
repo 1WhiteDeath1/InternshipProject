@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import Alert, AlertStatus
-from backend.auth import get_current_user, require_supervisor
+from backend.auth import PermissionChecker
 
 router = APIRouter()
 
@@ -12,7 +12,7 @@ router = APIRouter()
 async def list_alerts(
     status: str = "", severity: str = "", module: str = "",
     page: int = Query(1, ge=1), page_size: int = Query(25, ge=1),
-    db: Session = Depends(get_db), current_user=Depends(get_current_user),
+    db: Session = Depends(get_db), current_user=Depends(PermissionChecker("alerts", "view")),
 ):
     query = db.query(Alert)
     if status:
@@ -31,13 +31,13 @@ async def list_alerts(
 
 
 @router.get("/unread-count")
-async def unread_count(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+async def unread_count(db: Session = Depends(get_db), current_user=Depends(PermissionChecker("alerts", "view"))):
     count = db.query(Alert).filter(Alert.status == AlertStatus.NEW).count()
     return {"count": count}
 
 
 @router.post("/{alert_id}/acknowledge")
-async def acknowledge_alert(alert_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+async def acknowledge_alert(alert_id: int, db: Session = Depends(get_db), current_user=Depends(PermissionChecker("alerts", "edit"))):
     alert = db.query(Alert).filter(Alert.id == alert_id).first()
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
@@ -50,7 +50,7 @@ async def acknowledge_alert(alert_id: int, db: Session = Depends(get_db), curren
 
 
 @router.post("/{alert_id}/resolve")
-async def resolve_alert(alert_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+async def resolve_alert(alert_id: int, db: Session = Depends(get_db), current_user=Depends(PermissionChecker("alerts", "edit"))):
     alert = db.query(Alert).filter(Alert.id == alert_id).first()
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
@@ -63,7 +63,7 @@ async def resolve_alert(alert_id: int, db: Session = Depends(get_db), current_us
 
 
 @router.post("/run-checks")
-async def run_checks(db: Session = Depends(get_db), current_user=Depends(require_supervisor)):
+async def run_checks(db: Session = Depends(get_db), current_user=Depends(PermissionChecker("alerts", "edit"))):
     from backend.alerts import run_all_checks
     from backend.services.anomaly_engine import run_anomaly_checks
     result = run_all_checks(db)

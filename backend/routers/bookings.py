@@ -667,6 +667,8 @@ async def list_bookings(
     page: int = Query(1, ge=1), page_size: int = Query(25, ge=1),
     db: Session = Depends(get_db), current_user=Depends(get_current_user),
 ):
+    if not check_permission(current_user, "bookings", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     query = db.query(Booking)
     if status:
         query = query.filter(Booking.status == status)
@@ -1247,6 +1249,8 @@ async def void_expired(booking_id: int, request: Request, db: Session = Depends(
 @router.get("/sms-outbox")
 async def sms_outbox(status: str = "", page: int = Query(1, ge=1), page_size: int = Query(25, ge=1),
                      db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "bookings", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     query = db.query(SmsMessage)
     if status:
         query = query.filter(SmsMessage.status == status)
@@ -1298,6 +1302,8 @@ async def sms_mark_sent(sms_id: int, request: Request, db: Session = Depends(get
 
 @router.get("/guest-movements")
 async def list_movements(booking_id: int = 0, page: int = Query(1, ge=1), page_size: int = Query(25, ge=1), db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "bookings", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     query = db.query(GuestMovement)
     if booking_id:
         query = query.filter(GuestMovement.booking_id == booking_id)

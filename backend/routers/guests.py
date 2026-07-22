@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import Guest, Booking, Invoice
 from backend.schemas import GuestOut, GuestListResponse, GuestListItem, GuestProfileOut, GuestBookingSummary, GuestInvoiceSummary, GuestQuickCreate
-from backend.auth import get_current_user
+from backend.auth import get_current_user, check_permission
 from backend.audit import log_audit, serialize_model, AuditAction
 
 router = APIRouter()
@@ -13,6 +13,8 @@ router = APIRouter()
 
 @router.get("/search", response_model=list[GuestOut])
 async def search_guests(q: str = Query(..., min_length=2), db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "guests", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     return db.query(Guest).filter(
         (Guest.full_name.contains(q)) | (Guest.phone.contains(q)) | (Guest.id_number.contains(q))
     ).order_by(Guest.updated_at.desc()).limit(8).all()
@@ -24,6 +26,8 @@ async def quick_create_guest(data: GuestQuickCreate, request: Request, db: Sessi
     a non-member added straight from the meal attendance omnibar) - just a
     name, optionally a phone number. Full guest records with ID/address still
     come from the booking check-in flow (_find_or_create_guest in bookings.py)."""
+    if not check_permission(current_user, "guests", "create"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     guest = Guest(full_name=data.full_name.strip(), phone=data.phone)
     db.add(guest)
     db.commit()
@@ -37,6 +41,8 @@ async def list_guests(
     q: str = "", page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100),
     db: Session = Depends(get_db), current_user=Depends(get_current_user),
 ):
+    if not check_permission(current_user, "guests", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     query = db.query(Guest)
     if q:
         query = query.filter(
@@ -61,6 +67,8 @@ async def list_guests(
 
 @router.get("/{guest_id}", response_model=GuestProfileOut)
 async def get_guest_profile(guest_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "guests", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     guest = db.query(Guest).filter(Guest.id == guest_id).first()
     if not guest:
         raise HTTPException(status_code=404, detail="Guest not found")

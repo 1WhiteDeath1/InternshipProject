@@ -60,6 +60,8 @@ async def update_vendor(vendor_id: int, data: VendorUpdate, request: Request, db
 
 @router.get("/purchase-orders")
 async def list_pos(status: str = "", page: int = Query(1, ge=1), page_size: int = Query(25, ge=1), db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "procurement", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     query = db.query(PurchaseOrder)
     if status:
         query = query.filter(PurchaseOrder.status == status)

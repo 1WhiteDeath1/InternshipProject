@@ -27,7 +27,7 @@ async def lookup_tariff(rank: str, room_type: str, stay_type: str, db: Session =
 
 @router.put("")
 async def upsert_tariff(data: TariffRateCreate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    if not check_permission(current_user, "bookings", "edit"):
+    if not check_permission(current_user, "tariffs", "edit"):
         raise HTTPException(status_code=403, detail="Permission denied")
     row = db.query(TariffRate).filter(
         TariffRate.rank == data.rank, TariffRate.room_type == data.room_type, TariffRate.stay_type == data.stay_type,
@@ -50,7 +50,7 @@ async def upsert_tariff(data: TariffRateCreate, request: Request, db: Session = 
 
 @router.delete("/{tariff_id}")
 async def delete_tariff(tariff_id: int, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    if not check_permission(current_user, "bookings", "edit"):
+    if not check_permission(current_user, "tariffs", "edit"):
         raise HTTPException(status_code=403, detail="Permission denied")
     row = db.query(TariffRate).filter(TariffRate.id == tariff_id).first()
     if not row:

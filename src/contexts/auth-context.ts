@@ -1,5 +1,10 @@
 import { createContext } from 'react';
 
+export interface Permission {
+  module: string;
+  action: string;
+}
+
 export interface User {
   id: number;
   username: string;
@@ -9,6 +14,7 @@ export interface User {
   is_supervisor: boolean;
   role_name: string;
   preferences: string | null;
+  permissions: Permission[];
 }
 
 export interface AuthContextType {
@@ -19,3 +25,14 @@ export interface AuthContextType {
 }
 
 export const AuthContext = createContext<AuthContextType | null>(null);
+
+// Mirrors backend check_permission() - is_supervisor short-circuits (kept for
+// a hypothetical break-glass account), otherwise an explicit module+action
+// row must exist. None of the seeded roles set is_supervisor: it's a total
+// bypass that can't be scoped, so real access differences (e.g. Manager vs
+// Deputy Manager) live entirely in the permissions list.
+export function hasPermission(user: User | null | undefined, module: string, action: string): boolean {
+  if (!user) return false;
+  if (user.is_supervisor) return true;
+  return user.permissions?.some(p => p.module === module && p.action === action) ?? false;
+}

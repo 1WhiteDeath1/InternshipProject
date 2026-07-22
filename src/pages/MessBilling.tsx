@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import api, { getErrorMessage } from '@/lib/api';
 import { useAuth } from '@/contexts/useAuth';
+import { hasPermission } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -225,7 +226,7 @@ export default function MessBilling() {
                         <div className="flex gap-1">
                           {b.status === 'draft' && <Button size="sm" variant="ghost" onClick={() => handleIssue(b.id)}><CheckCircle size={16} className="text-blue-600" /></Button>}
                           {b.status === 'issued' && <Button size="sm" variant="ghost" onClick={() => handleMarkPaid(b.id)}><DollarSign size={16} className="text-green-600" /></Button>}
-                          {user?.is_supervisor && b.status !== 'paid' && (
+                          {hasPermission(user, 'mess_billing', 'approve') && b.status !== 'paid' && (
                             <Button size="sm" variant="ghost" onClick={() => { setDiscountBill(b); setDiscountRate(b.applied_discount_rate); setDiscountReason(''); }}>
                               <Percent size={16} className="text-purple-600" />
                             </Button>
@@ -290,10 +291,11 @@ export default function MessBilling() {
         </TabsContent>
       </Tabs>
 
-      {/* Apply Discount dialog - renders only for supervisors; authorization is
-          entirely server-side (check_permission against the session), there is
-          no client-side "authorization id" field anywhere in this form. */}
-      {user?.is_supervisor && (
+      {/* Apply Discount dialog - renders only for roles with mess_billing.approve;
+          authorization is entirely server-side (check_permission against the
+          session), there is no client-side "authorization id" field anywhere
+          in this form. */}
+      {hasPermission(user, 'mess_billing', 'approve') && (
         <Dialog open={!!discountBill} onOpenChange={(open) => { if (!open) setDiscountBill(null); }}>
           <DialogContent className="max-w-sm">
             <DialogHeader><DialogTitle>Apply Discount - {discountBill?.member_name}</DialogTitle></DialogHeader>

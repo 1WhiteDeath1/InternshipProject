@@ -1,6 +1,7 @@
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/useAuth';
+import { hasPermission } from '@/contexts/auth-context';
 import { useTheme } from '@/contexts/useTheme';
 import { useFeatures } from '@/contexts/useFeatures';
 import api from '@/lib/api';
@@ -8,7 +9,7 @@ import {
   LayoutDashboard, Package, BedDouble, Receipt,
   Shield, Users, UserCog, ClipboardList, Bell, BarChart3,
   Settings, FileUp, LogOut, Sun, Moon, ChevronLeft, ChevronRight,
-  IdCard, UtensilsCrossed, Wallet, ChefHat, LayoutGrid, Menu, X, Contact, UserCircle2, TrendingUp,
+  IdCard, UtensilsCrossed, Wallet, ChefHat, LayoutGrid, Menu, X, Contact, UserCircle2, TrendingUp, ClipboardCheck,
   Plus, Receipt as ReceiptIcon, Camera, ShieldAlert, RefreshCw, UtensilsCrossed as OrderIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -36,26 +37,27 @@ const quickActionDefs: {
 ];
 
 const navItems = [
-  { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, requiresSupervisor: false },
-  { path: '/stock', label: 'Inventory & Procurement', icon: Package, feature: null },
-  { path: '/bookings', label: 'Bookings', icon: BedDouble, feature: null },
-  { path: '/billing', label: 'Billing', icon: Receipt, feature: null },
-  { path: '/clerk-desk', label: 'Clerk Desk', icon: LayoutGrid, feature: 'clerk_desk' },
-  { path: '/guests', label: 'Guests', icon: Contact, feature: null },
-  { path: '/attendants', label: 'Attendants', icon: UserCircle2, feature: null },
-  { path: '/members', label: 'Members', icon: IdCard, feature: 'mess_members' },
-  { path: '/attendance', label: 'Attendance', icon: UtensilsCrossed, feature: 'mess_attendance' },
-  { path: '/mess-billing', label: 'Mess Billing', icon: Wallet, feature: 'mess_billing' },
-  { path: '/kitchen', label: 'Kitchen', icon: ChefHat, feature: 'kitchen_module' },
-  { path: '/security', label: 'Security', icon: Shield, feature: null },
-  { path: '/users', label: 'Users', icon: Users, requiresSupervisor: true },
-  { path: '/roles', label: 'Roles', icon: UserCog, requiresSupervisor: true },
-  { path: '/audit-log', label: 'Audit Log', icon: ClipboardList, requiresSupervisor: true },
-  { path: '/alerts', label: 'Alerts', icon: Bell, badge: 'alertCount' },
-  { path: '/tariffs', label: 'Tariffs', icon: TrendingUp, requiresSupervisor: true },
-  { path: '/reports', label: 'Reports', icon: BarChart3, requiresSupervisor: true },
-  { path: '/import-export', label: 'Import / Export', icon: FileUp, requiresSupervisor: true },
-  { path: '/settings', label: 'Settings', icon: Settings, requiresSupervisor: true },
+  { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { path: '/stock', label: 'Inventory & Procurement', icon: Package, feature: null, requiredPermission: { module: 'inventory', action: 'view' } },
+  { path: '/bookings', label: 'Bookings', icon: BedDouble, feature: null, requiredPermission: { module: 'bookings', action: 'view' } },
+  { path: '/billing', label: 'Billing', icon: Receipt, feature: null, requiredPermission: { module: 'billing', action: 'view' } },
+  { path: '/clerk-desk', label: 'Clerk Desk', icon: LayoutGrid, feature: 'clerk_desk', requiredPermission: { module: 'clerk_desk', action: 'view' } },
+  { path: '/guests', label: 'Guests', icon: Contact, feature: null, requiredPermission: { module: 'guests', action: 'view' } },
+  { path: '/attendants', label: 'Attendants', icon: UserCircle2, feature: null, requiredPermission: { module: 'attendants', action: 'view' } },
+  { path: '/members', label: 'Members', icon: IdCard, feature: 'mess_members', requiredPermission: { module: 'members', action: 'view' } },
+  { path: '/attendance', label: 'Attendance', icon: UtensilsCrossed, feature: 'mess_attendance', requiredPermission: { module: 'attendance', action: 'view' } },
+  { path: '/mess-billing', label: 'Mess Billing', icon: Wallet, feature: 'mess_billing', requiredPermission: { module: 'mess_billing', action: 'view' } },
+  { path: '/kitchen', label: 'Kitchen', icon: ChefHat, feature: 'kitchen_module', requiredPermission: { module: 'kitchen', action: 'view' } },
+  { path: '/security', label: 'Security', icon: Shield, feature: null, requiredPermission: { module: 'security', action: 'view' } },
+  { path: '/approvals', label: 'Approvals', icon: ClipboardCheck, requiredPermission: { module: 'procurement', action: 'approve' } },
+  { path: '/users', label: 'Users', icon: Users, requiredPermission: { module: 'users', action: 'view' } },
+  { path: '/roles', label: 'Roles', icon: UserCog, requiredPermission: { module: 'roles', action: 'view' } },
+  { path: '/audit-log', label: 'Audit Log', icon: ClipboardList, requiredPermission: { module: 'audit', action: 'view' } },
+  { path: '/alerts', label: 'Alerts', icon: Bell, badge: 'alertCount', requiredPermission: { module: 'alerts', action: 'view' } },
+  { path: '/tariffs', label: 'Tariffs', icon: TrendingUp, requiredPermission: { module: 'tariffs', action: 'view' } },
+  { path: '/reports', label: 'Reports', icon: BarChart3, requiredPermission: { module: 'reports', action: 'view' } },
+  { path: '/import-export', label: 'Import / Export', icon: FileUp, requiredPermission: { module: 'import_export', action: 'view' } },
+  { path: '/settings', label: 'Settings', icon: Settings, requiredPermission: { module: 'settings', action: 'view' } },
 ];
 
 export default function Layout() {
@@ -87,6 +89,7 @@ export default function Layout() {
   }
 
   useEffect(() => {
+    if (!hasPermission(user, 'alerts', 'view')) return;
     const fetchAlerts = async () => {
       try {
         const res = await api.get('/alerts/unread-count');
@@ -96,12 +99,12 @@ export default function Layout() {
     fetchAlerts();
     const interval = setInterval(fetchAlerts, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [user]);
 
   if (loading || !user) return null;
 
   const filteredNav = navItems.filter(item => {
-    if (item.requiresSupervisor && !user.is_supervisor) return false;
+    if (item.requiredPermission && !hasPermission(user, item.requiredPermission.module, item.requiredPermission.action)) return false;
     if (item.feature && !isEnabled(item.feature)) return false;
     return true;
   });
@@ -228,7 +231,7 @@ export default function Layout() {
                 })}
               </div>
             )}
-            {user.is_supervisor && (
+            {hasPermission(user, 'alerts', 'view') && (
               <button
                 onClick={() => navigate('/alerts')}
                 className="relative p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"

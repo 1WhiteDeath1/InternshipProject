@@ -12,13 +12,13 @@ from backend.schemas import (
     MealAttendanceCreate, MealAttendanceOut, AttendanceMarkRequest, BulkAttendanceCreate, MemberLeaveCreate,
     AttendanceLookupResult, ServeAttendanceRequest, NoShowSweepResult,
 )
-from backend.auth import get_current_user, check_permission
+from backend.auth import get_current_user, check_permission, PermissionChecker
 from backend.audit import log_audit, serialize_model, AuditAction
 from backend.logging_config import get_logger
 from backend.services.mess_billing_calc import get_man_days, get_setting_float, get_setting_str
 
 logger = get_logger("app")
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(PermissionChecker("attendance", "view"))])
 
 # Fixed meal times for Tier 1 - not per-mess-configurable, just used as a
 # fallback reference. The actual booking cutoff is the settable

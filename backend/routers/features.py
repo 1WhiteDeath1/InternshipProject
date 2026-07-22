@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import FeatureFlag
 from backend.schemas import FeatureFlagOut, FeatureFlagToggle
-from backend.auth import require_supervisor
+from backend.auth import get_current_user, PermissionChecker
 from backend.audit import log_audit, serialize_model, AuditAction
 
 router = APIRouter()
@@ -45,7 +45,9 @@ DEFAULT_FEATURES = [
 
 
 @router.get("")
-async def list_features(db: Session = Depends(get_db), current_user=Depends(require_supervisor)):
+async def list_features(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    # Every role reads this (FeaturesContext gates nav/page visibility for
+    # everyone), so it's an open read - only toggling a flag is restricted.
     # Seed any default whose key isn't already present, rather than only
     # seeding when the whole table is empty - otherwise a default added in a
     # later release would never appear on any already-seeded database.
@@ -60,7 +62,7 @@ async def list_features(db: Session = Depends(get_db), current_user=Depends(requ
 
 
 @router.put("/{feature_id}/toggle")
-async def toggle_feature(feature_id: int, data: FeatureFlagToggle, db: Session = Depends(get_db), current_user=Depends(require_supervisor)):
+async def toggle_feature(feature_id: int, data: FeatureFlagToggle, db: Session = Depends(get_db), current_user=Depends(PermissionChecker("features", "edit"))):
     f = db.query(FeatureFlag).filter(FeatureFlag.id == feature_id).first()
     if not f:
         raise HTTPException(status_code=404, detail="Feature not found")

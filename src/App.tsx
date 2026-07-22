@@ -24,6 +24,7 @@ import Users from '@/pages/Users';
 import Roles from '@/pages/Roles';
 import AuditLog from '@/pages/AuditLog';
 import Alerts from '@/pages/Alerts';
+import Approvals from '@/pages/Approvals';
 import Reports from '@/pages/Reports';
 import Settings from '@/pages/Settings';
 import ImportExport from '@/pages/ImportExport';
@@ -57,6 +58,7 @@ function App() {
                 <Route path="/roles" element={<Roles />} />
                 <Route path="/audit-log" element={<AuditLog />} />
                 <Route path="/alerts" element={<Alerts />} />
+                <Route path="/approvals" element={<Approvals />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/import-export" element={<ImportExport />} />

@@ -88,6 +88,8 @@ async def list_invoices(
     page: int = Query(1, ge=1), page_size: int = Query(25, ge=1),
     db: Session = Depends(get_db), current_user=Depends(get_current_user),
 ):
+    if not check_permission(current_user, "billing", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     query = db.query(Invoice)
     if status:
         query = query.filter(Invoice.status == status)
@@ -280,6 +282,8 @@ def _running_balance_payload(db: Session, booking: Booking) -> dict:
 
 @router.get("/bookings/{booking_id}/running-balance")
 async def running_balance(booking_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "billing", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
@@ -310,6 +314,8 @@ async def clerk_desk(db: Session = Depends(get_db), current_user=Depends(get_cur
       first - so payment collection lives entirely on this desk instead of
       requiring a trip to the Billing page when the print dialog was
       closed without recording payment."""
+    if not (check_permission(current_user, "clerk_desk", "view") or check_permission(current_user, "billing", "view")):
+        raise HTTPException(status_code=403, detail="Permission denied")
     checked_in = db.query(Booking).options(joinedload(Booking.room)).filter(
         Booking.status == "checked_in",
         or_(Booking.nature_of_duty.is_(None), Booking.nature_of_duty != "hra"),
@@ -362,6 +368,8 @@ async def clerk_desk(db: Session = Depends(get_db), current_user=Depends(get_cur
 
 @router.get("/bookings/{booking_id}/charges")
 async def list_booking_charges(booking_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "billing", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     charges = db.query(BookingCharge).filter(BookingCharge.booking_id == booking_id).order_by(BookingCharge.created_at.desc()).all()
     return [{"id": c.id, "head": c.head, "amount": float(c.amount), "is_mess_charge": c.is_mess_charge,
              "invoiced": c.invoiced_at is not None, "created_at": c.created_at} for c in charges]
@@ -547,6 +555,8 @@ async def master_invoice(booking_id: int, db: Session = Depends(get_db), current
     one comprehensive master invoice - one merged item list, one grand
     total, one printable document. Read-only; the underlying invoices stay
     exactly as they are, so nothing here can double-count revenue."""
+    if not check_permission(current_user, "clerk_desk", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
@@ -756,6 +766,8 @@ async def void_invoice(invoice_id: int, reason: str, request: Request, db: Sessi
 
 @router.get("/invoices/{invoice_id}/payments")
 async def list_payments(invoice_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "billing", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")

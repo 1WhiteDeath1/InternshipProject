@@ -7,14 +7,17 @@ from backend.database import get_db
 from backend.models import (
     Invoice, Booking, Room, InventoryItem, StockBatch, WasteLog,
     PurchaseOrder, Vendor, AuditLog, Alert, KitchenOrder,
+    IncidentReport, MealAttendance, AttendanceStatus, MessBill, MessBillStatus,
+    Member, MemberStatus, MenuPrice, Recipe,
 )
-from backend.auth import get_current_user, require_supervisor
+from backend.auth import PermissionChecker
+from backend.services.recipe_costing import compute_theoretical_recipe_cost
 
 router = APIRouter()
 
 
 @router.get("/dashboard")
-async def supervisor_dashboard(db: Session = Depends(get_db), current_user=Depends(require_supervisor)):
+async def supervisor_dashboard(db: Session = Depends(get_db), current_user=Depends(PermissionChecker("reports", "view"))):
     today = date.today()
     month_start = today.replace(day=1)
 
@@ -38,8 +41,18 @@ async def supervisor_dashboard(db: Session = Depends(get_db), current_user=Depen
     # Open alerts
     open_alerts = db.query(Alert).filter(Alert.status.in_(["new", "acknowledged"])).count()
 
-    # Pending approvals
+    # Pending approvals (draft POs awaiting sign-off)
     pending_pos = db.query(PurchaseOrder).filter(PurchaseOrder.status == "draft").count()
+
+    # Outstanding balance across all live, unsettled invoices - an aggregate the
+    # Manager sees without reaching the (Clerk-owned) desk. No names, just the total.
+    live_invoices = db.query(Invoice).filter(Invoice.status.in_(["draft", "issued"])).all()
+    outstanding_balance = sum(
+        max(float(inv.total_amount) - float(inv.amount_paid or 0), 0.0) for inv in live_invoices
+    )
+    unsettled_invoice_count = sum(
+        1 for inv in live_invoices if float(inv.total_amount) - float(inv.amount_paid or 0) > 0.01
+    )
 
     # Total guests today
     today_guests = db.query(Booking).filter(
@@ -59,6 +72,42 @@ async def supervisor_dashboard(db: Session = Depends(get_db), current_user=Depen
         )
     """)).scalar()
 
+    # Security - open incidents
+    open_incidents = db.query(IncidentReport).filter(IncidentReport.status.in_(["open", "investigating"])).count()
+
+    # Attendance - today's meal service
+    today_attendance = db.query(MealAttendance).filter(MealAttendance.date == today).all()
+    attendance_present = sum(1 for a in today_attendance if a.status == AttendanceStatus.ATTENDED)
+    attendance_absent = sum(1 for a in today_attendance if a.status == AttendanceStatus.NO_SHOW)
+
+    # Procurement - vendor performance at a glance
+    active_vendors = db.query(Vendor).filter(Vendor.is_active == True).all()
+    active_vendor_count = len(active_vendors)
+    avg_vendor_accuracy = round(sum(v.delivery_accuracy or 0 for v in active_vendors) / active_vendor_count, 1) if active_vendor_count else 0
+
+    # Recipes - theoretical cost at or above the guest-facing menu price (no margin left)
+    recipes_below_margin = 0
+    for mp in db.query(MenuPrice).filter(MenuPrice.is_active == True).all():
+        recipe = db.query(Recipe).filter(Recipe.id == mp.recipe_id).first()
+        if not recipe:
+            continue
+        cost = compute_theoretical_recipe_cost(db, recipe)
+        if cost is not None and cost >= float(mp.price):
+            recipes_below_margin += 1
+
+    # Mess billing - current period
+    month_bills = db.query(MessBill).filter(MessBill.month == today.month, MessBill.year == today.year).all()
+    mess_revenue_month = sum(float(b.total_amount) for b in month_bills)
+    unpaid_mess_bills = sum(1 for b in month_bills if b.status != MessBillStatus.PAID)
+
+    # Members - active roster size
+    active_member_count = db.query(Member).filter(Member.status == MemberStatus.ACTIVE).count()
+
+    # Clerk Desk - finalization activity
+    invoices_finalized_today = sum(1 for inv in invoices if inv.status.value in ["issued", "paid"])
+    month_invoices = db.query(Invoice).filter(Invoice.created_at >= datetime.combine(month_start, datetime.min.time())).all()
+    discounts_month = sum(float(inv.discount) for inv in month_invoices if inv.discount)
+
     return {
         "today_revenue": today_revenue,
         "occupancy_rate": occupancy_rate,
@@ -68,11 +117,24 @@ async def supervisor_dashboard(db: Session = Depends(get_db), current_user=Depen
         "pending_approvals": pending_pos,
         "total_guests_today": today_guests,
         "low_stock_count": low_stock_result or 0,
+        "open_incidents": open_incidents,
+        "attendance_present_today": attendance_present,
+        "attendance_absent_today": attendance_absent,
+        "active_vendor_count": active_vendor_count,
+        "avg_vendor_accuracy": avg_vendor_accuracy,
+        "recipes_below_margin": recipes_below_margin,
+        "mess_revenue_month": round(mess_revenue_month, 2),
+        "unpaid_mess_bills": unpaid_mess_bills,
+        "active_member_count": active_member_count,
+        "invoices_finalized_today": invoices_finalized_today,
+        "discounts_month": round(discounts_month, 2),
+        "outstanding_balance": round(outstanding_balance, 2),
+        "unsettled_invoice_count": unsettled_invoice_count,
     }
 
 
 @router.get("/revenue-trend")
-async def revenue_trend(days: int = Query(30, ge=7, le=365), db: Session = Depends(get_db), current_user=Depends(require_supervisor)):
+async def revenue_trend(days: int = Query(30, ge=7, le=365), db: Session = Depends(get_db), current_user=Depends(PermissionChecker("reports", "view"))):
     today = date.today()
     labels = []
     values = []
@@ -89,7 +151,7 @@ async def revenue_trend(days: int = Query(30, ge=7, le=365), db: Session = Depen
 
 
 @router.get("/occupancy-trend")
-async def occupancy_trend(days: int = Query(30, ge=7, le=365), db: Session = Depends(get_db), current_user=Depends(require_supervisor)):
+async def occupancy_trend(days: int = Query(30, ge=7, le=365), db: Session = Depends(get_db), current_user=Depends(PermissionChecker("reports", "view"))):
     today = date.today()
     labels = []
     values = []
@@ -106,7 +168,7 @@ async def occupancy_trend(days: int = Query(30, ge=7, le=365), db: Session = Dep
 
 
 @router.get("/waste-by-category")
-async def waste_by_category(db: Session = Depends(get_db), current_user=Depends(require_supervisor)):
+async def waste_by_category(db: Session = Depends(get_db), current_user=Depends(PermissionChecker("reports", "view"))):
     month_start = date.today().replace(day=1)
     results = db.query(WasteLog.category, func.sum(WasteLog.quantity), func.sum(WasteLog.cost)).filter(
         WasteLog.created_at >= datetime.combine(month_start, datetime.min.time()),
@@ -117,6 +179,6 @@ async def waste_by_category(db: Session = Depends(get_db), current_user=Depends(
 
 
 @router.get("/vendor-performance")
-async def vendor_performance(db: Session = Depends(get_db), current_user=Depends(require_supervisor)):
+async def vendor_performance(db: Session = Depends(get_db), current_user=Depends(PermissionChecker("reports", "view"))):
     vendors = db.query(Vendor).filter(Vendor.is_active == True).order_by(Vendor.delivery_accuracy.desc()).limit(10).all()
     return [{"name": v.name, "accuracy": v.delivery_accuracy} for v in vendors]

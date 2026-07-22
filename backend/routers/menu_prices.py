@@ -24,7 +24,7 @@ async def list_menu_prices(db: Session = Depends(get_db), current_user=Depends(g
 
 @router.put("/{recipe_id}", response_model=MenuPriceOut)
 async def upsert_menu_price(recipe_id: int, data: MenuPriceUpdate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    if not check_permission(current_user, "kitchen", "edit"):
+    if not check_permission(current_user, "menu_prices", "edit"):
         raise HTTPException(status_code=403, detail="Permission denied")
     if not db.query(Recipe).filter(Recipe.id == recipe_id).first():
         raise HTTPException(status_code=404, detail="Recipe not found")

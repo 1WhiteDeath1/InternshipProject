@@ -10,7 +10,7 @@ from backend.models import (
     PurchaseOrder, POStatus, Booking, KitchenOrder, Room, Alert, AlertStatus, AlertSeverity,
 )
 from backend.schemas import GuestMealChargeCreate, DiscountApplyRequest
-from backend.auth import get_current_user, check_permission
+from backend.auth import get_current_user, check_permission, PermissionChecker
 from backend.audit import log_audit, serialize_model, AuditAction
 from backend.logging_config import get_logger
 from backend.alerts import create_alert
@@ -18,7 +18,7 @@ from backend.services.mess_billing_calc import get_man_days, get_setting_float, 
 from backend.services.room_pricing import get_hra_rank_rate, get_hra_utility_rate, get_womens_bloc_rank_rate
 
 logger = get_logger("app")
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(PermissionChecker("mess_billing", "view"))])
 
 
 @router.get("/bills")

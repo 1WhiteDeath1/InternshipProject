@@ -4,14 +4,14 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import Role, RolePermission
 from backend.schemas import RoleCreate, RoleUpdate, RoleOut, RolePermissionOut
-from backend.auth import require_supervisor
+from backend.auth import PermissionChecker
 from backend.audit import log_audit, serialize_model, AuditAction
 
 router = APIRouter()
 
 
 @router.get("")
-async def list_roles(db: Session = Depends(get_db), current_user=Depends(require_supervisor)):
+async def list_roles(db: Session = Depends(get_db), current_user=Depends(PermissionChecker("roles", "view"))):
     roles = db.query(Role).all()
     return [
         {
@@ -27,7 +27,7 @@ async def list_roles(db: Session = Depends(get_db), current_user=Depends(require
 
 
 @router.post("")
-async def create_role(data: RoleCreate, request: Request, db: Session = Depends(get_db), current_user=Depends(require_supervisor)):
+async def create_role(data: RoleCreate, request: Request, db: Session = Depends(get_db), current_user=Depends(PermissionChecker("roles", "create"))):
     if db.query(Role).filter(Role.name == data.name).first():
         raise HTTPException(status_code=400, detail="Role name already exists")
 
@@ -47,7 +47,7 @@ async def create_role(data: RoleCreate, request: Request, db: Session = Depends(
 
 
 @router.put("/{role_id}")
-async def update_role(role_id: int, data: RoleUpdate, request: Request, db: Session = Depends(get_db), current_user=Depends(require_supervisor)):
+async def update_role(role_id: int, data: RoleUpdate, request: Request, db: Session = Depends(get_db), current_user=Depends(PermissionChecker("roles", "edit"))):
     role = db.query(Role).filter(Role.id == role_id).first()
     if not role:
         raise HTTPException(status_code=404, detail="Role not found")

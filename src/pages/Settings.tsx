@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '@/lib/api';
 import { useAuth } from '@/contexts/useAuth';
+import { hasPermission } from '@/contexts/auth-context';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -50,7 +51,7 @@ export default function Settings() {
 
   useEffect(() => {
     queueMicrotask(() => {
-      if (user?.is_supervisor) {
+      if (hasPermission(user, 'settings', 'view')) {
         fetchSettings();
         fetchFeatures();
         fetchBackups();
@@ -88,8 +89,8 @@ export default function Settings() {
     return acc;
   }, {});
 
-  if (!user?.is_supervisor) {
-    return <div className="text-center py-20 text-gray-500"><Shield size={48} className="mx-auto mb-4 opacity-50" />Supervisor access required</div>;
+  if (!hasPermission(user, 'settings', 'view')) {
+    return <div className="text-center py-20 text-gray-500"><Shield size={48} className="mx-auto mb-4 opacity-50" />You don't have access to Settings</div>;
   }
 
   return (

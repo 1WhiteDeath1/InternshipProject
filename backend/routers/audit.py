@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import AuditLog
-from backend.auth import require_supervisor
+from backend.auth import PermissionChecker
 
 router = APIRouter()
 
@@ -19,7 +19,7 @@ async def list_audit_logs(
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     db: Session = Depends(get_db),
-    current_user=Depends(require_supervisor),
+    current_user=Depends(PermissionChecker("audit", "view")),
 ):
     query = db.query(AuditLog)
     if user_id:

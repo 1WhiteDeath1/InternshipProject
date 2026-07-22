@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import SystemSetting
 from backend.schemas import SettingOut, SettingUpdate
-from backend.auth import require_supervisor
+from backend.auth import PermissionChecker
 from backend.audit import log_audit, serialize_model, AuditAction
 from backend.config import settings as app_settings
 
@@ -51,13 +51,13 @@ def _seed_missing_settings(db: Session) -> None:
 
 
 @router.get("")
-async def list_settings(db: Session = Depends(get_db), current_user=Depends(require_supervisor)):
+async def list_settings(db: Session = Depends(get_db), current_user=Depends(PermissionChecker("settings", "view"))):
     _seed_missing_settings(db)
     return db.query(SystemSetting).all()
 
 
 @router.put("/{key}")
-async def update_setting(key: str, data: SettingUpdate, db: Session = Depends(get_db), current_user=Depends(require_supervisor)):
+async def update_setting(key: str, data: SettingUpdate, db: Session = Depends(get_db), current_user=Depends(PermissionChecker("settings", "edit"))):
     _seed_missing_settings(db)
     s = db.query(SystemSetting).filter(SystemSetting.key == key).first()
     if not s:

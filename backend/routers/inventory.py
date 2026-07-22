@@ -16,12 +16,12 @@ from backend.schemas import (
     StockBatchCreate, StockMovementCreate, WasteLogCreate, CycleCountCreate,
     StockIntakeCreate, ReceiptConfirmRequest,
 )
-from backend.auth import get_current_user, check_permission, require_supervisor
+from backend.auth import get_current_user, check_permission, require_supervisor, PermissionChecker
 from backend.audit import log_audit, serialize_model, AuditAction
 from backend.logging_config import get_logger
 
 logger = get_logger("app")
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(PermissionChecker("inventory", "view"))])
 
 RECEIPTS_DIR = UPLOADS_DIR / "receipts"
 RECEIPTS_DIR.mkdir(parents=True, exist_ok=True)

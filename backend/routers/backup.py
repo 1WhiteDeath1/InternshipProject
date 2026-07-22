@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from backend.database import get_db, engine
 from backend.config import BACKUP_DIR, DB_PATH
-from backend.auth import require_supervisor
+from backend.auth import PermissionChecker
 from backend.audit import log_audit, AuditAction
 from backend.logging_config import get_logger
 
@@ -18,7 +18,7 @@ router = APIRouter()
 
 
 @router.get("/list")
-async def list_backups(current_user=Depends(require_supervisor)):
+async def list_backups(current_user=Depends(PermissionChecker("backup", "view"))):
     backups = []
     if BACKUP_DIR.exists():
         for f in sorted(BACKUP_DIR.glob("*.zip"), reverse=True):
@@ -31,7 +31,7 @@ async def list_backups(current_user=Depends(require_supervisor)):
 
 
 @router.post("/create")
-async def create_backup(current_user=Depends(require_supervisor)):
+async def create_backup(current_user=Depends(PermissionChecker("backup", "create"))):
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     filename = f"backup_{timestamp}.zip"
     filepath = BACKUP_DIR / filename
@@ -51,7 +51,7 @@ async def create_backup(current_user=Depends(require_supervisor)):
 
 
 @router.get("/download/{filename}")
-async def download_backup(filename: str, current_user=Depends(require_supervisor)):
+async def download_backup(filename: str, current_user=Depends(PermissionChecker("backup", "view"))):
     filepath = BACKUP_DIR / filename
     if not filepath.exists():
         raise HTTPException(status_code=404, detail="Backup not found")

@@ -68,6 +68,9 @@ async def login(
             "role_id": user.role_id,
             "is_supervisor": user.role.is_supervisor if user.role else False,
             "role_name": user.role.name if user.role else None,
+            "permissions": [
+                {"module": p.module, "action": p.action} for p in user.role.permissions
+            ] if user.role else [],
         }
     )
 
@@ -111,4 +114,7 @@ async def get_me(current_user: User = Depends(get_current_user)):
         "role_name": current_user.role.name if current_user.role else None,
         "status": current_user.status.value if current_user.status else None,
         "preferences": current_user.preferences,
+        "permissions": [
+            {"module": p.module, "action": p.action} for p in current_user.role.permissions
+        ] if current_user.role else [],
     }

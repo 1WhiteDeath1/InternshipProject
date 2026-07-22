@@ -5,7 +5,7 @@ from sqlalchemy import func
 from backend.database import get_db
 from backend.models import User, Role, UserStatus
 from backend.schemas import UserCreate, UserUpdate, UserOut, UserListResponse
-from backend.auth import get_current_user, require_supervisor, hash_password, check_permission
+from backend.auth import get_current_user, hash_password, PermissionChecker
 from backend.audit import log_audit, serialize_model, AuditAction
 from backend.logging_config import get_logger
 
@@ -20,7 +20,7 @@ async def list_users(
     search: str = "",
     status: str = "",
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_supervisor),
+    current_user: User = Depends(PermissionChecker("users", "view")),
 ):
     query = db.query(User)
     if search:
@@ -53,7 +53,7 @@ async def create_user(
     data: UserCreate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_supervisor),
+    current_user: User = Depends(PermissionChecker("users", "create")),
 ):
     if db.query(User).filter(User.username == data.username).first():
         raise HTTPException(status_code=400, detail="Username already exists")
@@ -94,7 +94,7 @@ async def update_user(
     data: UserUpdate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_supervisor),
+    current_user: User = Depends(PermissionChecker("users", "edit")),
 ):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -135,7 +135,7 @@ async def unlock_user(
     user_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_supervisor),
+    current_user: User = Depends(PermissionChecker("users", "edit")),
 ):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:

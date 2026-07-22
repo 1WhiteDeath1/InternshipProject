@@ -5,12 +5,12 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import SecurityLog, IncidentReport, AlertSeverity
 from backend.schemas import SecurityLogCreate, IncidentReportCreate, IncidentReportUpdate
-from backend.auth import get_current_user, check_permission
+from backend.auth import get_current_user, check_permission, PermissionChecker
 from backend.audit import log_audit, serialize_model, AuditAction
 from backend.logging_config import get_logger
 
 logger = get_logger("app")
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(PermissionChecker("security", "view"))])
 
 
 @router.get("/logs")

@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from backend.database import engine, Base
 from backend.logging_config import setup_logging
 from backend.branding import create_default_branding_file
-from backend.migrations_manual import run_startup_migrations
+from backend.migrations import run_startup_migrations
 from backend.config import UPLOADS_DIR
 from backend import routers
 
@@ -18,7 +18,7 @@ create_default_branding_file()
 Base.metadata.create_all(bind=engine)
 
 # Patch any tables that existed before a model change (create_all only adds
-# new tables, it never alters existing ones - see migrations_manual.py)
+# new tables, it never alters existing ones - see backend/migrations/)
 run_startup_migrations(engine)
 
 app = FastAPI(

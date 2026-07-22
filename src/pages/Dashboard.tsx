@@ -1,11 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import api from '@/lib/api';
 import { useAuth } from '@/contexts/useAuth';
+import { hasPermission } from '@/contexts/auth-context';
 import { useTheme } from '@/contexts/useTheme';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   TrendingUp, Package, AlertTriangle, Receipt, DollarSign, Trash2,
-  BedDouble, LogIn, LogOut, Wallet, ArrowRight
+  BedDouble, LogIn, LogOut, Wallet, ArrowRight, ShieldAlert, UtensilsCrossed,
+  Truck, ChefHat, IdCard, LayoutGrid, ClipboardCheck,
 } from 'lucide-react';
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
@@ -25,6 +27,19 @@ interface DashboardStats {
   pending_approvals: number;
   total_guests_today: number;
   low_stock_count: number;
+  open_incidents: number;
+  attendance_present_today: number;
+  attendance_absent_today: number;
+  active_vendor_count: number;
+  avg_vendor_accuracy: number;
+  recipes_below_margin: number;
+  mess_revenue_month: number;
+  unpaid_mess_bills: number;
+  active_member_count: number;
+  invoices_finalized_today: number;
+  discounts_month: number;
+  outstanding_balance: number;
+  unsettled_invoice_count: number;
 }
 
 interface OccupancyData {
@@ -115,11 +130,12 @@ export default function Dashboard() {
       const now = new Date();
       const mStart = new Date(now.getFullYear(), now.getMonth() - 5, 1).toLocaleDateString('en-CA');
       const mEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toLocaleDateString('en-CA');
+      const canSeeDesk = hasPermission(user, 'billing', 'view') || hasPermission(user, 'clerk_desk', 'view');
       const common = [
         api.get('/bookings/occupancy').then(res => setOccupancy(res.data)),
-        api.get('/billing/desk').then(res => setUnsettled(res.data.unsettled_invoices || [])),
+        ...(canSeeDesk ? [api.get('/billing/desk').then(res => setUnsettled(res.data.unsettled_invoices || []))] : []),
       ];
-      const supervisor = user?.is_supervisor ? [
+      const supervisor = hasPermission(user, 'reports', 'view') ? [
         api.get('/reports/dashboard').then(res => setStats(res.data)),
         api.get('/reports/revenue-trend?days=14').then(res => setRevenueTrend(res.data)),
         api.get('/reports/occupancy-trend?days=14').then(res => setOccupancyTrend(res.data)),
@@ -222,8 +238,8 @@ export default function Dashboard() {
     </SectionCard>
   );
 
-  // ---- Non-supervisor: operations only ----
-  if (!user?.is_supervisor) {
+  // ---- Operations-only view: anyone without the cross-module reports permission ----
+  if (!hasPermission(user, 'reports', 'view')) {
     return (
       <div className="space-y-6">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Welcome, {user?.full_name}</h1>
@@ -248,7 +264,7 @@ export default function Dashboard() {
     );
   }
 
-  // ---- Supervisor: full analytics board ----
+  // ---- Full analytics board: Manager / Deputy Manager (anyone with reports.view) ----
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -256,36 +272,35 @@ export default function Dashboard() {
         <p className="text-base text-gray-500 dark:text-gray-400">{new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
       </div>
 
-      {/* Hero row: the four figures that matter, readable from across the room */}
+      {/* Hero row: the four figures that matter, readable from across the room.
+          These are informational summaries - the Manager/Deputy don't drill into
+          operational pages from here (that's not their job), so no navigation. */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <HeroTile
           label="Today's Revenue"
           value={<StatValue loading={loading} value={bigMoney(stats?.today_revenue)} />}
           sub="Bills issued & paid today"
           icon={DollarSign} tone="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600"
-          onClick={() => navigate('/billing')}
         />
         <HeroTile
           label="Occupancy"
           value={<><StatValue loading={loading} value={stats?.occupancy_rate || 0} />%</>}
           sub={`${occupancy?.occupied ?? 0} of ${occupancy?.total_rooms ?? 0} rooms occupied`}
           icon={BedDouble} tone="bg-blue-100 dark:bg-blue-900/30 text-blue-600"
-          onClick={() => navigate('/bookings')}
         />
         <HeroTile
           label="To Collect"
-          value={<StatValue loading={loading} value={bigMoney(billsAmount)} />}
-          sub={billGroups.length > 0 ? `${billGroups.length} guest${billGroups.length > 1 ? 's' : ''} with bills due` : 'All bills collected'}
+          value={<StatValue loading={loading} value={bigMoney(stats?.outstanding_balance)} />}
+          sub={(stats?.unsettled_invoice_count ?? 0) > 0 ? `${stats?.unsettled_invoice_count} unsettled invoice${(stats?.unsettled_invoice_count ?? 0) > 1 ? 's' : ''}` : 'All bills collected'}
           icon={Wallet} tone="bg-purple-100 dark:bg-purple-900/30 text-purple-600"
-          onClick={() => navigate('/clerk-desk')}
-          alert={billGroups.length > 0}
+          alert={(stats?.outstanding_balance ?? 0) > 0}
         />
         <HeroTile
           label="Open Alerts"
           value={<StatValue loading={loading} value={stats?.open_alerts || 0} />}
-          sub={stats?.pending_approvals ? `${stats.pending_approvals} approvals waiting` : 'Nothing awaiting approval'}
+          sub={stats?.pending_approvals ? `${stats.pending_approvals} PO${stats.pending_approvals > 1 ? 's' : ''} awaiting sign-off` : 'Nothing awaiting approval'}
           icon={AlertTriangle} tone="bg-red-100 dark:bg-red-900/30 text-red-600"
-          onClick={() => navigate('/alerts')}
+          onClick={hasPermission(user, 'alerts', 'view') ? () => navigate('/alerts') : undefined}
           alert={(stats?.open_alerts ?? 0) > 0}
         />
       </div>
@@ -315,10 +330,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Desk work + collections + occupancy movement */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        {deskWidget}
-        {billsWidget}
+      {/* Occupancy movement - aggregate trend, no guest-level detail */}
+      <div className="grid grid-cols-1 gap-4">
         <SectionCard title="Occupancy — Last 14 Days">
           <ResponsiveContainer width="100%" height={230}>
             <LineChart data={occupancyData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -350,19 +363,47 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-2 gap-4">
           <HeroTile label="Stock Value" value={<StatValue loading={loading} value={bigMoney(stats?.total_stock_value)} />}
-            icon={Package} tone="bg-amber-100 dark:bg-amber-900/30 text-amber-600" onClick={() => navigate('/inventory')} />
+            icon={Package} tone="bg-amber-100 dark:bg-amber-900/30 text-amber-600" />
           <HeroTile label="Low Stock" value={<StatValue loading={loading} value={stats?.low_stock_count || 0} />}
             sub={stats?.low_stock_count ? 'Items need reorder' : 'Levels healthy'}
-            icon={TrendingUp} tone="bg-pink-100 dark:bg-pink-900/30 text-pink-600" onClick={() => navigate('/inventory')} />
+            icon={TrendingUp} tone="bg-pink-100 dark:bg-pink-900/30 text-pink-600" />
           <HeroTile label="Waste (Month)" value={<StatValue loading={loading} value={bigMoney(stats?.waste_cost_month)} />}
             icon={Trash2} tone="bg-red-100 dark:bg-red-900/30 text-red-600" />
-          <HeroTile label="Approvals" value={<StatValue loading={loading} value={stats?.pending_approvals || 0} />}
-            sub="POs awaiting sign-off"
-            icon={Receipt} tone="bg-orange-100 dark:bg-orange-900/30 text-orange-600" onClick={() => navigate('/procurement')} />
+          <HeroTile label="POs to Approve" value={<StatValue loading={loading} value={stats?.pending_approvals || 0} />}
+            sub="Awaiting your sign-off"
+            icon={ClipboardCheck} tone="bg-orange-100 dark:bg-orange-900/30 text-orange-600"
+            onClick={() => navigate('/approvals')} alert={(stats?.pending_approvals ?? 0) > 0} />
         </div>
       </div>
 
-      {/* Guests figure lives in the desk widget header row on this board */}
+      {/* Cross-module snapshot - aggregate insight into every department. These are
+          read-only summaries: the Manager/Deputy don't drill into operational
+          pages (not their job), so no navigation except to what they can act on. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <HeroTile label="Open Incidents" value={<StatValue loading={loading} value={stats?.open_incidents || 0} />}
+          icon={ShieldAlert} tone="bg-red-100 dark:bg-red-900/30 text-red-600"
+          alert={(stats?.open_incidents ?? 0) > 0} />
+        <HeroTile label="Attendance Today" value={<StatValue loading={loading} value={stats?.attendance_present_today || 0} />}
+          sub={stats?.attendance_absent_today ? `${stats.attendance_absent_today} no-shows` : 'No no-shows'}
+          icon={UtensilsCrossed} tone="bg-teal-100 dark:bg-teal-900/30 text-teal-600" />
+        <HeroTile label="Active Vendors" value={<StatValue loading={loading} value={stats?.active_vendor_count || 0} />}
+          sub={`${stats?.avg_vendor_accuracy || 0}% avg delivery accuracy`}
+          icon={Truck} tone="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600" />
+        <HeroTile label="Recipes Below Margin" value={<StatValue loading={loading} value={stats?.recipes_below_margin || 0} />}
+          icon={ChefHat} tone="bg-orange-100 dark:bg-orange-900/30 text-orange-600"
+          alert={(stats?.recipes_below_margin ?? 0) > 0} />
+        <HeroTile label="Mess Revenue (Month)" value={<StatValue loading={loading} value={bigMoney(stats?.mess_revenue_month)} />}
+          sub={stats?.unpaid_mess_bills ? `${stats.unpaid_mess_bills} unpaid bills` : 'All settled'}
+          icon={Wallet} tone="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600" />
+        <HeroTile label="Active Members" value={<StatValue loading={loading} value={stats?.active_member_count || 0} />}
+          icon={IdCard} tone="bg-blue-100 dark:bg-blue-900/30 text-blue-600"
+          onClick={hasPermission(user, 'members', 'view') ? () => navigate('/members') : undefined} />
+        <HeroTile label="Invoices Finalized Today" value={<StatValue loading={loading} value={stats?.invoices_finalized_today || 0} />}
+          icon={LayoutGrid} tone="bg-purple-100 dark:bg-purple-900/30 text-purple-600" />
+        <HeroTile label="Discounts (Month)" value={<StatValue loading={loading} value={bigMoney(stats?.discounts_month)} />}
+          icon={Receipt} tone="bg-pink-100 dark:bg-pink-900/30 text-pink-600" />
+      </div>
+
       <p className="sr-only">Guests in house: {stats?.total_guests_today ?? 0}</p>
     </div>
   );

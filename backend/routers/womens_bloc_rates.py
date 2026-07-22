@@ -21,7 +21,7 @@ async def list_womens_bloc_rates(db: Session = Depends(get_db), current_user=Dep
 
 @router.put("")
 async def upsert_womens_bloc_rate(data: WomensBlocRankRateCreate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    if not check_permission(current_user, "bookings", "edit"):
+    if not check_permission(current_user, "womens_bloc_rates", "edit"):
         raise HTTPException(status_code=403, detail="Permission denied")
     row = db.query(WomensBlocRankRate).filter(WomensBlocRankRate.rank_band == data.rank_band).first()
     before = serialize_model(row) if row else None
@@ -43,7 +43,7 @@ async def upsert_womens_bloc_rate(data: WomensBlocRankRateCreate, request: Reque
 
 @router.delete("/{rate_id}")
 async def delete_womens_bloc_rate(rate_id: int, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    if not check_permission(current_user, "bookings", "edit"):
+    if not check_permission(current_user, "womens_bloc_rates", "edit"):
         raise HTTPException(status_code=403, detail="Permission denied")
     row = db.query(WomensBlocRankRate).filter(WomensBlocRankRate.id == rate_id).first()
     if not row:
