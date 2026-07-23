@@ -10,7 +10,12 @@ import Dashboard from '@/pages/Dashboard';
 import StockManagement from '@/pages/StockManagement';
 import Bookings from '@/pages/Bookings';
 import Billing from '@/pages/Billing';
-import ClerkDesk from '@/pages/ClerkDesk';
+import ClerkDeskLayout from '@/pages/clerk-desk/ClerkDeskLayout';
+import ClerkOverview from '@/pages/clerk-desk/Overview';
+import ClerkLiveGuests from '@/pages/clerk-desk/LiveGuests';
+import ClerkCheckout from '@/pages/clerk-desk/Checkout';
+import ClerkMessOnly from '@/pages/clerk-desk/MessOnly';
+import ClerkMembers from '@/pages/clerk-desk/Members';
 import Guests from '@/pages/Guests';
 import Attendants from '@/pages/Attendants';
 import Tariffs from '@/pages/Tariffs';
@@ -44,7 +49,13 @@ function App() {
                 <Route path="/stock" element={<StockManagement />} />
                 <Route path="/bookings" element={<Bookings />} />
                 <Route path="/billing" element={<Billing />} />
-                <Route path="/clerk-desk" element={<ClerkDesk />} />
+                <Route path="/clerk-desk" element={<ClerkDeskLayout />}>
+                  <Route index element={<ClerkOverview />} />
+                  <Route path="live" element={<ClerkLiveGuests />} />
+                  <Route path="checkout" element={<ClerkCheckout />} />
+                  <Route path="mess-only" element={<ClerkMessOnly />} />
+                  <Route path="members" element={<ClerkMembers />} />
+                </Route>
                 <Route path="/guests" element={<Guests />} />
                 <Route path="/attendants" element={<Attendants />} />
                 <Route path="/tariffs" element={<Tariffs />} />

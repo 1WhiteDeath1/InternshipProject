@@ -35,7 +35,70 @@ def _migrate_invoices_complimentary(engine):
         conn.commit()
 
 
+def _migrate_invoices_guest_walkin(engine):
+    """Let an invoice belong to a standalone walk-in mess guest (no room).
+    Adds invoices.guest_id and drops the NOT NULL on booking_id. SQLite can't
+    ALTER a column's NOT NULL, so this rebuilds the table once. Idempotent:
+    re-runs no-op once guest_id exists and booking_id is nullable. FK
+    enforcement is ON (database.py), so the swap runs on a raw connection with
+    foreign_keys OFF, toggled outside a transaction where the pragma takes
+    effect; child ids in invoice_items/payments/edit_requests stay valid
+    because row ids are preserved through the copy."""
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(invoices)")).fetchall()
+    if not cols:
+        return
+    col_names = [c[1] for c in cols]
+    booking_notnull = next((c[3] for c in cols if c[1] == "booking_id"), 0)
+    if "guest_id" in col_names and not booking_notnull:
+        return  # already migrated
+
+    raw = engine.raw_connection()
+    try:
+        cur = raw.cursor()
+        cur.execute("PRAGMA foreign_keys=OFF")
+        cur.execute("""
+            CREATE TABLE invoices_new (
+                id INTEGER NOT NULL PRIMARY KEY,
+                invoice_number VARCHAR(50) NOT NULL,
+                booking_id INTEGER,
+                guest_id INTEGER,
+                issue_date DATE NOT NULL,
+                due_date DATE NOT NULL,
+                subtotal NUMERIC(10, 2) NOT NULL,
+                tax_amount NUMERIC(10, 2),
+                discount NUMERIC(10, 2),
+                total_amount NUMERIC(10, 2) NOT NULL,
+                amount_paid NUMERIC(10, 2),
+                status VARCHAR(20),
+                bill_type VARCHAR(20),
+                is_complimentary BOOLEAN,
+                complimentary_reason TEXT,
+                notes TEXT,
+                created_by INTEGER,
+                created_at DATETIME,
+                UNIQUE (invoice_number),
+                FOREIGN KEY(booking_id) REFERENCES bookings (id),
+                FOREIGN KEY(guest_id) REFERENCES guests (id),
+                FOREIGN KEY(created_by) REFERENCES users (id)
+            )
+        """)
+        # Copy exactly the columns that exist today (all are in the new schema);
+        # guest_id is the only new column and defaults to NULL.
+        carried = ", ".join(col_names)
+        cur.execute(f"INSERT INTO invoices_new ({carried}) SELECT {carried} FROM invoices")
+        cur.execute("DROP TABLE invoices")
+        cur.execute("ALTER TABLE invoices_new RENAME TO invoices")
+        raw.commit()
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.close()
+        logger.info("migration: rebuilt invoices (guest_id added, booking_id now nullable)")
+    finally:
+        raw.close()
+
+
 MIGRATIONS = [
     _migrate_invoices_bill_type,
     _migrate_invoices_complimentary,
+    _migrate_invoices_guest_walkin,
 ]

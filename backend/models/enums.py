@@ -50,6 +50,11 @@ class InvoiceStatus(str, enum.Enum):
     VOID = "void"
     OVERDUE = "overdue"
 
+class EditRequestStatus(str, enum.Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
 class IngredientType(str, enum.Enum):
     LIQUID = "liquid"
     POWDER = "powder"

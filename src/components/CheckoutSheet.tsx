@@ -5,6 +5,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { toast } from 'sonner';
 import { BedDouble, Receipt, UtensilsCrossed } from 'lucide-react';
 import { BillPrintView } from '@/components/BillPrint';
+import { ChargeSplitBar } from '@/components/ChargeSplitBar';
 import { formatCurrency } from '@/lib/currency';
 
 // The Clerk's checkout surface - the only place an invoice actually gets
@@ -136,6 +137,10 @@ export function CheckoutSheet({ guest, onOpenChange, onDone }: {
                 )}
                 {balance ? (
                   <>
+                    <ChargeSplitBar segments={[
+                      { label: 'Room', amount: balance.room_bill_total, colorClass: 'bg-purple-500' },
+                      { label: 'Food', amount: balance.mess_bill_total, colorClass: 'bg-orange-500' },
+                    ]} />
                     <div className="flex gap-3 flex-col sm:flex-row">
                       <BillBox title="Room Bill" icon={BedDouble} items={balance.room_items}
                         total={balance.room_bill_total} billed={balance.room_billed} accent="border-purple-300 dark:border-purple-800" />

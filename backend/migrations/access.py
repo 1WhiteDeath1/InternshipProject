@@ -15,9 +15,14 @@ _ROLE_PERMISSIONS = {
     "Manager": {
         # Oversight (read summaries, act on alerts/incidents at a supervisory level)
         "reports": "V", "audit": "V", "alerts": "VE",
-        # Money authority: sign off SPEND (POs) via the Approvals inbox. Concessions
-        # (discounts/comps) are the Clerk's job - Manager oversees them via reports.
-        "procurement": "VA",
+        # Money authority: sign off SPEND (POs) via the Approvals inbox. Discounts/
+        # complimentary bills stay the Clerk's own call, no approval, overseen only
+        # after the fact via the dashboard's Discounts figure. A Clerk CORRECTING an
+        # already-generated bill's line items (wrong rate/charge entered) is
+        # different from a discount though - that one routes through this same
+        # Approvals inbox, hence "A" only (no V/E/C - they act on the request, they
+        # don't operate Billing itself).
+        "procurement": "VA", "billing": "A",
         # Policy: rate cards and menu pricing are management decisions
         "tariffs": "VE", "womens_bloc_rates": "VE", "menu_prices": "VE",
         # Administration: staff/access, the member roster (master-data), and system config
@@ -35,9 +40,12 @@ _ROLE_PERMISSIONS = {
     },
     # Owns billing/finalization end-to-end: invoice + mess-bill discounts,
     # complimentary bills, and settlement. This is where all concessions live.
+    # No bookings:view - the booking context a Clerk needs (dates, room, rate
+    # breakdown) already surfaces inline in Clerk Desk/Checkout; the Bookings
+    # page itself is Booking NCO's create/edit workspace, not a Clerk lookup.
     "Clerk": {
         "clerk_desk": "VCEA", "billing": "VE", "mess_billing": "VEA",
-        "bookings": "V", "guests": "V", "members": "V",
+        "guests": "V", "members": "V",
         "menu_prices": "V", "tariffs": "V", "womens_bloc_rates": "V",
     },
     "Kitchen NCO": {
@@ -54,9 +62,9 @@ _ROLE_PERMISSIONS = {
     },
 }
 _ROLE_DESCRIPTIONS = {
-    "Manager": "Oversight, PO approvals, rate/pricing policy, and staff/system administration - no hands-on operational work",
-    "Deputy Manager": "Acting-manager oversight, PO approvals, and policy - no user/role admin, logs, PII, or discount authority",
-    "Clerk": "Owns billing end-to-end - invoice/mess-bill discounts, complimentary bills, and settlement",
+    "Manager": "Oversight, PO approvals, bill-correction approvals, rate/pricing policy, and staff/system administration - no hands-on operational work",
+    "Deputy Manager": "Acting-manager oversight, PO approvals, and policy - no user/role admin, logs, PII, or discount/correction authority",
+    "Clerk": "Owns billing end-to-end - invoice/mess-bill discounts, complimentary bills, and settlement; bill corrections require Manager approval",
     "Kitchen NCO": "Inventory, kitchen production, recipe costing, and raising purchase orders",
     "Booking NCO": "Front desk - bookings, guest/attendant registration, charge logging",
     "Security Guard": "Incident reports and security logs",

@@ -6,7 +6,7 @@ from backend.models.enums import (
     UserStatus, BookingStatus, RoomStatus, RoomType, POStatus, InvoiceStatus,
     IngredientType, WasteCategory, AlertSeverity, AlertStatus, AuditAction,
     MessCategory, MemberStatus, ClientCategory, MealType, AttendanceStatus,
-    LeaveStatus, MessBillStatus,
+    LeaveStatus, MessBillStatus, EditRequestStatus,
 )
 from backend.models.access import Role, RolePermission, User
 from backend.models.system import FeatureFlag, SystemSetting
@@ -23,7 +23,7 @@ from backend.models.rates import (
 )
 from backend.models.guests import Guest
 from backend.models.bookings import Booking, BookingCharge, SmsMessage, GuestMovement
-from backend.models.billing import Invoice, InvoiceItem, InvoicePayment
+from backend.models.billing import Invoice, InvoiceItem, InvoicePayment, InvoiceEditRequest
 from backend.models.security import SecurityLog, IncidentReport
 from backend.models.members import Member, MemberLeave
 from backend.models.attendance import MealAttendance
@@ -33,7 +33,7 @@ __all__ = [
     "UserStatus", "BookingStatus", "RoomStatus", "RoomType", "POStatus", "InvoiceStatus",
     "IngredientType", "WasteCategory", "AlertSeverity", "AlertStatus", "AuditAction",
     "MessCategory", "MemberStatus", "ClientCategory", "MealType", "AttendanceStatus",
-    "LeaveStatus", "MessBillStatus",
+    "LeaveStatus", "MessBillStatus", "EditRequestStatus",
     "Role", "RolePermission", "User",
     "FeatureFlag", "SystemSetting",
     "AuditLog",
@@ -45,7 +45,7 @@ __all__ = [
     "RoomRate", "DutyRate", "HraRankRate", "WomensBlocRankRate", "HraUtilityRate", "TariffRate",
     "Guest",
     "Booking", "BookingCharge", "SmsMessage", "GuestMovement",
-    "Invoice", "InvoiceItem", "InvoicePayment",
+    "Invoice", "InvoiceItem", "InvoicePayment", "InvoiceEditRequest",
     "SecurityLog", "IncidentReport",
     "Member", "MemberLeave",
     "MealAttendance",

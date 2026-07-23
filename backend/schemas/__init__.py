@@ -48,6 +48,7 @@ from backend.schemas.bookings import (
 from backend.schemas.billing import (
     GuestInvoiceSummary, InvoiceItemCreate, InvoiceBase, InvoiceItemOut, InvoiceOut,
     BookingChargeCreate, PaymentCreate, PaymentOut,
+    InvoiceEditRequestCreate, InvoiceEditRequestOut, InvoiceEditDecision,
 )
 from backend.schemas.security import (
     SecurityLogCreate, SecurityLogOut,
@@ -64,7 +65,7 @@ from backend.schemas.attendance import (
 )
 from backend.schemas.mess_billing import (
     MessBillOut, GuestMealChargeCreate, GuestMealChargeOut,
-    DiscountApplyRequest, ComplimentaryRequest,
+    DiscountApplyRequest,
 )
 
 __all__ = [
@@ -95,6 +96,7 @@ __all__ = [
     "GuestBookingSummary", "BookingBase", "BookingCreate", "BookingUpdate", "BookingOut", "GuestMovementOut",
     "GuestInvoiceSummary", "InvoiceItemCreate", "InvoiceBase", "InvoiceItemOut", "InvoiceOut",
     "BookingChargeCreate", "PaymentCreate", "PaymentOut",
+    "InvoiceEditRequestCreate", "InvoiceEditRequestOut", "InvoiceEditDecision",
     "SecurityLogCreate", "SecurityLogOut",
     "IncidentReportBase", "IncidentReportCreate", "IncidentReportUpdate", "IncidentReportOut",
     "MemberBase", "MemberCreate", "MemberUpdate", "MemberStatusChange", "MemberOut",
@@ -103,5 +105,5 @@ __all__ = [
     "AttendanceMarkRequest", "BulkAttendanceCreate", "AttendanceLookupResult",
     "ServeAttendanceRequest", "NoShowSweepResult",
     "MessBillOut", "GuestMealChargeCreate", "GuestMealChargeOut",
-    "DiscountApplyRequest", "ComplimentaryRequest",
+    "DiscountApplyRequest",
 ]

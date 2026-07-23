@@ -68,3 +68,32 @@ class PaymentOut(BaseModel):
     notes: Optional[str] = None
     received_by: Optional[int] = None
     created_at: datetime
+
+
+class InvoiceEditRequestCreate(BaseModel):
+    proposed_description: str = Field(..., min_length=1, max_length=255)
+    proposed_unit_price: float = Field(..., ge=0)
+    reason: str = Field(..., min_length=1)
+
+class InvoiceEditRequestOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    invoice_id: int
+    invoice_item_id: int
+    bill_type: str
+    original_description: str
+    original_unit_price: float
+    proposed_description: str
+    proposed_unit_price: float
+    reason: str
+    status: str
+    requested_by_name: Optional[str] = None
+    requested_at: datetime
+    decided_by_name: Optional[str] = None
+    decided_at: Optional[datetime] = None
+    decision_reason: Optional[str] = None
+    guest_name: Optional[str] = None
+    room_number: Optional[str] = None
+
+class InvoiceEditDecision(BaseModel):
+    reason: Optional[str] = None

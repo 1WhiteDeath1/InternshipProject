@@ -7,13 +7,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   TrendingUp, Package, AlertTriangle, Receipt, DollarSign, Trash2,
   BedDouble, LogIn, LogOut, Wallet, ArrowRight, ShieldAlert, UtensilsCrossed,
-  Truck, ChefHat, IdCard, LayoutGrid, ClipboardCheck,
+  Truck, ChefHat, IdCard, LayoutGrid, ClipboardCheck, Percent, CalendarDays,
 } from 'lucide-react';
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
 import { RoomStatusDonut } from '@/components/RoomStatusDonut';
+import { ChargeSplitBar } from '@/components/ChargeSplitBar';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { formatCurrency } from '@/lib/currency';
@@ -63,6 +64,16 @@ interface UnsettledInvoice {
 }
 
 interface MonthSummary { month: string; occupancy_rate: number; bookings_count: number; revenue: number; }
+
+interface BillingStats {
+  today_revenue: number; today_invoice_count: number; month_revenue: number; overdue_invoices: number;
+  today_collections: number; month_collections: number; payment_methods_today: { method: string; amount: number }[];
+  today_room_revenue: number; today_mess_revenue: number; today_discounts: number;
+}
+
+const PAYMENT_METHOD_COLORS: Record<string, string> = {
+  Cash: 'bg-emerald-500', 'Bank Transfer': 'bg-blue-500', Cheque: 'bg-amber-500', Online: 'bg-violet-500',
+};
 
 // Hero figures drop the paise - "Rs 12,340" reads from across the room,
 // "Rs 12,340.00" doesn't.
@@ -119,10 +130,13 @@ export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [occupancy, setOccupancy] = useState<OccupancyData | null>(null);
   const [unsettled, setUnsettled] = useState<UnsettledInvoice[]>([]);
+  const [billingStats, setBillingStats] = useState<BillingStats | null>(null);
   const [revenueTrend, setRevenueTrend] = useState<{ labels: string[]; values: number[] } | null>(null);
   const [occupancyTrend, setOccupancyTrend] = useState<{ labels: string[]; values: number[] } | null>(null);
   const [months, setMonths] = useState<MonthSummary[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const isClerk = hasPermission(user, 'clerk_desk', 'view');
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -134,6 +148,10 @@ export default function Dashboard() {
       const common = [
         api.get('/bookings/occupancy').then(res => setOccupancy(res.data)),
         ...(canSeeDesk ? [api.get('/billing/desk').then(res => setUnsettled(res.data.unsettled_invoices || []))] : []),
+        // The Clerk's own cashier figures (collections, payment mix, room/mess
+        // split, discounts given) - not part of the cross-module reports.view
+        // board, so fetched separately, gated on the same billing.view Clerk has.
+        ...(isClerk ? [api.get('/billing/dashboard-stats').then(res => setBillingStats(res.data))] : []),
       ];
       const supervisor = hasPermission(user, 'reports', 'view') ? [
         api.get('/reports/dashboard').then(res => setStats(res.data)),
@@ -145,7 +163,7 @@ export default function Dashboard() {
         .catch(() => toast.error('Failed to load dashboard data'))
         .finally(() => setLoading(false));
     });
-  }, [user]);
+  }, [user, isClerk]);
 
   const gridStroke = darkMode ? '#374151' : '#E5E7EB';
   const tickFill = darkMode ? '#9CA3AF' : '#6B7280';
@@ -237,6 +255,51 @@ export default function Dashboard() {
       </div>
     </SectionCard>
   );
+
+  // ---- Clerk view: cashier/billing-finalization figures, not occupancy -
+  // that's Booking Staff's job. Collections (cash actually received today,
+  // distinct from revenue billed), the settle queue, room/mess revenue mix,
+  // payment-method reconciliation, and discounts given (the Clerk's own
+  // approval authority, watched for leakage). clerk_desk permission is
+  // exclusive to the Clerk role, so this check alone identifies them. ----
+  if (isClerk && !hasPermission(user, 'reports', 'view')) {
+    const paymentSegments = (billingStats?.payment_methods_today ?? []).map(p => ({
+      label: p.method, amount: p.amount, colorClass: PAYMENT_METHOD_COLORS[p.method] || 'bg-gray-400',
+    }));
+    return (
+      <div className="space-y-6">
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Welcome, {user?.full_name}</h1>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <HeroTile label="Today's Collections" value={<StatValue loading={loading} value={bigMoney(billingStats?.today_collections)} />}
+            sub="Payments actually received today"
+            icon={Wallet} tone="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600" />
+          <HeroTile label="This Month's Collections" value={<StatValue loading={loading} value={bigMoney(billingStats?.month_collections)} />}
+            sub="Received month-to-date"
+            icon={CalendarDays} tone="bg-blue-100 dark:bg-blue-900/30 text-blue-600" />
+          <HeroTile label="Outstanding to Collect" value={<StatValue loading={loading} value={bigMoney(billsAmount)} />}
+            sub={billGroups.length > 0 ? `${billGroups.length} guest${billGroups.length > 1 ? 's' : ''} pending` : 'All collected'}
+            icon={AlertTriangle} tone="bg-purple-100 dark:bg-purple-900/30 text-purple-600" onClick={() => navigate('/clerk-desk')} alert={billGroups.length > 0} />
+          <HeroTile label="Discounts Given Today" value={<StatValue loading={loading} value={bigMoney(billingStats?.today_discounts)} />}
+            sub="Concessions granted"
+            icon={Percent} tone="bg-pink-100 dark:bg-pink-900/30 text-pink-600" />
+        </div>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <SectionCard title="Room vs Mess — Today">
+            <ChargeSplitBar className="py-2" segments={[
+              { label: 'Room', amount: billingStats?.today_room_revenue ?? 0, colorClass: 'bg-purple-500' },
+              { label: 'Food', amount: billingStats?.today_mess_revenue ?? 0, colorClass: 'bg-orange-500' },
+            ]} />
+          </SectionCard>
+          <SectionCard title="Payments Collected — Today">
+            {paymentSegments.length > 0
+              ? <ChargeSplitBar className="py-2" segments={paymentSegments} />
+              : <p className="text-base text-gray-400">No payments recorded yet today</p>}
+          </SectionCard>
+        </div>
+        {billsWidget}
+      </div>
+    );
+  }
 
   // ---- Operations-only view: anyone without the cross-module reports permission ----
   if (!hasPermission(user, 'reports', 'view')) {

@@ -26,8 +26,8 @@ import { QuickIncidentModal } from '@/components/QuickIncidentModal';
 const quickActionDefs: {
   key: string; label: string; icon: typeof Plus; match: (path: string) => boolean; variant?: 'default' | 'secondary';
 }[] = [
-  { key: 'booking', label: 'New Booking', icon: Plus, match: p => p.startsWith('/bookings') || p.startsWith('/clerk-desk') },
-  { key: 'charge', label: 'Log Charge', icon: ReceiptIcon, match: p => p.startsWith('/billing') || p.startsWith('/clerk-desk'), variant: 'secondary' },
+  { key: 'booking', label: 'New Booking', icon: Plus, match: p => p.startsWith('/bookings') },
+  { key: 'charge', label: 'Log Charge', icon: ReceiptIcon, match: p => p.startsWith('/billing'), variant: 'secondary' },
   { key: 'scan', label: 'Scan Receipt', icon: Camera, match: p => p.startsWith('/stock') },
   { key: 'attendant', label: 'Add Attendant', icon: UserCircle2, match: p => p.startsWith('/attendants') },
   { key: 'member', label: 'Add Member', icon: IdCard, match: p => p.startsWith('/members') },

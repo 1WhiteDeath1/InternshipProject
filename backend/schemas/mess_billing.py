@@ -50,7 +50,3 @@ class DiscountApplyRequest(BaseModel):
         if (self.discount_rate is None) == (self.discount_amount is None):
             raise ValueError("Provide exactly one of discount_rate or discount_amount")
         return self
-
-class ComplimentaryRequest(BaseModel):
-    is_complimentary: bool = True
-    reason: str = Field(..., min_length=1)

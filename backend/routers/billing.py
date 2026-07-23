@@ -10,9 +10,13 @@ from sqlalchemy.orm import Session, joinedload
 from backend.database import get_db
 from backend.models import (
     Invoice, InvoiceItem, InvoicePayment, Booking, BookingCharge, InvoiceStatus,
-    ClientCategory, MealAttendance, KitchenOrder, MenuPrice,
+    ClientCategory, MealAttendance, KitchenOrder, MenuPrice, User, Guest,
+    InvoiceEditRequest, EditRequestStatus,
 )
-from backend.schemas import InvoiceItemCreate, BookingChargeCreate, PaymentCreate, DiscountApplyRequest, ComplimentaryRequest
+from backend.schemas import (
+    InvoiceItemCreate, BookingChargeCreate, PaymentCreate, DiscountApplyRequest,
+    InvoiceEditRequestCreate, InvoiceEditDecision,
+)
 from backend.auth import get_current_user, check_permission
 from backend.audit import log_audit, serialize_model, AuditAction
 from backend.logging_config import get_logger
@@ -34,18 +38,31 @@ def _meal_multiplier(db: Session, booking: Booking) -> float:
     return 1.0
 
 
-def _build_invoice(db: Session, booking: Booking, items: list, current_user, issue_date: date, due_date: date, tax_amount: float = 0.0, discount: float = 0.0, notes: str = None, bill_type: str = "combined") -> Invoice:
-    """Shared invoice-assembly logic used by both the manual create_invoice
-    endpoint and Instant Checkout: scales meal-charge line items by the
-    booking's client-category multiplier, assigns a race-free invoice number,
-    and creates the InvoiceItem rows."""
-    meal_multiplier = _meal_multiplier(db, booking)
+def _walkin_meal_multiplier(db: Session) -> float:
+    """Meal-charge multiplier for a standalone walk-in guest. No Booking, so
+    no client_category - a walk-in mess guest is a non-member civilian, the
+    same tier a civilian room guest bills at."""
+    return get_setting_float(db, "civilian_meal_multiplier", 1.0)
+
+
+def _build_invoice(db: Session, booking: Booking, items: list, current_user, issue_date: date, due_date: date, tax_amount: float = 0.0, discount: float = 0.0, notes: str = None, bill_type: str = "combined", *, guest: Guest = None) -> Invoice:
+    """Shared invoice-assembly logic used by Instant Checkout (room stay) and
+    the walk-in mess bill: scales meal-charge line items by the owner's
+    client-category multiplier, assigns a race-free invoice number, and
+    creates the InvoiceItem rows. Owner is a Booking (booking passed) or a
+    standalone walk-in Guest (guest= passed) - exactly one."""
+    if booking is not None:
+        meal_multiplier = _meal_multiplier(db, booking)
+        owner = {"booking_id": booking.id, "guest_id": None}
+    else:
+        meal_multiplier = _walkin_meal_multiplier(db)
+        owner = {"booking_id": None, "guest_id": guest.id}
 
     effective_prices = [(item.unit_price * meal_multiplier if item.is_meal_charge else item.unit_price) for item in items]
     total = sum(price * item.quantity for price, item in zip(effective_prices, items))
 
     invoice = Invoice(
-        invoice_number=f"TMP-{uuid.uuid4().hex}", booking_id=booking.id,
+        invoice_number=f"TMP-{uuid.uuid4().hex}", **owner,
         issue_date=issue_date, due_date=due_date,
         subtotal=total, tax_amount=tax_amount,
         discount=discount, total_amount=total + tax_amount - discount,
@@ -101,7 +118,7 @@ async def list_invoices(
 
     return {"items": [
         {"id": inv.id, "invoice_number": inv.invoice_number, "booking_id": inv.booking_id,
-         "guest_name": inv.booking.guest_name if inv.booking else None,
+         "guest_name": inv.booking.guest_name if inv.booking else (inv.guest.full_name if inv.guest else None),
          "room_number": inv.booking.room.room_number if inv.booking and inv.booking.room else None,
          "issue_date": inv.issue_date, "due_date": inv.due_date,
          "subtotal": float(inv.subtotal), "tax_amount": float(inv.tax_amount),
@@ -290,6 +307,169 @@ async def running_balance(booking_id: int, db: Session = Depends(get_db), curren
     return _running_balance_payload(db, booking)
 
 
+# --- Walk-in mess-only guests (meals consumed, no room booking) ---
+
+def _gather_walkin_items(db: Session, guest: Guest):
+    """Everything not yet invoiced for a standalone walk-in guest: their
+    unbilled MealAttendance rows (guest_id set, no booking), priced via
+    MenuPrice and scaled by the walk-in (civilian) multiplier. The guest-side
+    analogue of _gather_unbilled_items - mess only, since a walk-in has no
+    room, no BookingCharges, and KitchenOrder carries no guest_id."""
+    mess_items, unpriced = [], []
+    routine_meals = 0.0
+    meal_multiplier = _walkin_meal_multiplier(db)
+    attendance_rows = db.query(MealAttendance).filter(
+        MealAttendance.guest_id == guest.id, MealAttendance.invoiced_at.is_(None),
+        MealAttendance.status.in_(["booked", "attended", "no_show"]),
+    ).all()
+    for a in attendance_rows:
+        price = _resolve_menu_price(db, a.recipe_id)
+        if a.status == "no_show":
+            label = f"No-Show Charge ({a.date.strftime('%d %b')} {a.meal_type.value.title()})"
+        else:
+            label = f"{a.meal_type.value.title()} - {a.recipe.name if a.recipe else 'meal'}"
+        if price > 0:
+            mess_items.append(InvoiceItemCreate(description=label, quantity=1, unit_price=price, is_meal_charge=True))
+            routine_meals += price * meal_multiplier
+        else:
+            unpriced.append(label)
+    return {"mess_items": mess_items, "unpriced": unpriced,
+            "attendance_rows": attendance_rows, "routine_meals": routine_meals}
+
+
+def _guest_bill_header(guest: Guest) -> dict:
+    """Printable-bill header for a walk-in guest - name/address only, none of
+    the room/PA/voucher fields a room stay carries (they don't exist here)."""
+    return {
+        "guest_name": guest.full_name, "rank": None,
+        "pa_number": None, "unit_address": guest.unit_address,
+        "room_number": None, "check_in": None, "check_out": None,
+        "reference_person": None, "source": "walk_in", "online_voucher_no": None,
+        "booking_reference": f"WALKIN-{guest.id}",
+    }
+
+
+def _guest_running_balance_payload(db: Session, guest: Guest) -> dict:
+    """Read-only unbilled mess balance for one walk-in guest. Mirrors the
+    booking running-balance shape (room side always empty/zero) so the same
+    Clerk Desk card/checkout components render it unchanged."""
+    gathered = _gather_walkin_items(db, guest)
+    invoices = db.query(Invoice).filter(
+        Invoice.guest_id == guest.id, Invoice.status != InvoiceStatus.VOID,
+    ).all()
+    mess_billed = any(inv.bill_type == "mess" for inv in invoices)
+    mess_items = [] if mess_billed else gathered["mess_items"]
+    mess_bill = 0.0 if mess_billed else gathered["routine_meals"]
+    outstanding = sum(float(i.total_amount) - float(i.amount_paid) for i in invoices)
+    meal_multiplier = _walkin_meal_multiplier(db)
+    preview = lambda item: {  # noqa: E731
+        "description": item.description,
+        "amount": round((item.unit_price * meal_multiplier if item.is_meal_charge else item.unit_price) * item.quantity, 2),
+    }
+    return {
+        "room_amount": 0.0, "routine_meals_amount": gathered["routine_meals"],
+        "ala_carte_amount": 0.0, "room_charges_amount": 0.0, "mess_charges_amount": 0.0,
+        "room_bill_total": 0.0, "mess_bill_total": mess_bill,
+        "room_items": [], "mess_items": [preview(i) for i in mess_items],
+        "total": mess_bill, "outstanding_invoices": outstanding,
+        "balance_due": mess_bill + outstanding,
+        "unpriced_items": gathered["unpriced"],
+        "room_billed": True, "mess_billed": mess_billed,
+    }
+
+
+@router.get("/guests/{guest_id}/running-balance")
+async def guest_running_balance(guest_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "billing", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    guest = db.query(Guest).filter(Guest.id == guest_id).first()
+    if not guest:
+        raise HTTPException(status_code=404, detail="Guest not found")
+    return _guest_running_balance_payload(db, guest)
+
+
+@router.post("/guests/{guest_id}/mess-bill")
+async def generate_guest_mess_bill(guest_id: int, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Compiles a walk-in guest's unbilled meals into one mess invoice - the
+    Mess-Only page's equivalent of Instant Checkout. Clerk-only (generating a
+    bill is the Clerk's job); Booking/Kitchen staff only log the meals."""
+    if not check_permission(current_user, "clerk_desk", "create"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    guest = db.query(Guest).filter(Guest.id == guest_id).first()
+    if not guest:
+        raise HTTPException(status_code=404, detail="Guest not found")
+
+    gathered = _gather_walkin_items(db, guest)
+    if not gathered["mess_items"]:
+        raise HTTPException(status_code=400, detail="No unbilled meals to invoice for this guest")
+
+    today = date.today()
+    invoice = _build_invoice(db, None, gathered["mess_items"], current_user, today, today, bill_type="mess", guest=guest)
+    now = datetime.utcnow()
+    for a in gathered["attendance_rows"]:
+        a.invoiced_at = now
+    db.commit()
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "invoices", invoice.id,
+              after_state=serialize_model(invoice), ip_address=request.client.host)
+    return {
+        "invoices": [_invoice_out(invoice)],
+        "guest": _guest_bill_header(guest),
+        "unpriced_items": gathered["unpriced"],
+        "grand_total": float(invoice.total_amount),
+        "balance_due": float(invoice.total_amount),
+    }
+
+
+@router.get("/mess-only-desk")
+async def mess_only_desk(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """The Mess-Only worklist: every walk-in guest with unbilled meals (each
+    with their running mess balance), plus every unsettled guest-only mess
+    invoice. Guest-only invoices are kept OFF the main /desk feed and live
+    here instead, so the two pages don't double-list the same bill."""
+    if not (check_permission(current_user, "clerk_desk", "view") or check_permission(current_user, "billing", "view")):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    today = date.today()
+    # Guests with at least one unbilled, billable meal and no active room stay
+    # (a checked-in guest bills through checkout, not here).
+    checked_in_guest_ids = {gid for (gid,) in db.query(Booking.guest_id).filter(
+        Booking.status == "checked_in", Booking.guest_id.isnot(None)).all()}
+    guest_ids = {gid for (gid,) in db.query(MealAttendance.guest_id).filter(
+        MealAttendance.guest_id.isnot(None), MealAttendance.invoiced_at.is_(None),
+        MealAttendance.status.in_(["booked", "attended", "no_show"]),
+    ).all()} - checked_in_guest_ids
+    guests = db.query(Guest).filter(Guest.id.in_(guest_ids)).all() if guest_ids else []
+
+    items = []
+    for g in guests:
+        bal = _guest_running_balance_payload(db, g)
+        if bal["mess_bill_total"] <= 0.01 and not bal["unpriced_items"]:
+            continue  # nothing priced to bill
+        items.append({
+            "id": g.id, "guest_name": g.full_name, "rank": None,
+            "room_number": None, "status": "walk_in", "balance": bal,
+        })
+
+    open_invoices = db.query(Invoice).filter(
+        Invoice.guest_id.isnot(None), Invoice.status.in_((InvoiceStatus.DRAFT, InvoiceStatus.ISSUED)),
+    ).order_by(Invoice.created_at.desc()).all()
+    unsettled = []
+    for inv in open_invoices:
+        balance = float(inv.total_amount) - float(inv.amount_paid)
+        if balance <= 0.01:
+            continue
+        g = inv.guest
+        unsettled.append({
+            "id": inv.id, "invoice_number": inv.invoice_number, "bill_type": "mess",
+            "total_amount": float(inv.total_amount), "amount_paid": float(inv.amount_paid),
+            "balance_due": balance, "guest_id": inv.guest_id,
+            "guest_name": g.full_name if g else None, "rank": None, "room_number": None,
+            "issue_date": inv.issue_date, "checking_out_now": False,
+            "overdue": bool(inv.due_date and inv.due_date < today and balance > 0.01),
+            "issued_today": bool(inv.issue_date == today),
+        })
+    return {"items": items, "unsettled_invoices": unsettled}
+
+
 def _bill_exists(bill_type: str):
     """EXISTS clause: this booking already has a live bill of this type.
     Legacy 'combined' invoices cover both types."""
@@ -327,10 +507,12 @@ async def clerk_desk(db: Session = Depends(get_db), current_user=Depends(get_cur
     ).order_by(Booking.actual_check_out.desc()).all()
 
     # Unsettled bills: anything live with money still owing. Legacy invoices
-    # predate the created-as-issued rule, so 'draft' is included too.
+    # predate the created-as-issued rule, so 'draft' is included too. Guest-only
+    # walk-in mess invoices are excluded here - they live on the Mess-Only page.
     today = date.today()
     open_invoices = db.query(Invoice).options(joinedload(Invoice.booking).joinedload(Booking.room)).filter(
         Invoice.status.in_((InvoiceStatus.DRAFT, InvoiceStatus.ISSUED)),
+        Invoice.guest_id.is_(None),
     ).order_by(Invoice.created_at.desc()).all()
     unsettled = []
     for inv in open_invoices:
@@ -349,6 +531,9 @@ async def clerk_desk(db: Session = Depends(get_db), current_user=Depends(get_cur
             "issue_date": inv.issue_date,
             # The guest is standing at the desk right now - settle these first.
             "checking_out_now": bool(b and b.actual_check_out and b.actual_check_out.date() == today),
+            # State flags so the frontend can colour without re-deriving.
+            "overdue": bool(inv.due_date and inv.due_date < today and balance > 0.01),
+            "issued_today": bool(inv.issue_date == today),
         })
     unsettled.sort(key=lambda r: not r["checking_out_now"])  # stable: keeps newest-first within each group
 
@@ -423,7 +608,7 @@ def _invoice_out(inv: Invoice) -> dict:
         "total_amount": float(inv.total_amount), "amount_paid": float(inv.amount_paid),
         "balance_due": float(inv.total_amount) - float(inv.amount_paid),
         "status": inv.status.value, "is_complimentary": bool(inv.is_complimentary),
-        "items": [{"description": i.description, "quantity": float(i.quantity),
+        "items": [{"id": i.id, "description": i.description, "quantity": float(i.quantity),
                    "unit_price": float(i.unit_price), "total_price": float(i.total_price)} for i in inv.items],
     }
 
@@ -433,13 +618,16 @@ async def instant_checkout(booking_id: int, request: Request, bill_types: Option
                             db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """Compiles all unbilled charges for a checked-in guest - room charges
     (guest room charges + dhobi/breakage/allied...) and mess charges
-    (routine meals, a la carte, extra messing...) - into ONE final invoice,
-    the Clerk's single combined bill. bill_types selects which side to
-    include now - defaults to both, but either can be settled alone and the
-    other finalized later (e.g. an a la carte order still pending); if both
-    happen to be billed in the same call they land on the SAME invoice, not
-    two. No advance is applied - payment is settled here at checkout, via the
-    Pay Together / per-bill payment actions the print dialog offers.
+    (routine meals, a la carte, extra messing...) - into a room invoice
+    and/or a mess invoice. bill_types selects which side to include now -
+    defaults to both, but either can be settled alone and the other
+    finalized later (e.g. an a la carte order still pending). When both
+    sides are billed in the same call they land on two separate invoices
+    (kept detailed - room-only and mess-only rows, not merged), and the
+    Clerk's print dialog offers a Room / Mess / Combined toggle over them
+    (the combined view row-merges both via GET .../master-invoice). No
+    advance is applied - payment is settled here at checkout, via the Pay
+    Together / per-bill payment actions the print dialog offers.
     Guest/booking-only - members settle through the monthly Mess Bill cycle
     instead."""
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
@@ -491,23 +679,19 @@ async def instant_checkout(booking_id: int, request: Request, bill_types: Option
 
     today = date.today()
     now = datetime.utcnow()
-    # One invoice, not two: when both sides are being billed in this call
-    # they're merged into a single combined bill; if only one side has
-    # anything to bill right now, the invoice is labeled for just that side
-    # (still a single row, matching what a later "generate remaining bill"
-    # call for the other side would also produce).
-    if room_items and mess_items:
-        bill_type = "combined"
-    elif room_items:
-        bill_type = "room"
-    else:
-        bill_type = "mess"
-    invoice = _build_invoice(db, booking, room_items + mess_items, current_user, today, today, bill_type=bill_type)
+    # Room and mess stay on separate invoices even when billed in the same
+    # call, so each keeps its own detailed rows (Guest Room Charges / Extra
+    # Mattress on one side, Extra Messing / Sui Gas / per-meal rows on the
+    # other) - the print dialog's Combined view row-merges them for display
+    # without losing that per-invoice detail.
+    invoices = []
     if room_items:
+        invoices.append(_build_invoice(db, booking, room_items, current_user, today, today, bill_type="room"))
         for c in gathered["charge_rows"]:
             if not c.is_mess_charge:
                 c.invoiced_at = now
     if mess_items:
+        invoices.append(_build_invoice(db, booking, mess_items, current_user, today, today, bill_type="mess"))
         for a in gathered["attendance_rows"]:
             a.invoiced_at = now
         for o in gathered["ala_carte_orders"]:
@@ -516,7 +700,6 @@ async def instant_checkout(booking_id: int, request: Request, bill_types: Option
             if c.is_mess_charge:
                 c.invoiced_at = now
     db.commit()
-    invoices = [invoice]
 
     for inv in invoices:
         log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "invoices", inv.id,
@@ -614,42 +797,18 @@ def _live_invoices_for_master(db: Session, booking_id: int):
     return invoices
 
 
-@router.post("/bookings/{booking_id}/master-invoice/complimentary")
-async def master_invoice_complimentary(booking_id: int, data: ComplimentaryRequest, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    """Marks the WHOLE stay complimentary in one action - every live invoice
-    (room + mess) for this booking, not just one. Clerk-only, admin-granted."""
-    if not check_permission(current_user, "clerk_desk", "approve"):
-        raise HTTPException(status_code=403, detail="Permission denied")
-    invoices = _live_invoices_for_master(db, booking_id)
-
-    for inv in invoices:
-        before = serialize_model(inv)
-        if data.is_complimentary:
-            inv.discount = float(inv.subtotal)
-            inv.tax_amount = 0
-            inv.total_amount = 0
-            inv.is_complimentary = True
-            inv.complimentary_reason = data.reason
-        else:
-            inv.is_complimentary = False
-            inv.complimentary_reason = None
-            inv.discount = 0
-            inv.total_amount = float(inv.subtotal) + float(inv.tax_amount)
-        db.commit()
-        db.refresh(inv)
-        log_audit(db, current_user.id, current_user.full_name, AuditAction.OVERRIDE, "invoices", inv.id,
-                  before_state=before, after_state=serialize_model(inv), reason=data.reason, ip_address=request.client.host)
-
-    return {"booking_id": booking_id, "is_complimentary": data.is_complimentary,
-            "total_amount": sum(float(inv.total_amount) for inv in invoices)}
-
-
 @router.post("/bookings/{booking_id}/master-invoice/discount")
 async def master_invoice_discount(booking_id: int, data: DiscountApplyRequest, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    """Applies one discount across the WHOLE stay's live invoices at once. A
-    rate applies independently to each invoice's own subtotal; a flat amount
-    is split proportionally by each invoice's share of the combined
-    subtotal (the last invoice absorbs any rounding remainder)."""
+    """The single discount action for a stay's final bill: applies one
+    discount across the WHOLE stay's live invoices at once (works whether
+    there's one combined invoice or two, e.g. room + mess billed
+    separately). A rate applies independently to each invoice's own
+    subtotal; a flat amount is split proportionally by each invoice's share
+    of the combined subtotal (the last invoice absorbs any rounding
+    remainder). A discount that fully offsets an invoice's subtotal (a
+    100% rate, or a flat amount covering it) is what "complimentary" is -
+    there's no separate complimentary action; is_complimentary is derived
+    here from the resulting total."""
     if not check_permission(current_user, "clerk_desk", "approve"):
         raise HTTPException(status_code=403, detail="Permission denied")
     invoices = _live_invoices_for_master(db, booking_id)
@@ -671,12 +830,163 @@ async def master_invoice_discount(booking_id: int, data: DiscountApplyRequest, r
             remaining -= share
         inv.discount = inv_discount
         inv.total_amount = float(inv.subtotal) + float(inv.tax_amount) - inv_discount
+        if inv.total_amount <= 0.01:
+            inv.is_complimentary = True
+            inv.complimentary_reason = data.reason
+        else:
+            inv.is_complimentary = False
+            inv.complimentary_reason = None
         db.commit()
         db.refresh(inv)
         log_audit(db, current_user.id, current_user.full_name, AuditAction.OVERRIDE, "invoices", inv.id,
                   before_state=before, after_state=serialize_model(inv), reason=data.reason, ip_address=request.client.host)
 
     return {"booking_id": booking_id, "total_amount": sum(float(inv.total_amount) for inv in invoices)}
+
+
+def _invoice_edit_request_out(db: Session, req: InvoiceEditRequest) -> dict:
+    inv = req.invoice
+    booking = inv.booking if inv else None
+    requester = db.query(User).filter(User.id == req.requested_by).first() if req.requested_by else None
+    decider = db.query(User).filter(User.id == req.decided_by).first() if req.decided_by else None
+    return {
+        "id": req.id, "invoice_id": req.invoice_id, "invoice_item_id": req.invoice_item_id,
+        "bill_type": inv.bill_type if inv else "combined",
+        "original_description": req.original_description, "original_unit_price": float(req.original_unit_price),
+        "proposed_description": req.proposed_description, "proposed_unit_price": float(req.proposed_unit_price),
+        "reason": req.reason, "status": req.status.value,
+        "requested_by_name": requester.full_name if requester else None,
+        "requested_at": req.requested_at,
+        "decided_by_name": decider.full_name if decider else None,
+        "decided_at": req.decided_at, "decision_reason": req.decision_reason,
+        "guest_name": booking.guest_name if booking else None,
+        "room_number": booking.room.room_number if booking and booking.room else None,
+    }
+
+
+@router.post("/invoice-items/{item_id}/edit-request")
+async def request_invoice_item_edit(item_id: int, data: InvoiceEditRequestCreate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """A Clerk-proposed correction to one line on an already-generated bill
+    (wrong room rate, wrong mess charge...) - sits pending until a Manager
+    approves (POST .../approve) or rejects (POST .../reject) it. Scoped to
+    description/unit_price only; quantity is untouched. Distinct from the
+    discount/complimentary action on Invoice, which stays Clerk-autonomous
+    with no approval step."""
+    if not check_permission(current_user, "billing", "edit"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    item = db.query(InvoiceItem).filter(InvoiceItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Invoice item not found")
+    inv = item.invoice
+    if inv.status in (InvoiceStatus.VOID, InvoiceStatus.PAID):
+        raise HTTPException(status_code=400, detail=f"Cannot request a correction on an invoice with status '{inv.status.value}'")
+    existing = db.query(InvoiceEditRequest).filter(
+        InvoiceEditRequest.invoice_item_id == item_id, InvoiceEditRequest.status == EditRequestStatus.PENDING,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="This line already has a correction pending approval")
+
+    req = InvoiceEditRequest(
+        invoice_item_id=item.id, invoice_id=inv.id,
+        original_description=item.description, original_unit_price=item.unit_price,
+        proposed_description=data.proposed_description, proposed_unit_price=data.proposed_unit_price,
+        reason=data.reason, requested_by=current_user.id,
+    )
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "invoice_edit_requests", req.id,
+              after_state=serialize_model(req), ip_address=request.client.host)
+    return _invoice_edit_request_out(db, req)
+
+
+@router.get("/edit-requests")
+async def list_edit_requests(status: str = "pending", db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Used both by the Clerk (their own submitted requests) and the Manager
+    (the approval queue) - whichever side of the workflow the caller has
+    permission for."""
+    if not (check_permission(current_user, "billing", "edit") or check_permission(current_user, "billing", "approve")):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    query = db.query(InvoiceEditRequest)
+    if status:
+        try:
+            query = query.filter(InvoiceEditRequest.status == EditRequestStatus(status))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="status must be pending, approved, or rejected")
+    reqs = query.order_by(InvoiceEditRequest.requested_at.desc()).all()
+    return [_invoice_edit_request_out(db, r) for r in reqs]
+
+
+def _recompute_invoice_totals(inv: Invoice):
+    subtotal = sum(float(i.total_price) for i in inv.items)
+    inv.subtotal = subtotal
+    inv.total_amount = subtotal + float(inv.tax_amount) - float(inv.discount)
+
+
+@router.post("/edit-requests/{request_id}/approve")
+async def approve_edit_request(request_id: int, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Manager-only: applies the proposed correction to the invoice item and
+    recomputes the parent invoice's subtotal/total from all its items."""
+    if not check_permission(current_user, "billing", "approve"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    req = db.query(InvoiceEditRequest).filter(InvoiceEditRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Edit request not found")
+    if req.status != EditRequestStatus.PENDING:
+        raise HTTPException(status_code=400, detail=f"Request already {req.status.value}")
+
+    item = req.invoice_item
+    inv = req.invoice
+    before_item = serialize_model(item)
+    before_inv = serialize_model(inv)
+
+    item.description = req.proposed_description
+    item.unit_price = float(req.proposed_unit_price)
+    item.total_price = float(req.proposed_unit_price) * item.quantity
+    _recompute_invoice_totals(inv)
+
+    if float(inv.total_amount) < float(inv.amount_paid) - 0.01:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="This correction would reduce the bill below what's already been paid - void and reissue instead")
+
+    req.status = EditRequestStatus.APPROVED
+    req.decided_by = current_user.id
+    req.decided_at = datetime.utcnow()
+    db.commit()
+    db.refresh(item)
+    db.refresh(inv)
+    db.refresh(req)
+
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.OVERRIDE, "invoice_items", item.id,
+              before_state=before_item, after_state=serialize_model(item), reason=req.reason, ip_address=request.client.host)
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.OVERRIDE, "invoices", inv.id,
+              before_state=before_inv, after_state=serialize_model(inv), reason=f"Line item correction approved: {req.reason}", ip_address=request.client.host)
+    return _invoice_edit_request_out(db, req)
+
+
+@router.post("/edit-requests/{request_id}/reject")
+async def reject_edit_request(request_id: int, data: InvoiceEditDecision, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "billing", "approve"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    if not data.reason:
+        raise HTTPException(status_code=400, detail="A reason is required to reject a correction request")
+    req = db.query(InvoiceEditRequest).filter(InvoiceEditRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Edit request not found")
+    if req.status != EditRequestStatus.PENDING:
+        raise HTTPException(status_code=400, detail=f"Request already {req.status.value}")
+
+    before = serialize_model(req)
+    req.status = EditRequestStatus.REJECTED
+    req.decided_by = current_user.id
+    req.decided_at = datetime.utcnow()
+    req.decision_reason = data.reason
+    db.commit()
+    db.refresh(req)
+
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.OVERRIDE, "invoice_edit_requests", req.id,
+              before_state=before, after_state=serialize_model(req), reason=data.reason, ip_address=request.client.host)
+    return _invoice_edit_request_out(db, req)
 
 
 @router.get("/invoices/{invoice_id}/print-data")
@@ -700,11 +1010,15 @@ async def invoice_print_data(invoice_id: int, db: Session = Depends(get_db), cur
     verify_hash = hashlib.sha256(
         f"{inv.id}|{inv.invoice_number}|{float(inv.total_amount):.2f}|{inv.issue_date.isoformat()}".encode()
     ).hexdigest()[:12].upper()
+    # Header: a room stay uses the full booking-register header; a walk-in
+    # mess guest uses the name-only guest header (no room/PA/voucher fields).
+    header = _booking_bill_header(booking) if booking else (_guest_bill_header(inv.guest) if inv.guest else None)
+    guest_line = _guest_display_name(booking) if booking else (inv.guest.full_name if inv.guest else None)
     payload = "\n".join(filter(None, [
         mess_name,
         f"{bill_label}: {inv.invoice_number}",
         "COMPLIMENTARY" if inv.is_complimentary else None,
-        f"Guest: {_guest_display_name(booking)}" if booking else None,
+        f"Guest: {guest_line}" if guest_line else None,
         f"Room: {booking.room.room_number}" if booking and booking.room else None,
         f"Stay: {booking.check_in.strftime('%d-%m-%y')} to {booking.check_out.strftime('%d-%m-%y')}" if booking else None,
         f"Online V/No: {booking.online_voucher_no}" if booking and booking.online_voucher_no else None,
@@ -717,7 +1031,7 @@ async def invoice_print_data(invoice_id: int, db: Session = Depends(get_db), cur
 
     return {
         "invoice": _invoice_out(inv),
-        "booking": _booking_bill_header(booking) if booking else None,
+        "booking": header,
         "mess": {"name": mess_name, "address": mess_address, "phone": mess_phone},
         "verify_hash": verify_hash,
         "qr_svg": _invoice_qr_svg(payload),
@@ -827,7 +1141,7 @@ async def payment_receipt_data(payment_id: int, db: Session = Depends(get_db), c
     mess_address = get_setting_str(db, "mess_address", "204 Firdousi Road, Rawalpindi")
     mess_phone = get_setting_str(db, "mess_phone", "Tele No. G.H.Q 31725")
 
-    guest = _guest_display_name(booking) if booking else "-"
+    guest = _guest_display_name(booking) if booking else (inv.guest.full_name if inv and inv.guest else "-")
     payload = "\n".join([
         mess_name,
         f"Receipt No: {payment.id}",
@@ -853,64 +1167,6 @@ async def payment_receipt_data(payment_id: int, db: Session = Depends(get_db), c
     }
 
 
-@router.post("/invoices/{invoice_id}/apply-discount")
-async def apply_invoice_discount(invoice_id: int, data: DiscountApplyRequest, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    # Authorization is derived entirely from the authenticated session, mirroring
-    # mess_billing.py:apply_discount - never a client-supplied id.
-    inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
-    if not inv:
-        raise HTTPException(status_code=404, detail="Invoice not found")
-    if not check_permission(current_user, "clerk_desk", "approve"):
-        raise HTTPException(status_code=403, detail="Permission denied")
-    if inv.status in (InvoiceStatus.VOID, InvoiceStatus.PAID):
-        raise HTTPException(status_code=400, detail=f"Cannot discount an invoice with status '{inv.status.value}'")
-
-    before = serialize_model(inv)
-    discount_amount = data.discount_amount if data.discount_amount is not None else float(inv.subtotal) * data.discount_rate / 100
-    if discount_amount > float(inv.subtotal):
-        raise HTTPException(status_code=400, detail="Discount cannot exceed the invoice subtotal")
-
-    inv.discount = discount_amount
-    inv.total_amount = float(inv.subtotal) + float(inv.tax_amount) - discount_amount
-    db.commit()
-    db.refresh(inv)
-
-    log_audit(db, current_user.id, current_user.full_name, AuditAction.OVERRIDE, "invoices", inv.id, before_state=before, after_state=serialize_model(inv), reason=data.reason, ip_address=request.client.host)
-    return {"id": inv.id, "discount": float(inv.discount), "total_amount": float(inv.total_amount)}
-
-
-@router.post("/invoices/{invoice_id}/complimentary")
-async def mark_invoice_complimentary(invoice_id: int, data: ComplimentaryRequest, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    """Marks the whole invoice complimentary (Rs 0), distinct from a partial
-    discount - same approval tier as apply-discount since it waives revenue."""
-    inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
-    if not inv:
-        raise HTTPException(status_code=404, detail="Invoice not found")
-    if not check_permission(current_user, "clerk_desk", "approve"):
-        raise HTTPException(status_code=403, detail="Permission denied")
-    if inv.status in (InvoiceStatus.VOID, InvoiceStatus.PAID):
-        raise HTTPException(status_code=400, detail=f"Cannot make an invoice with status '{inv.status.value}' complimentary")
-
-    before = serialize_model(inv)
-    if data.is_complimentary:
-        inv.discount = float(inv.subtotal)
-        inv.tax_amount = 0
-        inv.total_amount = 0
-        inv.is_complimentary = True
-        inv.complimentary_reason = data.reason
-    else:
-        inv.is_complimentary = False
-        inv.complimentary_reason = None
-        inv.discount = 0
-        inv.total_amount = float(inv.subtotal) + float(inv.tax_amount)
-    db.commit()
-    db.refresh(inv)
-
-    log_audit(db, current_user.id, current_user.full_name, AuditAction.OVERRIDE, "invoices", inv.id,
-              before_state=before, after_state=serialize_model(inv), reason=data.reason, ip_address=request.client.host)
-    return {"id": inv.id, "is_complimentary": inv.is_complimentary, "discount": float(inv.discount), "total_amount": float(inv.total_amount)}
-
-
 @router.get("/dashboard-stats")
 async def billing_stats(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     today = date.today()
@@ -933,9 +1189,50 @@ async def billing_stats(db: Session = Depends(get_db), current_user=Depends(get_
         Invoice.status == InvoiceStatus.ISSUED, Invoice.due_date < today,
     ).count()
 
+    # Cashier figures for the Clerk dashboard: what actually landed in hand
+    # today (payments recorded today, split by method) - distinct from
+    # today_revenue above, which is bills issued today (accrual, not cash).
+    # InvoicePayment.created_at is stored via datetime.utcnow() (unlike
+    # Invoice.issue_date, a local-date column set from date.today()) - the
+    # "today" boundary here must use the same UTC clock it was written with,
+    # or a payment made moments ago can fall outside it depending on the
+    # server's UTC offset.
+    utc_today = datetime.utcnow().date()
+    utc_today_start = datetime.combine(utc_today, datetime.min.time())
+    utc_month_start = datetime.combine(utc_today.replace(day=1), datetime.min.time())
+    today_payments = db.query(InvoicePayment).filter(InvoicePayment.created_at >= utc_today_start).all()
+    today_collections = sum(float(p.amount) for p in today_payments)
+    # Month-to-date collections - same UTC boundary as today_collections since
+    # payment timestamps are stored in UTC.
+    month_collections = sum(float(p.amount) for p in db.query(InvoicePayment).filter(
+        InvoicePayment.created_at >= utc_month_start).all())
+    payment_methods_today: dict = {}
+    for p in today_payments:
+        method = p.method or "Cash"
+        payment_methods_today[method] = payment_methods_today.get(method, 0.0) + float(p.amount)
+
+    # Room vs mess mix for today's finalized bills - each invoice is one side
+    # only since instant-checkout stopped merging both into one invoice;
+    # legacy 'combined' rows from before that change aren't split further.
+    today_room_revenue = sum(float(inv.total_amount) for inv in today_invoices if inv.bill_type == "room")
+    today_mess_revenue = sum(float(inv.total_amount) for inv in today_invoices if inv.bill_type == "mess")
+
+    # Discounts given today - a leakage-watch figure, since granting these is
+    # the Clerk's own approval authority.
+    today_discounts = sum(float(inv.discount) for inv in today_invoices if inv.discount)
+
     return {
         "today_revenue": sum(float(inv.total_amount) for inv in today_invoices),
         "today_invoice_count": len(today_invoices),
         "month_revenue": month_total,
         "overdue_invoices": overdue,
+        "today_collections": round(today_collections, 2),
+        "payment_methods_today": [
+            {"method": m, "amount": round(a, 2)}
+            for m, a in sorted(payment_methods_today.items(), key=lambda x: -x[1])
+        ],
+        "today_room_revenue": today_room_revenue,
+        "today_mess_revenue": today_mess_revenue,
+        "today_discounts": round(today_discounts, 2),
+        "month_collections": round(month_collections, 2),
     }
