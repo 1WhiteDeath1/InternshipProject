@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, date, timedelta
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Body
-from sqlalchemy import and_, exists, or_
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 from backend.database import get_db
 from backend.models import (
@@ -250,6 +250,7 @@ def _booking_bill_header(booking: Booking) -> dict:
         "check_in": booking.check_in, "check_out": booking.check_out,
         "reference_person": booking.reference_person,
         "source": booking.source or "walk_in", "online_voucher_no": booking.online_voucher_no,
+        "advance_payment_amount": float(booking.advance_payment_amount) if booking.advance_payment_amount else 0,
         "booking_reference": booking.booking_reference,
     }
 
@@ -271,6 +272,14 @@ def _running_balance_payload(db: Session, booking: Booking) -> dict:
     mess_items = [] if mess_billed else gathered["mess_items"]
     room_bill = 0.0 if room_billed else amounts["room"] + amounts["room_charges"]
     mess_bill = 0.0 if mess_billed else amounts["routine_meals"] + amounts["ala_carte"] + amounts["mess_charges"]
+    # Online bookings pay the room charge in full in advance - netted out of
+    # the preview here (capped at what's actually owed) so this preview stays
+    # equal to what instant-checkout will actually charge/credit; the same
+    # advance gets applied for real as a payment once the room invoice exists.
+    advance_credit_applied = 0.0
+    if not room_billed and booking.source == "online" and booking.advance_payment_amount:
+        advance_credit_applied = min(float(booking.advance_payment_amount), room_bill)
+        room_bill -= advance_credit_applied
     # What the guest still owes on bills that already exist but aren't paid off.
     outstanding = sum(float(i.total_amount) - float(i.amount_paid) for i in invoices)
     # Itemized previews for the Clerk Desk's side-by-side Room / Food boxes -
@@ -294,6 +303,7 @@ def _running_balance_payload(db: Session, booking: Booking) -> dict:
         "balance_due": room_bill + mess_bill + outstanding,
         "unpriced_items": gathered["unpriced"],
         "room_billed": room_billed, "mess_billed": mess_billed,
+        "advance_credit_applied": advance_credit_applied,
     }
 
 
@@ -345,6 +355,7 @@ def _guest_bill_header(guest: Guest) -> dict:
         "pa_number": None, "unit_address": guest.unit_address,
         "room_number": None, "check_in": None, "check_out": None,
         "reference_person": None, "source": "walk_in", "online_voucher_no": None,
+        "advance_payment_amount": 0,
         "booking_reference": f"WALKIN-{guest.id}",
     }
 
@@ -470,41 +481,29 @@ async def mess_only_desk(db: Session = Depends(get_db), current_user=Depends(get
     return {"items": items, "unsettled_invoices": unsettled}
 
 
-def _bill_exists(bill_type: str):
-    """EXISTS clause: this booking already has a live bill of this type.
-    Legacy 'combined' invoices cover both types."""
-    return exists().where(and_(
-        Invoice.booking_id == Booking.id,
-        Invoice.status != InvoiceStatus.VOID,
-        Invoice.bill_type.in_((bill_type, "combined")),
-    ))
-
-
 @router.get("/desk")
 async def clerk_desk(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """The Clerk Desk worklist in one request: every guest who still needs
     billing attention, each with their running balance embedded.
 
     - checked-in guests (HRA residents excluded - they settle via the
-      monthly Mess Bill and must never be checkout-able here),
-    - ALL checked-out bookings still missing a room or mess bill - a real
-      query, not a recent-N heuristic, so a deferred bill can never fall
-      off the list no matter how much time passes, and
+      monthly Mess Bill and must never be checkout-able here), and
     - every generated-but-unsettled invoice, guests checking out TODAY
       first - so payment collection lives entirely on this desk instead of
       requiring a trip to the Billing page when the print dialog was
-      closed without recording payment."""
+      closed without recording payment.
+
+    Checkout always bills everything owed in one shot (walk-ins pay room+mess
+    together on the spot; online guests prepay the room in advance and pay
+    mess at checkout) - there's no "checked out but still unbilled" worklist
+    here by design. A booking only reappears after checkout via
+    unsettled_invoices, if its bill was generated but not fully paid."""
     if not (check_permission(current_user, "clerk_desk", "view") or check_permission(current_user, "billing", "view")):
         raise HTTPException(status_code=403, detail="Permission denied")
     checked_in = db.query(Booking).options(joinedload(Booking.room)).filter(
         Booking.status == "checked_in",
         or_(Booking.nature_of_duty.is_(None), Booking.nature_of_duty != "hra"),
     ).order_by(Booking.created_at.desc()).all()
-
-    pending_checkout = db.query(Booking).options(joinedload(Booking.room)).filter(
-        Booking.status == "checked_out",
-        ~and_(_bill_exists("room"), _bill_exists("mess")),
-    ).order_by(Booking.actual_check_out.desc()).all()
 
     # Unsettled bills: anything live with money still owing. Legacy invoices
     # predate the created-as-issued rule, so 'draft' is included too. Guest-only
@@ -542,9 +541,9 @@ async def clerk_desk(db: Session = Depends(get_db), current_user=Depends(get_cur
             "id": b.id, "booking_reference": b.booking_reference,
             "guest_name": b.guest_name, "rank": b.rank,
             "room_number": b.room.room_number if b.room else None,
-            "status": b.status.value,
+            "status": b.status.value, "source": b.source or "walk_in",
             "balance": _running_balance_payload(db, b),
-        } for b in checked_in + pending_checkout],
+        } for b in checked_in],
         "unsettled_invoices": unsettled,
     }
 
@@ -686,10 +685,29 @@ async def instant_checkout(booking_id: int, request: Request, bill_types: Option
     # without losing that per-invoice detail.
     invoices = []
     if room_items:
-        invoices.append(_build_invoice(db, booking, room_items, current_user, today, today, bill_type="room"))
+        room_invoice = _build_invoice(db, booking, room_items, current_user, today, today, bill_type="room")
+        invoices.append(room_invoice)
         for c in gathered["charge_rows"]:
             if not c.is_mess_charge:
                 c.invoiced_at = now
+        # Online bookings paid the room charge in full, in advance, outside
+        # SAM - credit it now that the room invoice exists, dated to when it
+        # was ACTUALLY received (not today), so Today's/Month's Collections
+        # attribute it to the right day instead of looking like cash just
+        # came in at checkout. Capped at the invoice total defensively, even
+        # though online advances are always sized to match the room charge.
+        if booking.source == "online" and booking.advance_payment_amount:
+            advance = min(float(booking.advance_payment_amount), float(room_invoice.total_amount))
+            if advance > 0:
+                received_at = datetime.combine(booking.advance_paid_at, datetime.min.time()) if booking.advance_paid_at else now
+                db.add(InvoicePayment(
+                    invoice_id=room_invoice.id, amount=advance, method="Advance (Online)",
+                    notes=f"Online booking advance - V/No {booking.online_voucher_no or '—'}",
+                    received_by=current_user.id, created_at=received_at,
+                ))
+                room_invoice.amount_paid = advance
+                if advance >= float(room_invoice.total_amount) - 0.01:
+                    room_invoice.status = InvoiceStatus.PAID
     if mess_items:
         invoices.append(_build_invoice(db, booking, mess_items, current_user, today, today, bill_type="mess"))
         for a in gathered["attendance_rows"]:

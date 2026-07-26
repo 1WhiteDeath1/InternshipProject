@@ -49,6 +49,15 @@ class Booking(Base):
     # separate online portal, carrying that portal's voucher number).
     source = Column(String(20), default="walk_in")  # walk_in | online
     online_voucher_no = Column(String(50))
+    # Online bookings are paid in full, in advance, for the room charge only
+    # (mess still bills normally at checkout) - money that actually moved
+    # outside SAM (bank transfer/agent), recorded here so Clerk Desk can
+    # credit it automatically at checkout instead of asking the guest to pay
+    # again. advance_paid_at is the real receipt date, not the booking date -
+    # it's what the auto-applied InvoicePayment gets dated to, so collections
+    # figures attribute the money to when it actually came in.
+    advance_payment_amount = Column(Numeric(10, 2), default=0)
+    advance_paid_at = Column(Date)
     # Guest must physically arrive (be checked in) by this time or staff may
     # void the booking to free the room.
     arrival_deadline = Column(DateTime)

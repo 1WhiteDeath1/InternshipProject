@@ -46,7 +46,13 @@ const navItems = [
   { path: '/attendants', label: 'Attendants', icon: UserCircle2, feature: null, requiredPermission: { module: 'attendants', action: 'view' } },
   { path: '/members', label: 'Members', icon: IdCard, feature: 'mess_members', requiredPermission: { module: 'members', action: 'view' } },
   { path: '/attendance', label: 'Attendance', icon: UtensilsCrossed, feature: 'mess_attendance', requiredPermission: { module: 'attendance', action: 'view' } },
-  { path: '/mess-billing', label: 'Mess Billing', icon: Wallet, feature: 'mess_billing', requiredPermission: { module: 'mess_billing', action: 'view' } },
+  // Clerk works member billing entirely inside Clerk Desk's Members tab now,
+  // so this standalone page is hidden for them even though they still hold
+  // mess_billing:view (needed for that tab to work) - hideIfPermission opts
+  // a nav item out when the user also holds a second, more specific
+  // permission. Booking NCO (mess_billing view+create, no clerk_desk) still
+  // sees it here as their entry point for generating bills / logging charges.
+  { path: '/mess-billing', label: 'Mess Billing', icon: Wallet, feature: 'mess_billing', requiredPermission: { module: 'mess_billing', action: 'view' }, hideIfPermission: { module: 'clerk_desk', action: 'view' } },
   { path: '/kitchen', label: 'Kitchen', icon: ChefHat, feature: 'kitchen_module', requiredPermission: { module: 'kitchen', action: 'view' } },
   { path: '/security', label: 'Security', icon: Shield, feature: null, requiredPermission: { module: 'security', action: 'view' } },
   { path: '/approvals', label: 'Approvals', icon: ClipboardCheck, requiredPermission: { module: 'procurement', action: 'approve' } },
@@ -106,6 +112,7 @@ export default function Layout() {
   const filteredNav = navItems.filter(item => {
     if (item.requiredPermission && !hasPermission(user, item.requiredPermission.module, item.requiredPermission.action)) return false;
     if (item.feature && !isEnabled(item.feature)) return false;
+    if (item.hideIfPermission && hasPermission(user, item.hideIfPermission.module, item.hideIfPermission.action)) return false;
     return true;
   });
 

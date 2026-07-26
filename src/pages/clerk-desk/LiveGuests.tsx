@@ -28,7 +28,10 @@ export default function LiveGuests() {
               <CardContent className="p-4 space-y-2">
                 <div className="flex justify-between items-start gap-2">
                   <div className="min-w-0">
-                    <p className="font-bold truncate">{g.rank ? `${g.rank} ` : ''}{g.guest_name}</p>
+                    <p className="font-bold truncate flex items-center gap-1.5">
+                      {g.rank ? `${g.rank} ` : ''}{g.guest_name}
+                      {g.source === 'online' && <span className="shrink-0 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 text-[10px] font-medium px-1.5 py-0.5">Online</span>}
+                    </p>
                     <p className="text-xs text-gray-500">Room {g.room_number}</p>
                   </div>
                   <div className="text-right shrink-0">

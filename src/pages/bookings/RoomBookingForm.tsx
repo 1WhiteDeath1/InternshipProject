@@ -65,8 +65,23 @@ export function RoomBookingForm({
         ))}
       </div>
       {form.source === 'online' && (
-        <Input placeholder="Online V/No *" value={form.online_voucher_no}
-          onChange={e => setForm({ ...form, online_voucher_no: e.target.value })} />
+        <div className="space-y-2">
+          <Input placeholder="Online V/No *" value={form.online_voucher_no}
+            onChange={e => setForm({ ...form, online_voucher_no: e.target.value })} />
+          <p className="text-xs text-gray-500">Online bookings are paid in full, in advance, for the room — record what was actually received outside SAM (bank transfer/agent).</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label className="text-xs">Advance Received (Rs) *</Label>
+              <Input type="number" min={0} placeholder="Amount" value={form.advance_payment_amount}
+                onChange={e => setForm({ ...form, advance_payment_amount: e.target.value })} />
+            </div>
+            <div>
+              <Label className="text-xs">Date Received *</Label>
+              <Input type="date" value={form.advance_paid_at} max={today}
+                onChange={e => setForm({ ...form, advance_paid_at: e.target.value })} />
+            </div>
+          </div>
+        </div>
       )}
 
       <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Stay Dates</p>

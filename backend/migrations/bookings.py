@@ -99,10 +99,32 @@ def _migrate_bookings_stay_type(engine):
             logger.info("migration: added bookings.stay_type")
 
 
+def _migrate_bookings_advance_payment(engine):
+    # Online bookings pay the room charge in full, in advance, outside SAM
+    # (bank transfer/agent) - these record what was received and when, so
+    # Clerk Desk can credit it automatically at checkout. Nullable/defaulted,
+    # plain ALTER TABLE ADD COLUMN.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(bookings)")).fetchall()
+        if not cols:
+            return
+        col_names = {c[1] for c in cols}
+        additions = (
+            ("advance_payment_amount", "NUMERIC(10, 2) DEFAULT 0"),
+            ("advance_paid_at", "DATE"),
+        )
+        for name, ddl_type in additions:
+            if name not in col_names:
+                conn.execute(text(f"ALTER TABLE bookings ADD COLUMN {name} {ddl_type}"))
+                logger.info("migration: added bookings.%s", name)
+        conn.commit()
+
+
 MIGRATIONS = [
     _migrate_bookings_register_fields,
     _migrate_bookings_source_fields,
     _migrate_bookings_guest_id,
     _migrate_bookings_attendant,
     _migrate_bookings_stay_type,
+    _migrate_bookings_advance_payment,
 ]

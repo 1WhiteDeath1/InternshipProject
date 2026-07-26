@@ -20,6 +20,7 @@ export interface CheckoutGuest {
   rank?: string | null;
   room_number?: string | null;
   status: string; // checked_in | checked_out (bill pending)
+  source?: string; // walk_in | online - online pays the room charge in advance
 }
 
 interface BalanceItem { description: string; amount: number; }
@@ -35,6 +36,7 @@ export interface RunningBalance {
   unpriced_items: string[];
   room_billed: boolean;
   mess_billed: boolean;
+  advance_credit_applied: number;
 }
 
 function BillBox({ title, icon: Icon, items, total, billed, accent }: {
@@ -130,11 +132,6 @@ export function CheckoutSheet({ guest, onOpenChange, onDone }: {
                 </SheetTitle>
               </SheetHeader>
               <div className="space-y-4 mt-3 px-1">
-                {guest.status === 'checked_out' && (
-                  <p className="text-xs rounded-md bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 px-3 py-2">
-                    Guest has checked out — a bill is still pending below.
-                  </p>
-                )}
                 {balance ? (
                   <>
                     <ChargeSplitBar segments={[
@@ -151,6 +148,12 @@ export function CheckoutSheet({ guest, onOpenChange, onDone }: {
                       Room and mess charges are logged by Booking Staff and Mess Staff as the stay goes on (Room Charges panel / Kitchen's Guest Mess Charges tab) — this total reflects everything logged so far.
                     </p>
                     <div className="rounded-lg border p-3 text-sm space-y-1">
+                      {balance.advance_credit_applied > 0 && (
+                        <div className="flex justify-between text-xs text-emerald-600 dark:text-emerald-400">
+                          <span>Online booking — advance already paid, applied to the room bill</span>
+                          <span className="font-mono">− {formatCurrency(balance.advance_credit_applied)}</span>
+                        </div>
+                      )}
                       {balance.outstanding_invoices > 0 && (
                         <div className="flex justify-between text-xs text-gray-500">
                           <span>Unpaid on bills already generated</span>
@@ -166,9 +169,9 @@ export function CheckoutSheet({ guest, onOpenChange, onDone }: {
                 <div className="rounded-lg border p-3 space-y-2">
                   <Button className="w-full" disabled={checkingOut || !balance} onClick={handleGenerateInvoice}>
                     <Receipt size={15} className="mr-1.5" />
-                    {checkingOut ? 'Working…' : alreadyFullyBilled ? 'View Invoice' : guest.status === 'checked_in' ? 'Checkout — Generate Invoice' : 'Generate Invoice'}
+                    {checkingOut ? 'Working…' : alreadyFullyBilled ? 'View Invoice' : 'Checkout — Generate Invoice'}
                   </Button>
-                  {guest.status === 'checked_in' && !alreadyFullyBilled && (
+                  {!alreadyFullyBilled && (
                     <p className="text-xs text-gray-500">Generating the invoice checks the guest out and sends the room to the housekeeping queue.</p>
                   )}
                 </div>

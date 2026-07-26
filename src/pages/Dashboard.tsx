@@ -7,14 +7,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   TrendingUp, Package, AlertTriangle, Receipt, DollarSign, Trash2,
   BedDouble, LogIn, LogOut, Wallet, ArrowRight, ShieldAlert, UtensilsCrossed,
-  Truck, ChefHat, IdCard, LayoutGrid, ClipboardCheck, Percent, CalendarDays,
+  Truck, ChefHat, IdCard, LayoutGrid, ClipboardCheck, CalendarDays,
 } from 'lucide-react';
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
 import { RoomStatusDonut } from '@/components/RoomStatusDonut';
-import { ChargeSplitBar } from '@/components/ChargeSplitBar';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { formatCurrency } from '@/lib/currency';
@@ -71,9 +70,7 @@ interface BillingStats {
   today_room_revenue: number; today_mess_revenue: number; today_discounts: number;
 }
 
-const PAYMENT_METHOD_COLORS: Record<string, string> = {
-  Cash: 'bg-emerald-500', 'Bank Transfer': 'bg-blue-500', Cheque: 'bg-amber-500', Online: 'bg-violet-500',
-};
+interface MemberBillLite { status: string; total_amount: number; }
 
 // Hero figures drop the paise - "Rs 12,340" reads from across the room,
 // "Rs 12,340.00" doesn't.
@@ -131,6 +128,7 @@ export default function Dashboard() {
   const [occupancy, setOccupancy] = useState<OccupancyData | null>(null);
   const [unsettled, setUnsettled] = useState<UnsettledInvoice[]>([]);
   const [billingStats, setBillingStats] = useState<BillingStats | null>(null);
+  const [memberBills, setMemberBills] = useState<MemberBillLite[]>([]);
   const [revenueTrend, setRevenueTrend] = useState<{ labels: string[]; values: number[] } | null>(null);
   const [occupancyTrend, setOccupancyTrend] = useState<{ labels: string[]; values: number[] } | null>(null);
   const [months, setMonths] = useState<MonthSummary[]>([]);
@@ -148,10 +146,15 @@ export default function Dashboard() {
       const common = [
         api.get('/bookings/occupancy').then(res => setOccupancy(res.data)),
         ...(canSeeDesk ? [api.get('/billing/desk').then(res => setUnsettled(res.data.unsettled_invoices || []))] : []),
-        // The Clerk's own cashier figures (collections, payment mix, room/mess
-        // split, discounts given) - not part of the cross-module reports.view
-        // board, so fetched separately, gated on the same billing.view Clerk has.
-        ...(isClerk ? [api.get('/billing/dashboard-stats').then(res => setBillingStats(res.data))] : []),
+        // The Clerk's own cashier figures (collections today/month) - not part
+        // of the cross-module reports.view board, so fetched separately, gated
+        // on the same billing.view Clerk has. Member bills are folded in too so
+        // "Outstanding"/"Pending" read as one true total across room, mess and
+        // member billing rather than just the guest side.
+        ...(isClerk ? [
+          api.get('/billing/dashboard-stats').then(res => setBillingStats(res.data)),
+          api.get('/mess-billing/bills?page_size=100').then(res => setMemberBills(res.data.items || [])),
+        ] : []),
       ];
       const supervisor = hasPermission(user, 'reports', 'view') ? [
         api.get('/reports/dashboard').then(res => setStats(res.data)),
@@ -256,16 +259,17 @@ export default function Dashboard() {
     </SectionCard>
   );
 
-  // ---- Clerk view: cashier/billing-finalization figures, not occupancy -
-  // that's Booking Staff's job. Collections (cash actually received today,
-  // distinct from revenue billed), the settle queue, room/mess revenue mix,
-  // payment-method reconciliation, and discounts given (the Clerk's own
-  // approval authority, watched for leakage). clerk_desk permission is
+  // ---- Clerk view: a compact, one-screen "financial pulse" - just enough to
+  // know what's going on, nothing to scroll through. Room/mess split, payment
+  // mix, and the guest-by-guest bill list all live one click away on Clerk
+  // Desk instead of on the face of this page. clerk_desk permission is
   // exclusive to the Clerk role, so this check alone identifies them. ----
   if (isClerk && !hasPermission(user, 'reports', 'view')) {
-    const paymentSegments = (billingStats?.payment_methods_today ?? []).map(p => ({
-      label: p.method, amount: p.amount, colorClass: PAYMENT_METHOD_COLORS[p.method] || 'bg-gray-400',
-    }));
+    const memberIssued = memberBills.filter(b => b.status === 'issued');
+    const memberDraftCount = memberBills.filter(b => b.status === 'draft').length;
+    const memberIssuedDue = memberIssued.reduce((s, b) => s + b.total_amount, 0);
+    const outstandingAll = billsAmount + memberIssuedDue;
+    const pendingCount = billGroups.length + memberDraftCount + memberIssued.length;
     return (
       <div className="space-y-6">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Welcome, {user?.full_name}</h1>
@@ -276,27 +280,13 @@ export default function Dashboard() {
           <HeroTile label="This Month's Collections" value={<StatValue loading={loading} value={bigMoney(billingStats?.month_collections)} />}
             sub="Received month-to-date"
             icon={CalendarDays} tone="bg-blue-100 dark:bg-blue-900/30 text-blue-600" />
-          <HeroTile label="Outstanding to Collect" value={<StatValue loading={loading} value={bigMoney(billsAmount)} />}
-            sub={billGroups.length > 0 ? `${billGroups.length} guest${billGroups.length > 1 ? 's' : ''} pending` : 'All collected'}
-            icon={AlertTriangle} tone="bg-purple-100 dark:bg-purple-900/30 text-purple-600" onClick={() => navigate('/clerk-desk')} alert={billGroups.length > 0} />
-          <HeroTile label="Discounts Given Today" value={<StatValue loading={loading} value={bigMoney(billingStats?.today_discounts)} />}
-            sub="Concessions granted"
-            icon={Percent} tone="bg-pink-100 dark:bg-pink-900/30 text-pink-600" />
+          <HeroTile label="Outstanding to Collect" value={<StatValue loading={loading} value={bigMoney(outstandingAll)} />}
+            sub="Room, mess & member bills"
+            icon={AlertTriangle} tone="bg-purple-100 dark:bg-purple-900/30 text-purple-600" onClick={() => navigate('/clerk-desk')} alert={outstandingAll > 0} />
+          <HeroTile label="Bills Pending Action" value={<StatValue loading={loading} value={pendingCount} />}
+            sub={pendingCount > 0 ? 'Tap to open Clerk Desk' : 'Nothing waiting on you'}
+            icon={ClipboardCheck} tone="bg-red-100 dark:bg-red-900/30 text-red-600" onClick={() => navigate('/clerk-desk')} alert={pendingCount > 0} />
         </div>
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          <SectionCard title="Room vs Mess — Today">
-            <ChargeSplitBar className="py-2" segments={[
-              { label: 'Room', amount: billingStats?.today_room_revenue ?? 0, colorClass: 'bg-purple-500' },
-              { label: 'Food', amount: billingStats?.today_mess_revenue ?? 0, colorClass: 'bg-orange-500' },
-            ]} />
-          </SectionCard>
-          <SectionCard title="Payments Collected — Today">
-            {paymentSegments.length > 0
-              ? <ChargeSplitBar className="py-2" segments={paymentSegments} />
-              : <p className="text-base text-gray-400">No payments recorded yet today</p>}
-          </SectionCard>
-        </div>
-        {billsWidget}
       </div>
     );
   }

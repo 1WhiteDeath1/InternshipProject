@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { FeaturesProvider } from '@/contexts/FeaturesContext';
@@ -11,7 +11,6 @@ import StockManagement from '@/pages/StockManagement';
 import Bookings from '@/pages/Bookings';
 import Billing from '@/pages/Billing';
 import ClerkDeskLayout from '@/pages/clerk-desk/ClerkDeskLayout';
-import ClerkOverview from '@/pages/clerk-desk/Overview';
 import ClerkLiveGuests from '@/pages/clerk-desk/LiveGuests';
 import ClerkCheckout from '@/pages/clerk-desk/Checkout';
 import ClerkMessOnly from '@/pages/clerk-desk/MessOnly';
@@ -50,7 +49,7 @@ function App() {
                 <Route path="/bookings" element={<Bookings />} />
                 <Route path="/billing" element={<Billing />} />
                 <Route path="/clerk-desk" element={<ClerkDeskLayout />}>
-                  <Route index element={<ClerkOverview />} />
+                  <Route index element={<Navigate to="live" replace />} />
                   <Route path="live" element={<ClerkLiveGuests />} />
                   <Route path="checkout" element={<ClerkCheckout />} />
                   <Route path="mess-only" element={<ClerkMessOnly />} />

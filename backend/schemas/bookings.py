@@ -40,6 +40,12 @@ class BookingBase(BaseModel):
     mattress_count: int = Field(0, ge=0, le=10)
     source: str = "walk_in"
     online_voucher_no: Optional[str] = Field(None, max_length=50)
+    # Online bookings pay the room charge in full, in advance, outside SAM -
+    # advance_paid_at is the actual receipt date (not the booking date), so
+    # the auto-applied payment at checkout is dated correctly for collections
+    # reporting rather than looking like it arrived on checkout day.
+    advance_payment_amount: Optional[float] = Field(None, ge=0)
+    advance_paid_at: Optional[date] = None
     reference_person: Optional[str] = Field(None, max_length=100)
     attendant_id: Optional[int] = None
     stay_type: Optional[str] = None
@@ -61,6 +67,10 @@ class BookingBase(BaseModel):
             raise ValueError("source must be walk_in or online")
         if self.source == "online" and not (self.online_voucher_no or "").strip():
             raise ValueError("Online bookings need the portal voucher number (Online V/No)")
+        if self.source == "online" and not (self.advance_payment_amount and self.advance_payment_amount > 0):
+            raise ValueError("Online bookings are paid in full in advance - enter the amount received")
+        if self.source == "online" and not self.advance_paid_at:
+            raise ValueError("Online bookings need the date the advance was actually received")
         return self
 
 class BookingCreate(BookingBase):

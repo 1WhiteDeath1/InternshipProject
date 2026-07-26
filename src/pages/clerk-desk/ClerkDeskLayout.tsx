@@ -3,18 +3,19 @@ import { NavLink, Outlet } from 'react-router-dom';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import { LayoutGrid, DoorOpen, LogOut, UtensilsCrossed, IdCard } from 'lucide-react';
-import type { ClerkDeskContext, DeskFeed, MemberBill, BillingStats } from './context';
+import type { ClerkDeskContext, DeskFeed, MemberBill } from './context';
 
 // The Clerk Desk is split into purpose-built pages by bill type. This layout
-// fetches the feeds once and shares them (via Outlet context) with the
-// Overview and the four category pages, so switching tabs never refetches and
-// every page/badge sees the same numbers.
+// fetches the feeds once and shares them (via Outlet context) with the four
+// category pages, so switching tabs never refetches and every page/badge
+// sees the same numbers. There's no separate Overview/dashboard tab here -
+// that lives on the main /dashboard page instead, so Live Guests is the
+// landing tab.
 
 const EMPTY_FEED: DeskFeed = { items: [], unsettled_invoices: [] };
 
 const TABS = [
-  { to: '/clerk-desk', end: true, label: 'Overview', icon: LayoutGrid },
-  { to: '/clerk-desk/live', label: 'Live Guests', icon: DoorOpen },
+  { to: '/clerk-desk/live', end: true, label: 'Live Guests', icon: DoorOpen },
   { to: '/clerk-desk/checkout', label: 'Checkout', icon: LogOut },
   { to: '/clerk-desk/mess-only', label: 'Mess-Only', icon: UtensilsCrossed },
   { to: '/clerk-desk/members', label: 'Members', icon: IdCard },
@@ -24,21 +25,18 @@ export default function ClerkDeskLayout() {
   const [desk, setDesk] = useState<DeskFeed>(EMPTY_FEED);
   const [messOnly, setMessOnly] = useState<DeskFeed>(EMPTY_FEED);
   const [memberBills, setMemberBills] = useState<MemberBill[]>([]);
-  const [stats, setStats] = useState<BillingStats | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     try {
-      const [deskRes, messRes, billsRes, statsRes] = await Promise.all([
+      const [deskRes, messRes, billsRes] = await Promise.all([
         api.get('/billing/desk'),
         api.get('/billing/mess-only-desk'),
         api.get('/mess-billing/bills?page_size=100'),
-        api.get('/billing/dashboard-stats'),
       ]);
       setDesk(deskRes.data);
       setMessOnly(messRes.data);
       setMemberBills(billsRes.data.items || []);
-      setStats(statsRes.data);
     } catch { toast.error('Failed to load Clerk Desk'); }
   }, []);
 
@@ -46,13 +44,16 @@ export default function ClerkDeskLayout() {
     queueMicrotask(() => { setLoading(true); refresh().finally(() => setLoading(false)); });
   }, [refresh]);
 
-  const ctx: ClerkDeskContext = { desk, messOnly, memberBills, stats, loading, refresh };
+  const ctx: ClerkDeskContext = { desk, messOnly, memberBills, loading, refresh };
 
   // Per-tab count badges give the clerk an at-a-glance sense of where work is.
+  // Members' badge is drafts only - freshly generated bills nobody has looked
+  // at yet - not the whole unpaid book, so it reads as "new" rather than
+  // "always non-zero".
   const liveCount = desk.items.filter(g => g.status === 'checked_in').length;
-  const checkoutCount = desk.items.filter(g => g.status === 'checked_out').length + desk.unsettled_invoices.length;
+  const checkoutCount = desk.unsettled_invoices.length;
   const messCount = messOnly.items.length + messOnly.unsettled_invoices.length;
-  const memberCount = memberBills.filter(b => b.status !== 'paid').length;
+  const memberCount = memberBills.filter(b => b.status === 'draft').length;
   const counts: Record<string, number> = {
     '/clerk-desk/live': liveCount,
     '/clerk-desk/checkout': checkoutCount,

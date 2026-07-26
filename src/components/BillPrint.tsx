@@ -34,7 +34,7 @@ interface BillBooking {
   guest_name: string; rank: string | null; pa_number: string | null; unit_address: string | null;
   reference_person?: string | null;
   room_number: string | null; check_in: string; check_out: string;
-  source: string; online_voucher_no: string | null; booking_reference: string;
+  source: string; online_voucher_no: string | null; advance_payment_amount: number; booking_reference: string;
 }
 interface MessIdentity { name: string; address: string; phone: string; }
 interface PrintData { invoice: BillInvoice; booking: BillBooking | null; mess: MessIdentity; qr_svg: string; verify_hash?: string; }
@@ -157,6 +157,7 @@ function DraftBill({ data }: { data: PrintData }) {
 
       <div className="flex justify-between gap-4">
         <DottedField label="Online V/No." value={b?.online_voucher_no || '—'} grow />
+        {b?.source === 'online' && <DottedField label="Advance Paid" value={formatCurrency(b.advance_payment_amount)} />}
         <DottedField label="S/No." value={inv.invoice_number} />
       </div>
       <div className="flex gap-4">

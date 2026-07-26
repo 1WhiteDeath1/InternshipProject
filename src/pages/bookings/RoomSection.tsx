@@ -41,6 +41,7 @@ const emptyForm = (checkIn: string, checkOut: string, checkInNow: boolean, atten
   adults: 1, children: 0,
   member_id: 0, special_requests: '',
   source: 'walk_in', online_voucher_no: '',
+  advance_payment_amount: '', advance_paid_at: todayISO(),
   check_in: checkIn, check_out: checkOut, check_in_now: checkInNow,
   attendant_id: attendantId, stay_type: '',
 });
@@ -252,6 +253,8 @@ export default function RoomSection({ roomId, open, onClose, onChanged, members,
     if (!datesValid) { toast.error('Check-out must be after check-in'); return; }
     if (form.nature_of_duty === 'hra' && !form.member_id) { toast.error('HRA residency must be linked to a member'); return; }
     if (form.source === 'online' && !form.online_voucher_no.trim()) { toast.error('Online bookings need the portal voucher number (Online V/No)'); return; }
+    if (form.source === 'online' && !(Number(form.advance_payment_amount) > 0)) { toast.error('Online bookings are paid in full in advance — enter the amount received'); return; }
+    if (form.source === 'online' && !form.advance_paid_at) { toast.error('Enter the date the advance was actually received'); return; }
     if (form.client_category === 'civilian' && !form.reference_person.trim()) { toast.error('Civilian guests require a reference person (C/O)'); return; }
     if (effectiveCheckInNow && !form.attendant_id) { toast.error('Select a room attendant before checking in'); return; }
     const guestTotal = Math.max(1, Number(form.adults) || 1) + Math.max(0, Number(form.children) || 0);
@@ -273,6 +276,8 @@ export default function RoomSection({ roomId, open, onClose, onChanged, members,
         mattress_count: form.mattress_count, special_requests: form.special_requests || null,
         adults: Math.max(1, Number(form.adults) || 1), children: Math.max(0, Number(form.children) || 0),
         source: form.source, online_voucher_no: form.source === 'online' ? form.online_voucher_no.trim() : null,
+        advance_payment_amount: form.source === 'online' ? Number(form.advance_payment_amount) : null,
+        advance_paid_at: form.source === 'online' ? form.advance_paid_at : null,
         check_in_now: effectiveCheckInNow,
         attendant_id: form.attendant_id ? Number(form.attendant_id) : null,
         stay_type: form.stay_type || null,

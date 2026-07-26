@@ -34,30 +34,29 @@ export interface MemberBill {
   id: number;
   member_id: number;
   member_name: string | null;
+  member_rank: string | null;
+  member_service_number: string | null;
+  member_mess_category: string | null;
+  member_is_womens_bloc: boolean;
   month: number;
   year: number;
+  man_days: number;
+  per_head_rate: number;
+  base_menu_amount: number;
+  stay_amount: number;
+  extra_meals_amount: number;
+  ala_carte_amount: number;
+  applied_discount_rate: number;
+  discount_amount: number;
+  discount_reason: string | null;
   total_amount: number;
   status: string;
-}
-
-export interface BillingStats {
-  today_collections: number;
-  month_collections: number;
-  today_revenue: number;
-  today_invoice_count: number;
-  month_revenue: number;
-  overdue_invoices: number;
-  payment_methods_today: { method: string; amount: number }[];
-  today_room_revenue: number;
-  today_mess_revenue: number;
-  today_discounts: number;
 }
 
 export interface ClerkDeskContext {
   desk: DeskFeed;
   messOnly: DeskFeed;
   memberBills: MemberBill[];
-  stats: BillingStats | null;
   loading: boolean;
   refresh: () => void;
 }

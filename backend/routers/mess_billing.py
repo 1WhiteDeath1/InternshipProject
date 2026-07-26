@@ -41,6 +41,12 @@ async def list_bills(
     bills = query.order_by(MessBill.year.desc(), MessBill.month.desc()).offset((page - 1) * page_size).limit(page_size).all()
     return {"items": [
         {"id": b.id, "member_id": b.member_id, "member_name": b.member.full_name if b.member else None,
+         # Member "type" fields - joined in here (rather than a separate members
+         # lookup) so a bill card can show who it's for without a second fetch.
+         "member_rank": b.member.rank if b.member else None,
+         "member_service_number": b.member.service_number if b.member else None,
+         "member_mess_category": b.member.mess_category.value if b.member else None,
+         "member_is_womens_bloc": bool(b.member.is_womens_bloc) if b.member else False,
          "month": b.month, "year": b.year, "man_days": b.man_days, "per_head_rate": float(b.per_head_rate),
          "base_menu_amount": float(b.base_menu_amount), "stay_amount": float(b.stay_amount or 0),
          "extra_meals_amount": float(b.extra_meals_amount or 0), "ala_carte_amount": float(b.ala_carte_amount or 0),
