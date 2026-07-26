@@ -24,8 +24,7 @@ export default function SplashScreen() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      const token = localStorage.getItem('token');
-      navigate(token ? '/dashboard' : '/login');
+      navigate('/login');
     }, config.splash_duration_seconds * 1000);
     return () => clearTimeout(timer);
   }, [config, navigate]);

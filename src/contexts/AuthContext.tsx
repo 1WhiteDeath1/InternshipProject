@@ -7,19 +7,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const init = async () => {
-      const token = localStorage.getItem('token');
-      if (token) {
-        try {
-          const res = await api.get('/auth/me');
-          setUser(res.data);
-        } catch {
-          localStorage.removeItem('token');
-        }
-      }
-      setLoading(false);
-    };
-    init();
+    // Shared terminals, not personal devices: every fresh app load must show
+    // the Login page, even if a still-valid token is sitting in localStorage
+    // from a previous person's session.
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setLoading(false);
   }, []);
 
   const login = useCallback(async (username: string, password: string) => {
