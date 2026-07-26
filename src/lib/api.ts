@@ -7,6 +7,14 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+// "Remember me" unchecked: the token lives only here, for the lifetime of
+// this tab's JS runtime - never written to localStorage, so a reload or a
+// fresh tab loses it and the app falls back to the Login page.
+let memoryToken: string | null = null;
+export function setMemoryToken(token: string | null) {
+  memoryToken = token;
+}
+
 export function getErrorMessage(err: unknown, fallback = 'Something went wrong'): string {
   if (axios.isAxiosError(err)) {
     const detail = err.response?.data?.detail;
@@ -17,7 +25,7 @@ export function getErrorMessage(err: unknown, fallback = 'Something went wrong')
 }
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem('token') || memoryToken;
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
@@ -26,13 +34,14 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      const hasToken = localStorage.getItem('token');
-      
-      // Only clear storage and force a hard redirect if a token actually existed 
+      const hasToken = localStorage.getItem('token') || memoryToken;
+
+      // Only clear storage and force a hard redirect if a token actually existed
       // (meaning an active session expired)
       if (hasToken) {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
+        memoryToken = null;
         window.location.href = '/login';
       }
     }

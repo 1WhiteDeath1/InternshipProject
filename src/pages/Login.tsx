@@ -5,12 +5,14 @@ import { getErrorMessage } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Hotel, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -23,7 +25,7 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      await login(username, password);
+      await login(username, password, rememberMe);
       toast.success('Login successful');
       navigate('/dashboard');
     } catch (err) {
@@ -70,6 +72,17 @@ export default function Login() {
                 className="h-11"
                 autoComplete="current-password"
               />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="remember-me"
+                checked={rememberMe}
+                onCheckedChange={(checked) => setRememberMe(checked === true)}
+              />
+              <Label htmlFor="remember-me" className="text-sm font-normal text-gray-600 dark:text-gray-400 cursor-pointer">
+                Remember me on this device
+              </Label>
             </div>
 
             <Button type="submit" className="w-full h-11 text-base font-medium" disabled={loading}>
