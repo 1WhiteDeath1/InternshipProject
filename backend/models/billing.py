@@ -16,6 +16,9 @@ class Invoice(Base):
     # the schema can express either; the routers enforce exactly-one.
     booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=True)
     guest_id = Column(Integer, ForeignKey("guests.id"), nullable=True)
+    # Set only for an event/hall-booking invoice (bill_type='event') - always
+    # paired with guest_id (the event's contact), never with booking_id.
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=True)
     issue_date = Column(Date, nullable=False)
     due_date = Column(Date, nullable=False)
     subtotal = Column(Numeric(10, 2), nullable=False)
@@ -36,6 +39,7 @@ class Invoice(Base):
 
     booking = relationship("Booking")
     guest = relationship("Guest")
+    event = relationship("Event")
     items = relationship("InvoiceItem", back_populates="invoice")
 
 

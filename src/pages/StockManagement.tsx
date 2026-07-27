@@ -55,6 +55,7 @@ interface DashboardData {
   low_stock_count: number;
   top_cost_driver: { item_name: string; total_spend: number } | null;
   procurement_frequency: { item_id: number; item_name: string; intake_count: number }[];
+  top_costing_products: { item_id: number; item_name: string; total_spend: number }[];
 }
 
 interface PriceHistory {
@@ -249,9 +250,10 @@ function DashboardTab() {
         </Card>
       </div>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Price Fluctuation Chart */}
+      {/* Price Fluctuation - full width on its own row: the item selector
+          needs room to breathe, and it doesn't pair naturally with the two
+          ranked-list charts below. */}
+      <div className="grid grid-cols-1 gap-6">
         <Card>
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between flex-wrap gap-2">
@@ -301,7 +303,13 @@ function DashboardTab() {
             )}
           </CardContent>
         </Card>
+      </div>
 
+      {/* Two ranked-list views over the same 30-day window, side by side:
+          how often an item gets bought (frequency) vs. how much it actually
+          costs (spend) - a cheap staple and an expensive rarely-bought item
+          can each top one list without topping the other. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Procurement Frequency Chart */}
         <Card>
           <CardHeader className="pb-2">
@@ -320,6 +328,35 @@ function DashboardTab() {
                     formatter={(value: number) => [`${value} times`, 'Procured']}
                   />
                   <Bar dataKey="intake_count" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-[250px] flex items-center justify-center text-gray-400">
+                No procurement data in the last 30 days
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Top Costing Products Chart */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Top Costing Products (30 Days)</CardTitle>
+            <p className="text-sm text-gray-500">Items ranked by total spend</p>
+          </CardHeader>
+          <CardContent>
+            {data.top_costing_products.length > 0 ? (
+              <ResponsiveContainer width="100%" height={250}>
+                <BarChart data={data.top_costing_products} layout="vertical" margin={{ left: 80 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border, #e5e7eb)" />
+                  <XAxis type="number" tick={{ fontSize: 11 }} stroke="var(--muted-foreground, #9ca3af)"
+                    tickFormatter={(v: number) => v >= 1000 ? `${Math.round(v / 1000)}k` : String(v)} />
+                  <YAxis dataKey="item_name" type="category" tick={{ fontSize: 11 }} width={75} stroke="var(--muted-foreground, #9ca3af)" />
+                  <RechartsTooltip
+                    contentStyle={{ background: 'var(--popover, #fff)', border: '1px solid var(--border, #e5e7eb)', borderRadius: 8, fontSize: 13 }}
+                    formatter={(value: number) => [formatCurrency(value), 'Spend']}
+                  />
+                  <Bar dataKey="total_spend" fill="#dc2626" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (

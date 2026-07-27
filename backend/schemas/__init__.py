@@ -67,6 +67,9 @@ from backend.schemas.mess_billing import (
     MessBillOut, GuestMealChargeCreate, GuestMealChargeOut,
     DiscountApplyRequest,
 )
+from backend.schemas.events import (
+    EventMenuItemCreate, EventCreate, EventUpdate, EventStatusUpdate, EventPostponeRequest,
+)
 
 __all__ = [
     "Token", "LoginRequest", "PasswordChange",
@@ -106,4 +109,5 @@ __all__ = [
     "ServeAttendanceRequest", "NoShowSweepResult",
     "MessBillOut", "GuestMealChargeCreate", "GuestMealChargeOut",
     "DiscountApplyRequest",
+    "EventMenuItemCreate", "EventCreate", "EventUpdate", "EventStatusUpdate", "EventPostponeRequest",
 ]

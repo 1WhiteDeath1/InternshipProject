@@ -1,7 +1,7 @@
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/useAuth';
-import { hasPermission } from '@/contexts/auth-context';
+import { hasPermission, getHomePath } from '@/contexts/auth-context';
 import { useTheme } from '@/contexts/useTheme';
 import { useFeatures } from '@/contexts/useFeatures';
 import api from '@/lib/api';
@@ -10,7 +10,7 @@ import {
   Shield, Users, UserCog, ClipboardList, Bell, BarChart3,
   Settings, FileUp, LogOut, Sun, Moon, ChevronLeft, ChevronRight,
   IdCard, UtensilsCrossed, Wallet, ChefHat, LayoutGrid, Menu, X, Contact, UserCircle2, TrendingUp, ClipboardCheck,
-  Plus, Receipt as ReceiptIcon, Camera, ShieldAlert, RefreshCw, UtensilsCrossed as OrderIcon,
+  Plus, Receipt as ReceiptIcon, Camera, ShieldAlert, RefreshCw, UtensilsCrossed as OrderIcon, CalendarDays, Scale,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { QuickBookingModal } from '@/components/QuickBookingModal';
@@ -42,18 +42,18 @@ const navItems = [
   { path: '/bookings', label: 'Bookings', icon: BedDouble, feature: null, requiredPermission: { module: 'bookings', action: 'view' } },
   { path: '/billing', label: 'Billing', icon: Receipt, feature: null, requiredPermission: { module: 'billing', action: 'view' } },
   { path: '/clerk-desk', label: 'Clerk Desk', icon: LayoutGrid, feature: 'clerk_desk', requiredPermission: { module: 'clerk_desk', action: 'view' } },
+  { path: '/billing-reports', label: 'Income & Cost', icon: Scale, feature: null, requiredPermission: { module: 'billing', action: 'view' } },
   { path: '/guests', label: 'Guests', icon: Contact, feature: null, requiredPermission: { module: 'guests', action: 'view' } },
   { path: '/attendants', label: 'Attendants', icon: UserCircle2, feature: null, requiredPermission: { module: 'attendants', action: 'view' } },
   { path: '/members', label: 'Members', icon: IdCard, feature: 'mess_members', requiredPermission: { module: 'members', action: 'view' } },
   { path: '/attendance', label: 'Attendance', icon: UtensilsCrossed, feature: 'mess_attendance', requiredPermission: { module: 'attendance', action: 'view' } },
-  // Clerk works member billing entirely inside Clerk Desk's Members tab now,
-  // so this standalone page is hidden for them even though they still hold
-  // mess_billing:view (needed for that tab to work) - hideIfPermission opts
-  // a nav item out when the user also holds a second, more specific
-  // permission. Booking NCO (mess_billing view+create, no clerk_desk) still
-  // sees it here as their entry point for generating bills / logging charges.
-  { path: '/mess-billing', label: 'Mess Billing', icon: Wallet, feature: 'mess_billing', requiredPermission: { module: 'mess_billing', action: 'view' }, hideIfPermission: { module: 'clerk_desk', action: 'view' } },
+  // Clerk owns mess_billing end-to-end now (generate, issue, collect) - this
+  // standalone page is their entry point for generating the period's bills
+  // and logging guest meal charges; Clerk Desk's Members tab is where they
+  // issue/collect/discount/print what gets generated here.
+  { path: '/mess-billing', label: 'Mess Billing', icon: Wallet, feature: 'mess_billing', requiredPermission: { module: 'mess_billing', action: 'view' } },
   { path: '/kitchen', label: 'Kitchen', icon: ChefHat, feature: 'kitchen_module', requiredPermission: { module: 'kitchen', action: 'view' } },
+  { path: '/events', label: 'Events', icon: CalendarDays, requiredPermission: { module: 'events', action: 'view' } },
   { path: '/security', label: 'Security', icon: Shield, feature: null, requiredPermission: { module: 'security', action: 'view' } },
   { path: '/approvals', label: 'Approvals', icon: ClipboardCheck, requiredPermission: { module: 'procurement', action: 'approve' } },
   { path: '/users', label: 'Users', icon: Users, requiredPermission: { module: 'users', action: 'view' } },
@@ -87,6 +87,15 @@ export default function Layout() {
     if (!loading && !user) navigate('/login');
   }, [user, loading, navigate]);
 
+  const homePath = getHomePath(user);
+  const noDashboard = homePath !== '/dashboard';
+
+  // Booking NCO has no Dashboard of its own - bounce back to their real home
+  // if they land on /dashboard anyway (direct URL, stale link, browser back).
+  useEffect(() => {
+    if (!loading && user && noDashboard && location.pathname === '/dashboard') navigate(homePath, { replace: true });
+  }, [user, loading, noDashboard, homePath, location.pathname, navigate]);
+
   // Close the drawer on navigation (adjust-state-during-render, not an effect)
   const [prevPath, setPrevPath] = useState(location.pathname);
   if (location.pathname !== prevPath) {
@@ -110,9 +119,9 @@ export default function Layout() {
   if (loading || !user) return null;
 
   const filteredNav = navItems.filter(item => {
+    if (item.path === '/dashboard' && noDashboard) return false;
     if (item.requiredPermission && !hasPermission(user, item.requiredPermission.module, item.requiredPermission.action)) return false;
     if (item.feature && !isEnabled(item.feature)) return false;
-    if (item.hideIfPermission && hasPermission(user, item.hideIfPermission.module, item.hideIfPermission.action)) return false;
     return true;
   });
 
@@ -213,9 +222,9 @@ export default function Layout() {
               <Menu size={22} className="text-gray-700 dark:text-gray-300" />
             </button>
             <div className="flex items-center gap-2 text-base text-gray-500 dark:text-gray-400 min-w-0">
-              {location.pathname !== '/dashboard' && (
+              {location.pathname !== homePath && (
                 <>
-                  <button onClick={() => navigate('/dashboard')} className="hover:text-blue-600 transition-colors hidden sm:block">Home</button>
+                  <button onClick={() => navigate(homePath)} className="hover:text-blue-600 transition-colors hidden sm:block">Home</button>
                   <span className="hidden sm:block">/</span>
                   <span className="text-gray-700 dark:text-gray-300 font-medium capitalize truncate">
                     {location.pathname.slice(1).replace(/-/g, ' ')}

@@ -17,10 +17,11 @@ import { RoomLeaseDispatchView, DietInvoiceView } from '@/components/MessBillPri
 import { useClerkDesk, type MemberBill } from './context';
 
 // Member billing, merged in from the old standalone Mess Billing page (Clerk
-// now works this entirely from Clerk Desk). Clerk has mess_billing view/edit/
-// approve but NOT create - generating the month's bills and logging a
-// sponsored guest meal stay on the front desk's Mess Billing page. This tab
-// picks up from there: issue, collect, discount, print.
+// now works this entirely from Clerk Desk). Clerk holds full mess_billing
+// access (view/create/edit/approve) - the standalone Mess Billing page is
+// still where bills get generated and guest meal charges get logged (this
+// tab intentionally excludes both); this tab picks up from there: issue,
+// collect, discount, print.
 
 const MONTHS = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 

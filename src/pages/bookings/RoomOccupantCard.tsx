@@ -3,6 +3,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { LogIn, LogOut, CalendarPlus, ArrowRight, X } from 'lucide-react';
 import { formatCurrency } from '@/lib/currency';
+import { useAuth } from '@/contexts/useAuth';
+import { hasPermission } from '@/contexts/auth-context';
 import { GuestChargePanel } from '@/components/GuestChargePanel';
 import { ROOM_TYPE_LABELS, addDays, fmtDay, selectClass, type CalendarData, type CalendarStay, type AttendantOption } from './shared';
 import { HraBadge } from './badges';
@@ -49,6 +51,10 @@ export function RoomOccupantCard({
   attendants, arrivalAttendantId, onArrivalAttendantChange, onCheckInArrival,
   reloadCalendar, onChanged,
 }: RoomOccupantCardProps) {
+  const { user } = useAuth();
+  // Charge logging is Clerk's domain now, not Booking NCO's - only render the
+  // panel (which reads/writes via the billing module) for whoever can use it.
+  const canLogRoomCharges = hasPermission(user, 'billing', 'view');
   return (
     <>
       {current && (
@@ -156,7 +162,7 @@ export function RoomOccupantCard({
       </div>
       )}
 
-      {current && current.nature_of_duty !== 'hra' && (
+      {current && current.nature_of_duty !== 'hra' && canLogRoomCharges && (
         <GuestChargePanel bookingId={current.id} isMess={false}
           onChanged={() => { reloadCalendar(); onChanged(); }}
           onTotalsChange={onTotalsChange} />

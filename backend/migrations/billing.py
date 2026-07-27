@@ -97,8 +97,23 @@ def _migrate_invoices_guest_walkin(engine):
         raw.close()
 
 
+def _migrate_invoices_event_id(engine):
+    # Lets an invoice belong to an event/hall booking (bill_type='event'),
+    # paired with guest_id. Additive/nullable - the events table is created
+    # fresh by create_all() before migrations run, so the FK target exists.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(invoices)")).fetchall()
+        if not cols:
+            return
+        if "event_id" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN event_id INTEGER REFERENCES events(id)"))
+            conn.commit()
+            logger.info("migration: added invoices.event_id")
+
+
 MIGRATIONS = [
     _migrate_invoices_bill_type,
     _migrate_invoices_complimentary,
     _migrate_invoices_guest_walkin,
+    _migrate_invoices_event_id,
 ]

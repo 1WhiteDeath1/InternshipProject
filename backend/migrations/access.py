@@ -28,33 +28,52 @@ _ROLE_PERMISSIONS = {
         # Administration: staff/access, the member roster (master-data), and system config
         "users": "VCE", "roles": "VCE", "members": "VCE",
         "settings": "VE", "features": "VE", "backup": "VC", "branding": "VE", "import_export": "VC",
+        # View-only - the Dashboard's Events widget summarizes what Deputy
+        # Manager/Kitchen NCO are running; Manager doesn't operate it.
+        "events": "V",
     },
     # Acting-manager oversight. Same shape as Manager MINUS: users/roles (no access
     # admin), audit + alerts (no logs), members (PII), and discount authority. Keeps
     # PO sign-off (spend), policy/rate-setting, system config, and reports.
+    # Tariffs are view-only here - room-rate policy is Manager's call alone.
     "Deputy Manager": {
         "reports": "V",
         "procurement": "VA",
-        "tariffs": "VE", "womens_bloc_rates": "VE", "menu_prices": "VE",
+        "tariffs": "V", "womens_bloc_rates": "VE", "menu_prices": "VE",
         "settings": "VE", "features": "VE", "backup": "VC", "branding": "VE",
+        # Owns hall/function event bookings end-to-end: creates them, sets
+        # the hall/capacity/headcount, and is the one who postpones/cancels
+        # if a capacity issue comes up (no automated conflict check exists).
+        "events": "VCE",
     },
-    # Owns billing/finalization end-to-end: invoice + mess-bill discounts,
-    # complimentary bills, and settlement. This is where all concessions live.
+    # Owns billing/finalization end-to-end: charge logging, invoicing, the
+    # monthly mess-bill run, discounts, complimentary bills, and settlement.
     # No bookings:view - the booking context a Clerk needs (dates, room, rate
     # breakdown) already surfaces inline in Clerk Desk/Checkout; the Bookings
     # page itself is Booking NCO's create/edit workspace, not a Clerk lookup.
+    # No guests:view either - the Customer Directory isn't needed by either
+    # money-facing or front-desk staff (see Booking NCO below).
     "Clerk": {
-        "clerk_desk": "VCEA", "billing": "VE", "mess_billing": "VEA",
-        "guests": "V", "members": "V",
-        "menu_prices": "V", "tariffs": "V", "womens_bloc_rates": "V",
+        "clerk_desk": "VCEA", "billing": "VCE", "mess_billing": "VCEA",
+        "members": "V", "menu_prices": "V", "tariffs": "V", "womens_bloc_rates": "V",
+        # View-only - needs to see which events are completed and ready to
+        # invoice; the actual invoice-generation endpoint is gated on
+        # clerk_desk:create like every other invoice-creating action.
+        "events": "V",
     },
     "Kitchen NCO": {
         "inventory": "VCE", "kitchen": "VCE", "recipes": "VCE", "procurement": "VC",
         "menu_prices": "V", "attendance": "VCE",
+        # Sets the event's menu and advances it through the prep lifecycle
+        # (menu_set -> preparing -> completed) - not the booking itself.
+        "events": "VE",
     },
+    # Front desk only - no billing/mess_billing (Clerk owns money end-to-end)
+    # and no guests:view (the Customer Directory is dropped for this role too;
+    # check-in's own name/CNIC autocomplete is carried by bookings:view
+    # instead, see the /guests/search permission check in guests.py).
     "Booking NCO": {
-        "bookings": "VCE", "guests": "VCE", "attendants": "VCE",
-        "billing": "VC", "mess_billing": "VC",
+        "bookings": "VCE", "attendants": "VCE",
         "members": "V", "tariffs": "V", "womens_bloc_rates": "V",
     },
     "Security Guard": {
@@ -64,9 +83,9 @@ _ROLE_PERMISSIONS = {
 _ROLE_DESCRIPTIONS = {
     "Manager": "Oversight, PO approvals, bill-correction approvals, rate/pricing policy, and staff/system administration - no hands-on operational work",
     "Deputy Manager": "Acting-manager oversight, PO approvals, and policy - no user/role admin, logs, PII, or discount/correction authority",
-    "Clerk": "Owns billing end-to-end - invoice/mess-bill discounts, complimentary bills, and settlement; bill corrections require Manager approval",
+    "Clerk": "Owns billing end-to-end - charge logging, invoicing, monthly mess bills, discounts, complimentary bills, and settlement; bill corrections require Manager approval",
     "Kitchen NCO": "Inventory, kitchen production, recipe costing, and raising purchase orders",
-    "Booking NCO": "Front desk - bookings, guest/attendant registration, charge logging",
+    "Booking NCO": "Front desk - bookings and attendant registration only; billing and the customer directory belong to Clerk",
     "Security Guard": "Incident reports and security logs",
 }
 _ACTION_LETTERS = {"V": "view", "C": "create", "E": "edit", "A": "approve"}

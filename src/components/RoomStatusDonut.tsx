@@ -41,7 +41,7 @@ export function RoomStatusDonut({ counts }: { counts: RoomStatusCounts | null })
   const rate = counts ? Math.round((counts.occupied / (counts.total_rooms || 1)) * 100) : 0;
 
   return (
-    <div className="flex items-center gap-4 flex-wrap sm:flex-nowrap">
+    <div className="flex items-center gap-4 flex-wrap">
       <div className="relative w-44 h-44 shrink-0 mx-auto">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>

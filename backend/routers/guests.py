@@ -13,7 +13,10 @@ router = APIRouter()
 
 @router.get("/search", response_model=list[GuestOut])
 async def search_guests(q: str = Query(..., min_length=2), db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    if not check_permission(current_user, "guests", "view"):
+    # Also usable via bookings:view - Booking NCO doesn't hold the Customer
+    # Directory permission, but still needs this for the check-in form's
+    # name/CNIC autocomplete (_find_or_create_guest matching).
+    if not (check_permission(current_user, "guests", "view") or check_permission(current_user, "bookings", "view")):
         raise HTTPException(status_code=403, detail="Permission denied")
     return db.query(Guest).filter(
         (Guest.full_name.contains(q)) | (Guest.phone.contains(q)) | (Guest.id_number.contains(q))

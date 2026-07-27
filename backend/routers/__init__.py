@@ -24,3 +24,4 @@ from backend.routers.guests import router as guests_router
 from backend.routers.attendants import router as attendants_router
 from backend.routers.tariffs import router as tariffs_router
 from backend.routers.womens_bloc_rates import router as womens_bloc_rates_router
+from backend.routers.events import router as events_router

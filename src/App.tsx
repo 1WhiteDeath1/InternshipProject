@@ -15,6 +15,7 @@ import ClerkLiveGuests from '@/pages/clerk-desk/LiveGuests';
 import ClerkCheckout from '@/pages/clerk-desk/Checkout';
 import ClerkMessOnly from '@/pages/clerk-desk/MessOnly';
 import ClerkMembers from '@/pages/clerk-desk/Members';
+import BillingReports from '@/pages/BillingReports';
 import Guests from '@/pages/Guests';
 import Attendants from '@/pages/Attendants';
 import Tariffs from '@/pages/Tariffs';
@@ -32,6 +33,7 @@ import Approvals from '@/pages/Approvals';
 import Reports from '@/pages/Reports';
 import Settings from '@/pages/Settings';
 import ImportExport from '@/pages/ImportExport';
+import Events from '@/pages/Events';
 import NotFound from '@/pages/NotFound';
 
 function App() {
@@ -55,6 +57,7 @@ function App() {
                   <Route path="mess-only" element={<ClerkMessOnly />} />
                   <Route path="members" element={<ClerkMembers />} />
                 </Route>
+                <Route path="/billing-reports" element={<BillingReports />} />
                 <Route path="/guests" element={<Guests />} />
                 <Route path="/attendants" element={<Attendants />} />
                 <Route path="/tariffs" element={<Tariffs />} />
@@ -72,6 +75,7 @@ function App() {
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/import-export" element={<ImportExport />} />
+                <Route path="/events" element={<Events />} />
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>

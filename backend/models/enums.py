@@ -133,3 +133,14 @@ class MessBillStatus(str, enum.Enum):
     DRAFT = "draft"
     ISSUED = "issued"
     PAID = "paid"
+
+class EventStatus(str, enum.Enum):
+    BOOKED = "booked"
+    MENU_SET = "menu_set"
+    PREPARING = "preparing"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+class EventBillingType(str, enum.Enum):
+    SPLIT = "split"
+    SINGLE_PAYER = "single_payer"

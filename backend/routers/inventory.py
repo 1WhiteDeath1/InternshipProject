@@ -572,12 +572,38 @@ async def inventory_dashboard(
         for r in freq_rows
     ]
 
+    # Top costing products (last 30 days): ranked by total spend, same
+    # underlying figure as top_cost_driver above but the full top-10 list
+    # instead of just the single highest item - the "which products actually
+    # drive the procurement bill" counterpart to procurement_frequency's
+    # "which products get bought most often" (a cheap, frequently-bought item
+    # and an expensive, rarely-bought one can both rank highly here for very
+    # different reasons, which is exactly why both views are shown).
+    cost_rows = (
+        db.query(
+            StockBatch.item_id,
+            InventoryItem.name,
+            func.sum(StockBatch.quantity * StockBatch.unit_cost).label("total_spend"),
+        )
+        .join(InventoryItem, StockBatch.item_id == InventoryItem.id)
+        .filter(StockBatch.created_at >= thirty_days_ago, StockBatch.is_active == True)
+        .group_by(StockBatch.item_id, InventoryItem.name)
+        .order_by(func.sum(StockBatch.quantity * StockBatch.unit_cost).desc())
+        .limit(10)
+        .all()
+    )
+    top_costing_products = [
+        {"item_id": r.item_id, "item_name": r.name, "total_spend": round(float(r.total_spend or 0), 2)}
+        for r in cost_rows
+    ]
+
     return {
         "month_total": round(float(month_total), 2),
         "inventory_value": round(inventory_value, 2),
         "low_stock_count": low_stock_count,
         "top_cost_driver": top_cost_driver,
         "procurement_frequency": procurement_frequency,
+        "top_costing_products": top_costing_products,
     }
 
 

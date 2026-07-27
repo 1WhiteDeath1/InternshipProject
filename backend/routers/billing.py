@@ -1,17 +1,20 @@
 """Billing and invoicing router."""
 import hashlib
+import io
 import json
 import uuid
 from datetime import datetime, date, timedelta
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Body
-from sqlalchemy import or_
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
+from sqlalchemy import or_, func
 from sqlalchemy.orm import Session, joinedload
 from backend.database import get_db
 from backend.models import (
     Invoice, InvoiceItem, InvoicePayment, Booking, BookingCharge, InvoiceStatus,
     ClientCategory, MealAttendance, KitchenOrder, MenuPrice, User, Guest,
-    InvoiceEditRequest, EditRequestStatus,
+    InvoiceEditRequest, EditRequestStatus, PurchaseOrder, InventoryItem, StockBatch, WasteLog,
 )
 from backend.schemas import (
     InvoiceItemCreate, BookingChargeCreate, PaymentCreate, DiscountApplyRequest,
@@ -460,8 +463,12 @@ async def mess_only_desk(db: Session = Depends(get_db), current_user=Depends(get
             "room_number": None, "status": "walk_in", "balance": bal,
         })
 
+    # Event invoices are also guest_id-linked (no booking) but aren't a walk-in
+    # mess bill - they'd otherwise show up here mislabeled as "mess". They're
+    # settled from the Events page or the general Billing page instead.
     open_invoices = db.query(Invoice).filter(
         Invoice.guest_id.isnot(None), Invoice.status.in_((InvoiceStatus.DRAFT, InvoiceStatus.ISSUED)),
+        Invoice.bill_type != "event",
     ).order_by(Invoice.created_at.desc()).all()
     unsettled = []
     for inv in open_invoices:
@@ -561,9 +568,10 @@ async def list_booking_charges(booking_id: int, db: Session = Depends(get_db), c
 
 @router.post("/bookings/{booking_id}/charges")
 async def add_booking_charge(booking_id: int, data: BookingChargeCreate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    # Decoupled billing: a mess charge (Extra Messing, Sui Gas...) is Mess
-    # Staff's domain, everything else (Dhobi, Breakage, Allied...) is
-    # Booking Staff's - each guarded by its own existing permission module.
+    # Clerk owns both sides of ad-hoc charge logging now (mess_billing:create
+    # for Extra Messing/Sui Gas, billing:create for Dhobi/Breakage/Allied) -
+    # kept as two permission checks rather than one so a future role could
+    # still be scoped to just one side.
     required_module = "mess_billing" if data.is_mess_charge else "billing"
     if not check_permission(current_user, required_module, "create"):
         raise HTTPException(status_code=403, detail="Permission denied")
@@ -637,8 +645,9 @@ async def instant_checkout(booking_id: int, request: Request, bill_types: Option
     if booking.nature_of_duty == "hra":
         raise HTTPException(status_code=400, detail="HRA residents settle via the monthly Mess Bill - this residency cannot be checked out here")
 
-    # Booking/Mess Staff only ever log charges (add_booking_charge, gated
-    # separately below) - generating the actual invoice is the Clerk's job.
+    # billing/mess_billing:create only ever logs a charge (add_booking_charge,
+    # gated separately above) - generating the actual invoice needs its own,
+    # separate clerk_desk:create permission.
     if not check_permission(current_user, "clerk_desk", "create"):
         raise HTTPException(status_code=403, detail="Permission denied")
 
@@ -1254,3 +1263,214 @@ async def billing_stats(db: Session = Depends(get_db), current_user=Depends(get_
         "today_discounts": round(today_discounts, 2),
         "month_collections": round(month_collections, 2),
     }
+
+
+def _period_bounds(period: str, date_str: Optional[str]):
+    """Resolves a period=month|year + optional reference date into
+    [start, end) date bounds, defaulting to the period containing today."""
+    ref = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else date.today()
+    if period == "year":
+        start = ref.replace(month=1, day=1)
+        end = start.replace(year=start.year + 1)
+    else:
+        start = ref.replace(day=1)
+        end = date(start.year + 1, 1, 1) if start.month == 12 else start.replace(month=start.month + 1)
+    return start, end
+
+
+@router.get("/reports/summary")
+async def billing_report_summary(period: str = Query("month", pattern="^(month|year)$"),
+                                  as_of: Optional[str] = Query(None, alias="date", description="Any date within the period, defaults to today"),
+                                  db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Clerk-facing month/year income-vs-cost report - reachable on the same
+    billing:view permission the Clerk already has, so it doesn't need the
+    Manager-only 'reports' module.
+
+    Cost is only ever tracked on the mess/kitchen side (Procurement spend +
+    WasteLog) - there is no housekeeping/utility/maintenance cost model for
+    rooms anywhere in this system, so `room.cost`/`room.margin` come back
+    `None` rather than a fabricated figure. Don't attribute any procurement
+    or waste cost to the room side - every InventoryItem in this system is
+    kitchen/mess stock, never room supplies."""
+    if not check_permission(current_user, "billing", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    start, end = _period_bounds(period, as_of)
+    start_dt = datetime.combine(start, datetime.min.time())
+    end_dt = datetime.combine(end, datetime.min.time())
+
+    invoices = db.query(Invoice).filter(Invoice.issue_date >= start, Invoice.issue_date < end).all()
+    billed = [inv for inv in invoices if inv.status.value in ("issued", "paid")]
+    voided = [inv for inv in invoices if inv.status.value == "void"]
+
+    room_revenue = sum(float(inv.total_amount) for inv in billed if inv.bill_type == "room")
+    mess_revenue = sum(float(inv.total_amount) for inv in billed if inv.bill_type == "mess")
+    total_revenue = sum(float(inv.total_amount) for inv in billed)
+    other_revenue = round(total_revenue - room_revenue - mess_revenue, 2)
+    discounts_total = sum(float(inv.discount) for inv in invoices if inv.discount)
+
+    today = date.today()
+    overdue_amount = sum(
+        max(float(inv.total_amount) - float(inv.amount_paid or 0), 0.0)
+        for inv in invoices
+        if inv.status.value == "issued" and inv.due_date and inv.due_date < today
+    )
+
+    # Cash in: money actually received during the period (payment date, not
+    # invoice issue date - a payment can land against a bill issued earlier).
+    payments = db.query(InvoicePayment).filter(
+        InvoicePayment.created_at >= start_dt, InvoicePayment.created_at < end_dt,
+    ).all()
+    collections_total = sum(float(p.amount) for p in payments)
+    collections_by_method: dict = {}
+    for p in payments:
+        m = p.method or "Cash"
+        collections_by_method[m] = collections_by_method.get(m, 0.0) + float(p.amount)
+
+    # Mess cost: committed procurement spend + logged waste in the period -
+    # the same two figures Manager's dashboard treats as "cost", both of
+    # which are entirely kitchen/mess stock. Not an actual paid-to-vendor
+    # cash ledger (no such thing exists), but a real committed-spend figure.
+    procurement_spend = float(db.query(func.sum(PurchaseOrder.total_amount)).filter(
+        PurchaseOrder.created_at >= start_dt, PurchaseOrder.created_at < end_dt,
+        PurchaseOrder.status.notin_(["draft", "cancelled"]),
+    ).scalar() or 0)
+    waste_cost = float(db.query(func.sum(WasteLog.cost)).filter(
+        WasteLog.created_at >= start_dt, WasteLog.created_at < end_dt,
+    ).scalar() or 0)
+    mess_cost = procurement_spend + waste_cost
+
+    return {
+        "period": period,
+        "start_date": start.isoformat(),
+        "end_date": (end - timedelta(days=1)).isoformat(),
+        "room": {
+            "income": round(room_revenue, 2),
+            "cost": None,
+            "margin": None,
+        },
+        "mess": {
+            "income": round(mess_revenue, 2),
+            "cost": round(mess_cost, 2),
+            "margin": round(mess_revenue - mess_cost, 2),
+        },
+        "mess_cost_breakdown": {
+            "procurement": round(procurement_spend, 2),
+            "waste": round(waste_cost, 2),
+        },
+        "other_revenue": max(other_revenue, 0.0),
+        "total_revenue": round(total_revenue, 2),
+        "invoice_count": len(billed),
+        "discounts_total": round(discounts_total, 2),
+        "void_count": len(voided),
+        "void_amount": round(sum(float(inv.total_amount) for inv in voided), 2),
+        "overdue_amount": round(overdue_amount, 2),
+        "cash_in_total": round(collections_total, 2),
+        "cash_in_by_method": [
+            {"method": m, "amount": round(a, 2)} for m, a in sorted(collections_by_method.items(), key=lambda x: -x[1])
+        ],
+    }
+
+
+@router.get("/stock-summary")
+async def billing_stock_summary(limit: int = Query(8, ge=1, le=50),
+                                 db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Read-only stock valuation snapshot for the Clerk's billing reports.
+    Deliberately narrow (no inventory:view grant) - Inventory management
+    itself stays Kitchen NCO's job; this only surfaces the total value and a
+    top-items list a Clerk needs for the monthly report."""
+    if not check_permission(current_user, "billing", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    items = db.query(InventoryItem).filter(InventoryItem.is_active == True).all()
+    rows = []
+    total_value = 0.0
+    low_stock_count = 0
+    for item in items:
+        batches = db.query(StockBatch).filter(StockBatch.item_id == item.id, StockBatch.is_active == True).all()
+        quantity = sum(b.quantity for b in batches)
+        value = sum(float(b.unit_cost or 0) * b.quantity for b in batches)
+        total_value += value
+        if item.reorder_level and quantity <= item.reorder_level:
+            low_stock_count += 1
+        rows.append({"id": item.id, "name": item.name, "sku": item.sku, "unit": item.unit,
+                      "quantity": quantity, "value": round(value, 2)})
+    rows.sort(key=lambda r: r["value"], reverse=True)
+    return {
+        "total_stock_value": round(total_value, 2),
+        "low_stock_count": low_stock_count,
+        "top_items": rows[:limit],
+    }
+
+
+@router.get("/export/invoices")
+async def export_invoices(start: Optional[str] = Query(None), end: Optional[str] = Query(None),
+                           db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Excel export of invoices, optionally bounded by issue_date. Gated on
+    billing:view (not the import_export module) so the Clerk can export their
+    own domain's data without the master-data import/export permission."""
+    if not check_permission(current_user, "billing", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    q = db.query(Invoice).options(joinedload(Invoice.booking).joinedload(Booking.room), joinedload(Invoice.guest))
+    if start:
+        q = q.filter(Invoice.issue_date >= datetime.strptime(start, "%Y-%m-%d").date())
+    if end:
+        q = q.filter(Invoice.issue_date <= datetime.strptime(end, "%Y-%m-%d").date())
+    invoices = q.order_by(Invoice.issue_date.desc(), Invoice.id.desc()).limit(5000).all()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Invoices"
+    ws.append(["Invoice #", "Type", "Guest", "Room", "Issue Date", "Due Date", "Status", "Total", "Paid", "Balance", "Discount"])
+    for inv in invoices:
+        b = inv.booking
+        guest_name = b.guest_name if b else (inv.guest.full_name if inv.guest else "")
+        room_no = b.room.room_number if b and b.room else ""
+        ws.append([
+            inv.invoice_number, inv.bill_type or "combined", guest_name, room_no,
+            inv.issue_date.isoformat() if inv.issue_date else "", inv.due_date.isoformat() if inv.due_date else "",
+            inv.status.value, float(inv.total_amount), float(inv.amount_paid or 0),
+            float(inv.total_amount) - float(inv.amount_paid or 0), float(inv.discount or 0),
+        ])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                              headers={"Content-Disposition": f"attachment; filename=invoices_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.xlsx"})
+
+
+@router.get("/export/payments")
+async def export_payments(start: Optional[str] = Query(None), end: Optional[str] = Query(None),
+                           db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Excel export of recorded payments (cash-in ledger), optionally bounded
+    by the payment's received date."""
+    if not check_permission(current_user, "billing", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    q = db.query(InvoicePayment).options(
+        joinedload(InvoicePayment.invoice).joinedload(Invoice.booking).joinedload(Booking.room),
+        joinedload(InvoicePayment.invoice).joinedload(Invoice.guest),
+    )
+    if start:
+        q = q.filter(InvoicePayment.created_at >= datetime.strptime(start, "%Y-%m-%d"))
+    if end:
+        q = q.filter(InvoicePayment.created_at < datetime.strptime(end, "%Y-%m-%d") + timedelta(days=1))
+    payments = q.order_by(InvoicePayment.created_at.desc()).limit(5000).all()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Payments"
+    ws.append(["Date", "Invoice #", "Guest", "Room", "Amount", "Method", "Notes"])
+    for p in payments:
+        inv = p.invoice
+        b = inv.booking if inv else None
+        guest_name = b.guest_name if b else (inv.guest.full_name if inv and inv.guest else "")
+        room_no = b.room.room_number if b and b.room else ""
+        ws.append([
+            p.created_at.isoformat() if p.created_at else "", inv.invoice_number if inv else "",
+            guest_name, room_no, float(p.amount), p.method or "", p.notes or "",
+        ])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                              headers={"Content-Disposition": f"attachment; filename=payments_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.xlsx"})

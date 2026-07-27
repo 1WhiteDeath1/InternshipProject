@@ -7,9 +7,10 @@ import { Trash2 } from 'lucide-react';
 import { formatCurrency } from '@/lib/currency';
 import { ROOM_CHARGE_HEADS, MESS_CHARGE_HEADS, CUSTOM_CHARGE_HEAD, type BookingCharge } from '@/pages/bookings/shared';
 
-/** Where Booking Staff (room charges) and Mess/Kitchen Staff (mess charges)
-    log costs as a guest incurs them - a running tally only, no invoice or
-    checkout action here. The Clerk turns this into a bill later. */
+/** Where charges get logged as a guest incurs them (Clerk for room charges via
+    the Billing page's quick action, Kitchen/Mess Staff for mess charges) - a
+    running tally only, no invoice or checkout action here. The Clerk turns
+    this into a bill later. */
 export function GuestChargePanel({ bookingId, isMess, title, onChanged, onTotalsChange }: {
   bookingId: number; isMess: boolean; title?: string; onChanged?: () => void; onTotalsChange?: (total: number) => void;
 }) {

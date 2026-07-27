@@ -37,6 +37,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setMemoryToken(access_token);
     }
     setUser(userData);
+    return userData as User;
   }, []);
 
   const logout = useCallback(async () => {

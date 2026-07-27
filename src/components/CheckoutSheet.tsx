@@ -9,10 +9,10 @@ import { ChargeSplitBar } from '@/components/ChargeSplitBar';
 import { formatCurrency } from '@/lib/currency';
 
 // The Clerk's checkout surface - the only place an invoice actually gets
-// generated. Booking Staff and Mess Staff log charges elsewhere (the Room
-// Charges panel in the room view, the Guest Mess Charges tab in Kitchen) as
-// a guest incurs them; by the time a stay reaches here, the Clerk just
-// reviews the accumulated total and generates one invoice.
+// generated. Charges accrue elsewhere first (the Clerk's own global "+ Log
+// Charge" quick action, or the Guest Mess Charges tab in Kitchen) as a guest
+// incurs them; by the time a stay reaches here, the Clerk just reviews the
+// accumulated total and generates one invoice.
 
 export interface CheckoutGuest {
   id: number;
@@ -145,7 +145,7 @@ export function CheckoutSheet({ guest, onOpenChange, onDone }: {
                         total={balance.mess_bill_total} billed={balance.mess_billed} accent="border-orange-300 dark:border-orange-800" />
                     </div>
                     <p className="text-xs text-gray-500">
-                      Room and mess charges are logged by Booking Staff and Mess Staff as the stay goes on (Room Charges panel / Kitchen's Guest Mess Charges tab) — this total reflects everything logged so far.
+                      Room and mess charges are logged as the stay goes on (the "+ Log Charge" quick action / Kitchen's Guest Mess Charges tab) — this total reflects everything logged so far.
                     </p>
                     <div className="rounded-lg border p-3 text-sm space-y-1">
                       {balance.advance_credit_applied > 0 && (

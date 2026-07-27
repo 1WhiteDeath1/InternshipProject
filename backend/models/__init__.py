@@ -6,7 +6,7 @@ from backend.models.enums import (
     UserStatus, BookingStatus, RoomStatus, RoomType, POStatus, InvoiceStatus,
     IngredientType, WasteCategory, AlertSeverity, AlertStatus, AuditAction,
     MessCategory, MemberStatus, ClientCategory, MealType, AttendanceStatus,
-    LeaveStatus, MessBillStatus, EditRequestStatus,
+    LeaveStatus, MessBillStatus, EditRequestStatus, EventStatus, EventBillingType,
 )
 from backend.models.access import Role, RolePermission, User
 from backend.models.system import FeatureFlag, SystemSetting
@@ -28,12 +28,13 @@ from backend.models.security import SecurityLog, IncidentReport
 from backend.models.members import Member, MemberLeave
 from backend.models.attendance import MealAttendance
 from backend.models.mess_billing import MessBill, GuestMealCharge
+from backend.models.events import Event, EventMenuItem
 
 __all__ = [
     "UserStatus", "BookingStatus", "RoomStatus", "RoomType", "POStatus", "InvoiceStatus",
     "IngredientType", "WasteCategory", "AlertSeverity", "AlertStatus", "AuditAction",
     "MessCategory", "MemberStatus", "ClientCategory", "MealType", "AttendanceStatus",
-    "LeaveStatus", "MessBillStatus", "EditRequestStatus",
+    "LeaveStatus", "MessBillStatus", "EditRequestStatus", "EventStatus", "EventBillingType",
     "Role", "RolePermission", "User",
     "FeatureFlag", "SystemSetting",
     "AuditLog",
@@ -50,4 +51,5 @@ __all__ = [
     "Member", "MemberLeave",
     "MealAttendance",
     "MessBill", "GuestMealCharge",
+    "Event", "EventMenuItem",
 ]

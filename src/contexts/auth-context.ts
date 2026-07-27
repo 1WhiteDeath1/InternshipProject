@@ -19,7 +19,7 @@ export interface User {
 
 export interface AuthContextType {
   user: User | null;
-  login: (username: string, password: string, rememberMe: boolean) => Promise<void>;
+  login: (username: string, password: string, rememberMe: boolean) => Promise<User>;
   logout: () => Promise<void>;
   loading: boolean;
 }
@@ -35,4 +35,14 @@ export function hasPermission(user: User | null | undefined, module: string, act
   if (!user) return false;
   if (user.is_supervisor) return true;
   return user.permissions?.some(p => p.module === module && p.action === action) ?? false;
+}
+
+// Booking NCO (the only role with bookings:view but neither reports:view nor
+// clerk_desk:view) has no Dashboard of its own - Bookings is home instead.
+// Keyed off permissions, not role name, so a cloned custom role follows suit.
+export function getHomePath(user: User | null | undefined): string {
+  if (hasPermission(user, 'bookings', 'view') && !hasPermission(user, 'reports', 'view') && !hasPermission(user, 'clerk_desk', 'view')) {
+    return '/bookings';
+  }
+  return '/dashboard';
 }

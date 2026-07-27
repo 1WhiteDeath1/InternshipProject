@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/useAuth';
+import { getHomePath } from '@/contexts/auth-context';
 import { getErrorMessage } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,9 +26,9 @@ export default function Login() {
     }
     setLoading(true);
     try {
-      await login(username, password, rememberMe);
+      const loggedInUser = await login(username, password, rememberMe);
       toast.success('Login successful');
-      navigate('/dashboard');
+      navigate(getHomePath(loggedInUser));
     } catch (err) {
       toast.error(getErrorMessage(err, 'Login failed'));
     } finally {

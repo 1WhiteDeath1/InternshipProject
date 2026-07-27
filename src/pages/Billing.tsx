@@ -168,8 +168,11 @@ export default function Billing() {
                   <TableCell className="font-medium">
                     {inv.invoice_number}
                     {inv.bill_type !== 'combined' && (
-                      <Badge className={`ml-1.5 ${inv.bill_type === 'room' ? 'bg-purple-100 text-purple-800' : 'bg-orange-100 text-orange-800'}`}>
-                        {inv.bill_type === 'room' ? 'Room' : 'Mess'}
+                      <Badge className={`ml-1.5 ${
+                        inv.bill_type === 'room' ? 'bg-purple-100 text-purple-800'
+                        : inv.bill_type === 'event' ? 'bg-indigo-100 text-indigo-800'
+                        : 'bg-orange-100 text-orange-800'}`}>
+                        {inv.bill_type === 'room' ? 'Room' : inv.bill_type === 'event' ? 'Event' : 'Mess'}
                       </Badge>
                     )}
                   </TableCell>
