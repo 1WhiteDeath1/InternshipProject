@@ -11,6 +11,7 @@ class MemberBase(BaseModel):
     unit: Optional[str] = None
     mess_category: str
     is_womens_bloc: bool = False
+    dining_status: str = "dining"
     phone: Optional[str] = None
     email: Optional[str] = None
     custom_discount_rate: float = Field(0, ge=0, le=100)
@@ -24,6 +25,7 @@ class MemberUpdate(BaseModel):
     unit: Optional[str] = None
     mess_category: Optional[str] = None
     is_womens_bloc: Optional[bool] = None
+    dining_status: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
     status: Optional[str] = None

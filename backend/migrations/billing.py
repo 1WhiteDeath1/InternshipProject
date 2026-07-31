@@ -111,9 +111,65 @@ def _migrate_invoices_event_id(engine):
             logger.info("migration: added invoices.event_id")
 
 
+def _migrate_edit_requests_item_id_nullable(engine):
+    """Lets a bill-correction request add a new line under a head that's
+    currently zero/uncharged, not just correct an existing one - the
+    request then carries invoice_id but no invoice_item_id. SQLite can't
+    ALTER a column's NOT NULL away, so this rebuilds the table once (same
+    technique as _migrate_invoices_guest_walkin above). Idempotent: a
+    fresh PRAGMA read on invoice_item_id's notnull flag decides whether to
+    run at all."""
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(invoice_edit_requests)")).fetchall()
+    if not cols:
+        return
+    item_notnull = next((c[3] for c in cols if c[1] == "invoice_item_id"), 0)
+    if not item_notnull:
+        return  # already migrated
+
+    col_names = [c[1] for c in cols]
+    raw = engine.raw_connection()
+    try:
+        cur = raw.cursor()
+        cur.execute("PRAGMA foreign_keys=OFF")
+        cur.execute("""
+            CREATE TABLE invoice_edit_requests_new (
+                id INTEGER NOT NULL PRIMARY KEY,
+                invoice_item_id INTEGER,
+                invoice_id INTEGER NOT NULL,
+                original_description VARCHAR(255) NOT NULL,
+                original_unit_price NUMERIC(10, 2) NOT NULL,
+                proposed_description VARCHAR(255) NOT NULL,
+                proposed_unit_price NUMERIC(10, 2) NOT NULL,
+                reason TEXT NOT NULL,
+                status VARCHAR(20),
+                requested_by INTEGER,
+                requested_at DATETIME,
+                decided_by INTEGER,
+                decided_at DATETIME,
+                decision_reason TEXT,
+                FOREIGN KEY(invoice_item_id) REFERENCES invoice_items (id),
+                FOREIGN KEY(invoice_id) REFERENCES invoices (id),
+                FOREIGN KEY(requested_by) REFERENCES users (id),
+                FOREIGN KEY(decided_by) REFERENCES users (id)
+            )
+        """)
+        carried = ", ".join(col_names)
+        cur.execute(f"INSERT INTO invoice_edit_requests_new ({carried}) SELECT {carried} FROM invoice_edit_requests")
+        cur.execute("DROP TABLE invoice_edit_requests")
+        cur.execute("ALTER TABLE invoice_edit_requests_new RENAME TO invoice_edit_requests")
+        raw.commit()
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.close()
+        logger.info("migration: rebuilt invoice_edit_requests (invoice_item_id now nullable)")
+    finally:
+        raw.close()
+
+
 MIGRATIONS = [
     _migrate_invoices_bill_type,
     _migrate_invoices_complimentary,
     _migrate_invoices_guest_walkin,
     _migrate_invoices_event_id,
+    _migrate_edit_requests_item_id_nullable,
 ]

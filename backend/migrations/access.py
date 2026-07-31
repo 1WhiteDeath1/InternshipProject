@@ -9,64 +9,90 @@ _ROLE_PERMISSIONS = {
     # role's JOB, not to seniority - a higher role is NOT "everyone's modules,
     # read-only". Manager/Deputy do oversight, approvals, policy and admin; they
     # get NONE of the operational transaction modules (bookings, billing, clerk
-    # desk, kitchen, inventory, mess billing, attendance, security), because the
-    # information they'd want from those already reaches them summarized on the
-    # dashboard/reports. Operating those modules is the NCOs'/Clerk's job.
+    # desk, kitchen, inventory, mess billing, attendance, security) beyond the
+    # few narrow, approve-only exceptions called out below - the information
+    # they'd otherwise want already reaches them summarized on the
+    # dashboard/reports. Operating those modules day-to-day is the NCOs'/Clerk's job.
     "Manager": {
         # Oversight (read summaries, act on alerts/incidents at a supervisory level)
         "reports": "V", "audit": "V", "alerts": "VE",
-        # Money authority: sign off SPEND (POs) via the Approvals inbox. Discounts/
-        # complimentary bills stay the Clerk's own call, no approval, overseen only
-        # after the fact via the dashboard's Discounts figure. A Clerk CORRECTING an
-        # already-generated bill's line items (wrong rate/charge entered) is
-        # different from a discount though - that one routes through this same
-        # Approvals inbox, hence "A" only (no V/E/C - they act on the request, they
-        # don't operate Billing itself).
-        "procurement": "VA", "billing": "A",
-        # Policy: rate cards and menu pricing are management decisions
-        "tariffs": "VE", "womens_bloc_rates": "VE", "menu_prices": "VE",
-        # Administration: staff/access, the member roster (master-data), and system config
+        # Money authority: sign off on a Clerk CORRECTING an already-generated
+        # bill's line items (wrong rate/charge entered) via the Approvals
+        # inbox, hence "A" only (no V/E/C - they act on the request, they
+        # don't operate Billing itself). Procurement is view-only: the mess
+        # buys and restocks itself (Kitchen NCO logs it via Daily Stock
+        # Intake), there's no PO to sign off on - Manager just sees spend.
+        "procurement": "V", "billing": "A",
+        # Discount/complimentary authority for guests lives on the dedicated
+        # Guest Discounts page (bookings:approve, below) - no clerk_desk
+        # permission needed, Manager never operates Clerk Desk itself.
+        # Read-only access to the Customer Directory (guest identity/history) so
+        # Manager can look a guest up without needing Booking NCO's full module.
+        "guests": "V",
+        # "A" only: lets Manager override a booking's client_category (and the
+        # bill total that flows from it) via a dedicated endpoint, without
+        # granting general bookings:view/edit - that stays Booking NCO's module.
+        "bookings": "A",
+        # Policy: rate cards are a management decision; menu changes are
+        # Kitchen NCO-proposed but Manager approves ("A" only, same narrow-
+        # slice pattern as billing corrections above). Mess/Gas charge rates
+        # are Kitchen NCO's own call directly - Manager only views the trend.
+        "tariffs": "VE", "womens_bloc_rates": "VE", "menu": "A", "mess_rates": "V",
+        # Administration: staff/access, the member roster (master-data - also
+        # fully owned operationally by Kitchen NCO, see its block below), and system config
         "users": "VCE", "roles": "VCE", "members": "VCE",
         "settings": "VE", "features": "VE", "backup": "VC", "branding": "VE", "import_export": "VC",
         # View-only - the Dashboard's Events widget summarizes what Deputy
         # Manager/Kitchen NCO are running; Manager doesn't operate it.
         "events": "V",
+        # One-way instruction feed: Manager is the only sender ("C"), and can
+        # also see directives addressed to their own role ("V") like everyone else.
+        "directives": "VC",
     },
     # Acting-manager oversight. Same shape as Manager MINUS: users/roles (no access
     # admin), audit + alerts (no logs), members (PII), and discount authority. Keeps
-    # PO sign-off (spend), policy/rate-setting, system config, and reports.
+    # policy/rate-setting, system config, and reports. Procurement is view-only,
+    # same as Manager - see that block's comment (no PO to sign off on).
     # Tariffs are view-only here - room-rate policy is Manager's call alone.
     "Deputy Manager": {
         "reports": "V",
-        "procurement": "VA",
-        "tariffs": "V", "womens_bloc_rates": "VE", "menu_prices": "VE",
+        "procurement": "V",
+        "tariffs": "V", "womens_bloc_rates": "VE", "menu": "A", "mess_rates": "V",
         "settings": "VE", "features": "VE", "backup": "VC", "branding": "VE",
         # Owns hall/function event bookings end-to-end: creates them, sets
         # the hall/capacity/headcount, and is the one who postpones/cancels
         # if a capacity issue comes up (no automated conflict check exists).
-        "events": "VCE",
+        "events": "VCE", "directives": "V",
     },
     # Owns billing/finalization end-to-end: charge logging, invoicing, the
-    # monthly mess-bill run, discounts, complimentary bills, and settlement.
+    # monthly mess-bill run, and settlement. Discount/complimentary authority
+    # is Manager-only (see Manager's "clerk_desk": "A" above) - Clerk no longer
+    # has "A" on clerk_desk, so the master-invoice discount action 403s here.
     # No bookings:view - the booking context a Clerk needs (dates, room, rate
     # breakdown) already surfaces inline in Clerk Desk/Checkout; the Bookings
     # page itself is Booking NCO's create/edit workspace, not a Clerk lookup.
     # No guests:view either - the Customer Directory isn't needed by either
     # money-facing or front-desk staff (see Booking NCO below).
     "Clerk": {
-        "clerk_desk": "VCEA", "billing": "VCE", "mess_billing": "VCEA",
-        "members": "V", "menu_prices": "V", "tariffs": "V", "womens_bloc_rates": "V",
+        "clerk_desk": "VCE", "billing": "VCE", "mess_billing": "VCEA",
+        "members": "V", "tariffs": "V", "womens_bloc_rates": "V",
         # View-only - needs to see which events are completed and ready to
         # invoice; the actual invoice-generation endpoint is gated on
         # clerk_desk:create like every other invoice-creating action.
-        "events": "V",
+        "events": "V", "directives": "V",
     },
     "Kitchen NCO": {
-        "inventory": "VCE", "kitchen": "VCE", "recipes": "VCE", "procurement": "VC",
-        "menu_prices": "V", "attendance": "VCE",
+        "inventory": "VCE", "kitchen": "VCE", "menu": "CE", "mess_rates": "VE", "procurement": "VC",
+        "attendance": "VCE",
+        # Dining/non-dining member classification (incl. marking an HRA
+        # resident who isn't actually eating there as non-dining) is a mess
+        # concern, so Kitchen NCO gets full member access - not just a
+        # dining-status toggle. Room occupancy itself (who's an HRA resident,
+        # who's a checked-in guest) stays view-only - that's Booking NCO's data.
+        "members": "VCE", "bookings": "V",
         # Sets the event's menu and advances it through the prep lifecycle
         # (menu_set -> preparing -> completed) - not the booking itself.
-        "events": "VE",
+        "events": "VE", "directives": "V",
     },
     # Front desk only - no billing/mess_billing (Clerk owns money end-to-end)
     # and no guests:view (the Customer Directory is dropped for this role too;
@@ -74,17 +100,24 @@ _ROLE_PERMISSIONS = {
     # instead, see the /guests/search permission check in guests.py).
     "Booking NCO": {
         "bookings": "VCE", "attendants": "VCE",
-        "members": "V", "tariffs": "V", "womens_bloc_rates": "V",
+        # "C" (not just "V") so a Booking NCO can register a brand-new HRA
+        # member inline from the booking form, instead of only picking from
+        # the existing roster - member roster edits/status changes still stay
+        # Manager's call (no "E" here).
+        "members": "VC", "tariffs": "V", "womens_bloc_rates": "V", "directives": "V",
     },
+    # Gate only - no guest/member/attendant lookup, no directives. Everything
+    # this role needs (check-in/out log, incident reports) lives inside the
+    # security module itself.
     "Security Guard": {
-        "security": "VC", "guests": "V", "members": "V", "attendants": "V",
+        "security": "VC",
     },
 }
 _ROLE_DESCRIPTIONS = {
-    "Manager": "Oversight, PO approvals, bill-correction approvals, rate/pricing policy, and staff/system administration - no hands-on operational work",
-    "Deputy Manager": "Acting-manager oversight, PO approvals, and policy - no user/role admin, logs, PII, or discount/correction authority",
-    "Clerk": "Owns billing end-to-end - charge logging, invoicing, monthly mess bills, discounts, complimentary bills, and settlement; bill corrections require Manager approval",
-    "Kitchen NCO": "Inventory, kitchen production, recipe costing, and raising purchase orders",
+    "Manager": "Oversight, bill-correction approvals, sole discount/complimentary-bill authority (Guest Discounts and Member Discounts pages), booking category overrides, customer lookup, rate/pricing policy, and staff/system administration",
+    "Deputy Manager": "Acting-manager oversight and policy - no user/role admin, logs, PII, or discount/correction authority",
+    "Clerk": "Owns billing end-to-end - charge logging, invoicing, monthly mess bills, and settlement; bill corrections and all discounts/complimentary bills require the Manager to act directly",
+    "Kitchen NCO": "Inventory, kitchen production, proposing menu/price changes, setting mess/gas charge rates, managing the dining member roster, and logging self-purchase stock intake",
     "Booking NCO": "Front desk - bookings and attendant registration only; billing and the customer directory belong to Clerk",
     "Security Guard": "Incident reports and security logs",
 }

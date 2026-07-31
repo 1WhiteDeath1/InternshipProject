@@ -239,14 +239,24 @@ function DraftBill({ data }: { data: PrintData }) {
     Approvals page - this dialog only submits, it never applies the change
     itself. Scoped to one invoice's own items, so it's only offered on a
     single (non-merged) bill view. */
-function RequestCorrectionDialog({ items, invoiceNumber, open, onClose, onSubmitted }: {
-  items: BillItem[]; invoiceNumber: string; open: boolean; onClose: () => void; onSubmitted: () => void;
+const HEAD_PREFIX = 'head:';
+
+function RequestCorrectionDialog({ invoiceId, items, invoiceNumber, open, onClose, onSubmitted }: {
+  invoiceId: number; items: BillItem[]; invoiceNumber: string; open: boolean; onClose: () => void; onSubmitted: () => void;
 }) {
   const [itemId, setItemId] = useState('');
   const [description, setDescription] = useState('');
   const [unitPrice, setUnitPrice] = useState('');
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // Fixed paper-form heads not yet charged on this bill (rendered as "—" in
+  // DraftBill, same matching rule as paperRows()) - offered alongside real
+  // items so a correction can add a charge under one of these, not just
+  // fix an existing line.
+  const unmatchedHeads = PAPER_BILL_HEADS.filter(
+    head => !items.some(it => it.description.toLowerCase().startsWith(head.toLowerCase())),
+  );
 
   // Reset happens on every close path (Cancel, backdrop/Esc via
   // onOpenChange, and after a successful submit) rather than in an effect
@@ -257,24 +267,35 @@ function RequestCorrectionDialog({ items, invoiceNumber, open, onClose, onSubmit
     onClose();
   };
 
-  const selected = items.find(i => String(i.id) === itemId);
+  const isHead = itemId.startsWith(HEAD_PREFIX);
+  const selectedItem = !isHead ? items.find(i => String(i.id) === itemId) : undefined;
+  const selectedHead = isHead ? itemId.slice(HEAD_PREFIX.length) : undefined;
+  const hasSelection = !!selectedItem || !!selectedHead;
 
-  const pickItem = (id: string) => {
+  const pick = (id: string) => {
     setItemId(id);
+    if (id.startsWith(HEAD_PREFIX)) {
+      setDescription(id.slice(HEAD_PREFIX.length));
+      setUnitPrice('');
+      return;
+    }
     const it = items.find(i => String(i.id) === id);
     if (it) { setDescription(it.description); setUnitPrice(String(it.unit_price)); }
   };
 
   const submit = async () => {
-    if (!selected || !description.trim() || !unitPrice || !reason.trim()) {
-      toast.error('Select the line, the corrected amount, and a reason');
+    if (!hasSelection || !description.trim() || !unitPrice || !reason.trim()) {
+      toast.error('Select the line, the amount, and a reason');
       return;
     }
     setSubmitting(true);
     try {
-      await api.post(`/billing/invoice-items/${selected.id}/edit-request`, {
-        proposed_description: description.trim(), proposed_unit_price: Number(unitPrice), reason: reason.trim(),
-      });
+      const payload = { proposed_description: description.trim(), proposed_unit_price: Number(unitPrice), reason: reason.trim() };
+      if (selectedItem) {
+        await api.post(`/billing/invoice-items/${selectedItem.id}/edit-request`, payload);
+      } else {
+        await api.post(`/billing/invoices/${invoiceId}/edit-request`, payload);
+      }
       toast.success('Correction request sent for Manager approval');
       onSubmitted();
       close();
@@ -289,35 +310,38 @@ function RequestCorrectionDialog({ items, invoiceNumber, open, onClose, onSubmit
         <div className="space-y-3">
           <div className="space-y-1.5">
             <Label>Line item</Label>
-            <Select value={itemId} onValueChange={pickItem}>
-              <SelectTrigger><SelectValue placeholder="Select the line to correct" /></SelectTrigger>
+            <Select value={itemId} onValueChange={pick}>
+              <SelectTrigger><SelectValue placeholder="Select the line to correct, or a head to charge" /></SelectTrigger>
               <SelectContent>
                 {items.map(it => (
                   <SelectItem key={it.id} value={String(it.id)}>{it.description} — {formatCurrency(it.unit_price)}</SelectItem>
                 ))}
+                {unmatchedHeads.map(head => (
+                  <SelectItem key={head} value={`${HEAD_PREFIX}${head}`}>{head} — not yet charged</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
-          {selected && (
+          {hasSelection && (
             <>
               <div className="space-y-1.5">
-                <Label>Corrected description</Label>
+                <Label>{selectedHead ? 'Description' : 'Corrected description'}</Label>
                 <Input value={description} onChange={e => setDescription(e.target.value)} />
               </div>
               <div className="space-y-1.5">
-                <Label>Corrected amount (Rs)</Label>
+                <Label>{selectedHead ? 'Amount (Rs)' : 'Corrected amount (Rs)'}</Label>
                 <Input type="number" min="0" step="0.01" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} />
               </div>
               <div className="space-y-1.5">
-                <Label>Reason for correction</Label>
+                <Label>Reason</Label>
                 <Textarea rows={2} value={reason} onChange={e => setReason(e.target.value)}
-                  placeholder="e.g. Wrong room rate entered at checkout" />
+                  placeholder={selectedHead ? 'e.g. Dhobi charge missed at checkout' : 'e.g. Wrong room rate entered at checkout'} />
               </div>
             </>
           )}
         </div>
         <div className="flex gap-2 pt-2">
-          <Button className="flex-1" disabled={!selected || submitting} onClick={submit}>Submit for Approval</Button>
+          <Button className="flex-1" disabled={!hasSelection || submitting} onClick={submit}>Submit for Approval</Button>
           <Button variant="ghost" onClick={close}>Cancel</Button>
         </div>
       </DialogContent>
@@ -331,9 +355,9 @@ interface BillPrintViewProps {
   /** Show "Pay Together" / per-bill payment actions for unpaid bills. */
   allowPayments?: boolean;
   onPaymentsChanged?: () => void;
-  /** Enables the whole-stay discount action (Clerk-only, applies to every
-      live invoice for this booking at once) and, when the booking has more
-      than one live invoice, the row-merged single document. */
+  /** Enables the Room / Mess / Combined view over the whole stay (not just
+      the invoices passed in `invoiceIds`) - always shown once set, even
+      when one side has no invoice at all (rendered as a zero bill). */
   bookingId?: number;
 }
 
@@ -341,13 +365,32 @@ const PAYMENT_METHODS = ['Cash', 'Bank Transfer', 'Cheque', 'Online'];
 
 type ViewMode = 'room' | 'mess' | 'combined';
 
+/** A side (room or mess) with no invoice at all for this stay - rendered as
+    a Rs 0 bill rather than hiding the tab, so Room/Mess/Combined are always
+    all three present once bookingId is set. */
+function zeroBill(billType: 'room' | 'mess', master: MasterInvoiceData): PrintData {
+  return {
+    invoice: {
+      id: 0, invoice_number: '—', bill_type: billType, issue_date: new Date().toISOString().slice(0, 10),
+      subtotal: 0, total_amount: 0, amount_paid: 0, balance_due: 0, status: 'draft', items: [],
+    },
+    booking: master.booking,
+    mess: master.mess,
+    qr_svg: '',
+  };
+}
+
 export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPaymentsChanged, bookingId }: BillPrintViewProps) {
   const [bills, setBills] = useState<PrintData[]>([]);
+  // Other live invoices for this same booking that aren't in `invoiceIds`
+  // (e.g. one side was already settled separately) - fetched for display
+  // only, never touched by the payment/correction actions below, which stay
+  // scoped to `bills`.
+  const [extraBills, setExtraBills] = useState<PrintData[]>([]);
   const [masterData, setMasterData] = useState<MasterInvoiceData | null>(null);
   const [loading, setLoading] = useState(false);
   const [paying, setPaying] = useState(false);
   const [method, setMethod] = useState(PAYMENT_METHODS[0]);
-  const [applyingDiscount, setApplyingDiscount] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('combined');
   const [pendingCorrectionItemIds, setPendingCorrectionItemIds] = useState<Set<number>>(new Set());
   const [correctionOpen, setCorrectionOpen] = useState(false);
@@ -357,20 +400,28 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
       .then(setBills)
       .catch(err => toast.error(getErrorMessage(err, 'Failed to load bill')));
 
-  // When a stay has both a room and a mess invoice, the Clerk gets three
-  // views over them - Room only, Mess only (each keeps its own detailed
-  // rows), and Combined (the master-invoice's row-merged, source-tagged
-  // list) - never two separate paper forms stacked in the same dialog.
+  // Whenever bookingId is known, the Clerk always gets three views over the
+  // whole stay - Room only, Mess only (each keeps its own detailed rows),
+  // and Combined (the master-invoice's row-merged, fixed-head list) - never
+  // two separate paper forms stacked in the same dialog, and never hidden
+  // just because one side happens to have no charge.
   const refresh = async (ids: number[]) => {
     await fetchBills(ids);
-    if (ids.length > 1 && bookingId) {
+    let extra: PrintData[] = [];
+    if (bookingId) {
       try {
         const res = await api.get(`/billing/bookings/${bookingId}/master-invoice`);
-        setMasterData(res.data as MasterInvoiceData);
-      } catch (err) { toast.error(getErrorMessage(err, 'Failed to load master invoice')); }
+        const master = res.data as MasterInvoiceData;
+        setMasterData(master);
+        const missingIds = master.source_invoices.map(si => si.id).filter(id => !ids.includes(id));
+        if (missingIds.length) {
+          extra = await Promise.all(missingIds.map(id => api.get(`/billing/invoices/${id}/print-data`).then(r => r.data as PrintData)));
+        }
+      } catch (err) { setMasterData(null); toast.error(getErrorMessage(err, 'Failed to load master invoice')); }
     } else {
       setMasterData(null);
     }
+    setExtraBills(extra);
     if (allowPayments) {
       // Best-effort: surfaces "correction pending" so a Clerk doesn't submit
       // a duplicate request for the same line while one is already queued.
@@ -383,52 +434,26 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
 
   useEffect(() => {
     queueMicrotask(() => {
-      if (!invoiceIds || invoiceIds.length === 0) { setBills([]); setMasterData(null); return; }
+      if (!invoiceIds || invoiceIds.length === 0) { setBills([]); setExtraBills([]); setMasterData(null); return; }
       setLoading(true);
       setViewMode('combined');
       refresh(invoiceIds).finally(() => setLoading(false));
     });
   }, [invoiceIds, bookingId]);
 
-  const roomBill = bills.find(b => b.invoice.bill_type === 'room');
-  const messBill = bills.find(b => b.invoice.bill_type === 'mess');
-  const hasBothSides = !!roomBill && !!messBill;
+  const showTabs = !!bookingId;
+  const displayBills = [...bills, ...extraBills];
+  const roomBill = displayBills.find(b => b.invoice.bill_type === 'room') ?? (showTabs && masterData ? zeroBill('room', masterData) : undefined);
+  const messBill = displayBills.find(b => b.invoice.bill_type === 'mess') ?? (showTabs && masterData ? zeroBill('mess', masterData) : undefined);
   // The single invoice a line-item correction would target - undefined on
-  // the merged Combined view, since a correction always belongs to one
-  // invoice's own item, never a cross-invoice merged row.
-  const activeBill = hasBothSides ? (viewMode === 'room' ? roomBill : viewMode === 'mess' ? messBill : undefined) : bills[0];
+  // the merged Combined view (a correction always belongs to one invoice's
+  // own item, never a cross-invoice merged row) and on a synthesized zero
+  // bill (invoice.id 0 - nothing real to attach a correction to).
+  const activeBill = showTabs ? (viewMode === 'room' ? roomBill : viewMode === 'mess' ? messBill : undefined) : bills[0];
   const activeBillHasPendingCorrection = !!activeBill?.invoice.items.some(it => pendingCorrectionItemIds.has(it.id));
 
   const unpaid = bills.filter(b => b.invoice.balance_due > 0.005 && b.invoice.status !== 'void');
   const unpaidTotal = unpaid.reduce((s, b) => s + b.invoice.balance_due, 0);
-  // Discount only makes sense before anything's been paid against the bill.
-  const discountEligible = bills.filter(b => b.invoice.amount_paid < 0.005 && b.invoice.status !== 'void' && b.invoice.status !== 'paid');
-
-  // The one discount action for the final bill - whole-stay so it works
-  // whether the booking has one combined invoice or a room + mess pair; a
-  // 100% discount is what "complimentary" looks like, no separate action.
-  const applyDiscount = async () => {
-    if (!bookingId) return;
-    const rateStr = prompt('Discount % on the final bill (leave blank to enter a flat Rs amount instead):');
-    if (rateStr === null) return;
-    let discount_rate: number | undefined; let discount_amount: number | undefined;
-    if (rateStr.trim()) { discount_rate = Number(rateStr); }
-    else {
-      const amtStr = prompt('Flat discount amount (Rs), split proportionally across the room and mess bills:');
-      if (!amtStr) return;
-      discount_amount = Number(amtStr);
-    }
-    const reason = prompt('Reason for this discount:');
-    if (!reason) return;
-    setApplyingDiscount(true);
-    try {
-      await api.post(`/billing/bookings/${bookingId}/master-invoice/discount`, { discount_rate, discount_amount, reason });
-      toast.success('Discount applied');
-      if (invoiceIds) await refresh(invoiceIds);
-      onPaymentsChanged?.();
-    } catch (err) { toast.error(getErrorMessage(err, 'Failed to apply discount')); }
-    finally { setApplyingDiscount(false); }
-  };
 
   const payInvoices = async (targets: PrintData[]) => {
     setPaying(true);
@@ -454,13 +479,14 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <style>{PRINT_STYLE}</style>
         <DialogHeader>
-          <DialogTitle>{hasBothSides ? titles[viewMode] : 'Bill'}</DialogTitle>
+          <DialogTitle>{showTabs ? titles[viewMode] : 'Bill'}</DialogTitle>
         </DialogHeader>
         {loading && <p className="text-sm text-gray-500">Loading bill…</p>}
         {/* Three views over the same stay: Room-only and Mess-only keep
             each invoice's own detailed rows; Combined row-merges both via
-            the master-invoice endpoint. Only shown when both exist. */}
-        {hasBothSides && (
+            the master-invoice endpoint. Always shown once bookingId is
+            known, even when a side has no invoice (rendered as Rs 0). */}
+        {showTabs && (
           <Tabs value={viewMode} onValueChange={v => setViewMode(v as ViewMode)}>
             <TabsList>
               <TabsTrigger value="room">Room</TabsTrigger>
@@ -470,27 +496,22 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
           </Tabs>
         )}
         <PrintArea>
-          {hasBothSides
+          {showTabs
             ? viewMode === 'combined'
               ? (masterData ? <MergedBill data={masterData} /> : <p className="text-sm text-gray-500">Loading…</p>)
-              : <DraftBill data={(viewMode === 'room' ? roomBill : messBill) as PrintData} />
+              : ((viewMode === 'room' ? roomBill : messBill)
+                  ? <DraftBill data={(viewMode === 'room' ? roomBill : messBill) as PrintData} />
+                  : <p className="text-sm text-gray-500">Loading…</p>)
             : bills.map(bd => <DraftBill key={bd.invoice.id} data={bd} />)}
         </PrintArea>
 
-        {allowPayments && bookingId && discountEligible.filter(b => !b.invoice.is_complimentary).length > 0 && (
-          <div className="rounded-lg border p-3 space-y-2">
-            <p className="text-sm font-medium">Discount</p>
-            <Button size="sm" variant="outline" disabled={applyingDiscount} onClick={applyDiscount}>
-              Apply Discount
-            </Button>
-          </div>
-        )}
-
-        {/* Corrects a wrong line already on the bill (bad rate/charge
-            entered) - distinct from a discount, and gated by Manager
-            approval since it's editing what was actually charged. Only
-            offered on a single invoice's own view, never the merged one. */}
-        {allowPayments && activeBill && activeBill.invoice.status !== 'void' && (
+        {/* Corrects a wrong line already on the bill, or adds a charge under
+            a head that's currently zero (wrong rate entered, or a charge
+            that was simply missed) - gated by Manager approval since it's
+            editing what was actually charged. Only offered on a single real
+            invoice's own view, never the merged one or a synthesized zero
+            bill with nothing to attach a correction to. */}
+        {allowPayments && activeBill && activeBill.invoice.id > 0 && activeBill.invoice.status !== 'void' && (
           <div className="rounded-lg border p-3 space-y-2">
             <p className="text-sm font-medium">Line Item Correction</p>
             {activeBillHasPendingCorrection ? (
@@ -532,15 +553,15 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
         )}
 
         <div className="flex gap-2 pt-2">
-          <Button onClick={() => window.print()} className="flex-1" disabled={loading || bills.length === 0}>
-            <Printer size={16} className="mr-1" /> Print {hasBothSides ? printLabels[viewMode] : 'Invoice'}
+          <Button onClick={() => window.print()} className="flex-1" disabled={loading || (!showTabs && bills.length === 0)}>
+            <Printer size={16} className="mr-1" /> Print {showTabs ? printLabels[viewMode] : 'Invoice'}
           </Button>
           <Button variant="ghost" onClick={onClose}>Close</Button>
         </div>
       </DialogContent>
     </Dialog>
-    {activeBill && (
-      <RequestCorrectionDialog items={activeBill.invoice.items} invoiceNumber={activeBill.invoice.invoice_number}
+    {activeBill && activeBill.invoice.id > 0 && (
+      <RequestCorrectionDialog invoiceId={activeBill.invoice.id} items={activeBill.invoice.items} invoiceNumber={activeBill.invoice.invoice_number}
         open={correctionOpen} onClose={() => setCorrectionOpen(false)}
         onSubmitted={() => { if (invoiceIds) refresh(invoiceIds); }} />
     )}
@@ -556,11 +577,27 @@ interface MasterInvoiceData {
   mess: MessIdentity; qr_svg: string; verify_hash: string;
 }
 
+/** Same fixed-Ser-head matching as paperRows(), but over the master
+    invoice's merged room+mess item list - the Combined bill's row set is
+    the union of the room bill's heads and the mess bill's heads, so a head
+    that's zero on both still gets its own "—" row instead of the whole
+    line silently disappearing from the final printed document. */
+function masterPaperRows(items: MasterInvoiceItem[]) {
+  const remaining = [...items];
+  const takeMatch = (head: string) => {
+    const idx = remaining.findIndex(it => it.description.toLowerCase().startsWith(head.toLowerCase()));
+    return idx === -1 ? null : remaining.splice(idx, 1)[0];
+  };
+  const fixed = PAPER_BILL_HEADS.map(head => ({ head, item: takeMatch(head) }));
+  return { fixed, extra: remaining };
+}
+
 /** One combined document merging a stay's separately generated room + mess
     invoices into a single bill with a row-level, source-tagged item list
     and one grand total - the "final bill" a Clerk settles/prints, never
     two separate paper forms for the same stay. */
 function MergedBill({ data }: { data: MasterInvoiceData }) {
+  const { fixed, extra } = masterPaperRows(data.items);
   return (
     <div className="bill-page border border-gray-400 rounded-sm p-4 text-[13px] text-gray-900 bg-white space-y-2.5">
       <div className="flex justify-between items-start">
@@ -591,9 +628,17 @@ function MergedBill({ data }: { data: MasterInvoiceData }) {
           </tr>
         </thead>
         <tbody>
-          {data.items.map((it, i) => (
-            <tr key={i}>
+          {fixed.map(({ head, item }, i) => (
+            <tr key={head}>
               <td className="border border-gray-500 px-2 py-1">{i + 1}</td>
+              <td className="border border-gray-500 px-2 py-1">{item ? item.description : head}</td>
+              <td className="border border-gray-500 px-2 py-1 text-[11px] text-gray-500">{item ? item.source_label : '—'}</td>
+              <td className="border border-gray-500 px-2 py-1 text-right font-mono whitespace-nowrap">{item ? formatCurrency(item.total_price) : '—'}</td>
+            </tr>
+          ))}
+          {extra.map((it, i) => (
+            <tr key={`x${i}`}>
+              <td className="border border-gray-500 px-2 py-1">{fixed.length + i + 1}</td>
               <td className="border border-gray-500 px-2 py-1">{it.description}{it.quantity > 1 ? ` × ${it.quantity}` : ''}</td>
               <td className="border border-gray-500 px-2 py-1 text-[11px] text-gray-500">{it.source_label}</td>
               <td className="border border-gray-500 px-2 py-1 text-right font-mono whitespace-nowrap">{formatCurrency(it.total_price)}</td>

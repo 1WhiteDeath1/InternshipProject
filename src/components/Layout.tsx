@@ -11,6 +11,7 @@ import {
   Settings, FileUp, LogOut, Sun, Moon, ChevronLeft, ChevronRight,
   IdCard, UtensilsCrossed, Wallet, ChefHat, LayoutGrid, Menu, X, Contact, UserCircle2, TrendingUp, ClipboardCheck,
   Plus, Receipt as ReceiptIcon, Camera, ShieldAlert, RefreshCw, UtensilsCrossed as OrderIcon, CalendarDays, Scale,
+  MessageSquare, Percent,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { QuickBookingModal } from '@/components/QuickBookingModal';
@@ -55,11 +56,23 @@ const navItems = [
   { path: '/kitchen', label: 'Kitchen', icon: ChefHat, feature: 'kitchen_module', requiredPermission: { module: 'kitchen', action: 'view' } },
   { path: '/events', label: 'Events', icon: CalendarDays, requiredPermission: { module: 'events', action: 'view' } },
   { path: '/security', label: 'Security', icon: Shield, feature: null, requiredPermission: { module: 'security', action: 'view' } },
-  { path: '/approvals', label: 'Approvals', icon: ClipboardCheck, requiredPermission: { module: 'procurement', action: 'approve' } },
+  // Manager's direct discount/category authority over in-house guests -
+  // reuses the existing bookings:approve permission (the same lever the
+  // category override already used), no new RBAC permission needed.
+  { path: '/guest-discounts', label: 'Guest Discounts', icon: Percent, requiredPermission: { module: 'bookings', action: 'approve' } },
+  // Standing HRA/mess-member discount rate - members:edit is shared with
+  // Kitchen NCO, so this also requires bookings:approve (Manager-only
+  // today) to keep it off Kitchen NCO's nav.
+  { path: '/member-discounts', label: 'Member Discounts', icon: Percent, requiredPermissionAll: [{ module: 'bookings', action: 'approve' }, { module: 'members', action: 'edit' }] },
+  // No procurement approval anymore (the mess buys and restocks itself,
+  // no PO to sign off on) - gated instead on the two things that actually
+  // land here: bill corrections (Manager) and menu changes (Manager/Deputy).
+  { path: '/approvals', label: 'Approvals', icon: ClipboardCheck, requiredPermissionAny: [{ module: 'billing', action: 'approve' }, { module: 'menu', action: 'approve' }] },
   { path: '/users', label: 'Users', icon: Users, requiredPermission: { module: 'users', action: 'view' } },
   { path: '/roles', label: 'Roles', icon: UserCog, requiredPermission: { module: 'roles', action: 'view' } },
   { path: '/audit-log', label: 'Audit Log', icon: ClipboardList, requiredPermission: { module: 'audit', action: 'view' } },
   { path: '/alerts', label: 'Alerts', icon: Bell, badge: 'alertCount', requiredPermission: { module: 'alerts', action: 'view' } },
+  { path: '/directives', label: 'Directives', icon: MessageSquare, badge: 'directiveCount', requiredPermission: { module: 'directives', action: 'view' } },
   { path: '/tariffs', label: 'Tariffs', icon: TrendingUp, requiredPermission: { module: 'tariffs', action: 'view' } },
   { path: '/reports', label: 'Reports', icon: BarChart3, requiredPermission: { module: 'reports', action: 'view' } },
   { path: '/import-export', label: 'Import / Export', icon: FileUp, requiredPermission: { module: 'import_export', action: 'view' } },
@@ -77,6 +90,7 @@ export default function Layout() {
   // hamburger button; it closes on navigation or backdrop tap.
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [alertCount, setAlertCount] = useState(0);
+  const [directiveCount, setDirectiveCount] = useState(0);
   const [quickBookingOpen, setQuickBookingOpen] = useState(false);
   const [quickChargeOpen, setQuickChargeOpen] = useState(false);
   const [quickAttendantOpen, setQuickAttendantOpen] = useState(false);
@@ -116,11 +130,26 @@ export default function Layout() {
     return () => clearInterval(interval);
   }, [user]);
 
+  useEffect(() => {
+    if (!hasPermission(user, 'directives', 'view')) return;
+    const fetchDirectives = async () => {
+      try {
+        const res = await api.get('/directives/unread-count');
+        setDirectiveCount(res.data.count);
+      } catch { /* silent - badge just stays at its last known value */ }
+    };
+    fetchDirectives();
+    const interval = setInterval(fetchDirectives, 30000);
+    return () => clearInterval(interval);
+  }, [user]);
+
   if (loading || !user) return null;
 
   const filteredNav = navItems.filter(item => {
     if (item.path === '/dashboard' && noDashboard) return false;
     if (item.requiredPermission && !hasPermission(user, item.requiredPermission.module, item.requiredPermission.action)) return false;
+    if (item.requiredPermissionAny && !item.requiredPermissionAny.some(p => hasPermission(user, p.module, p.action))) return false;
+    if (item.requiredPermissionAll && !item.requiredPermissionAll.every(p => hasPermission(user, p.module, p.action))) return false;
     if (item.feature && !isEnabled(item.feature)) return false;
     return true;
   });
@@ -185,10 +214,18 @@ export default function Layout() {
                         {alertCount}
                       </span>
                     )}
+                    {item.badge === 'directiveCount' && directiveCount > 0 && (
+                      <span className="ml-auto bg-violet-500 text-white text-sm font-bold rounded-full h-6 min-w-6 flex items-center justify-center px-1.5 animate-pulse">
+                        {directiveCount}
+                      </span>
+                    )}
                   </>
                 )}
                 {collapsed && !drawerOpen && item.badge === 'alertCount' && alertCount > 0 && (
                   <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-red-500 rounded-full" />
+                )}
+                {collapsed && !drawerOpen && item.badge === 'directiveCount' && directiveCount > 0 && (
+                  <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-violet-500 rounded-full" />
                 )}
               </button>
             );

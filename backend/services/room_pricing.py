@@ -240,7 +240,7 @@ def reprice_for_departure(db: Session, booking, departure: date):
         client_category=booking.client_category, nature_of_duty=booking.nature_of_duty,
         rank=booking.rank, da_multiplier=float(booking.da_multiplier) if booking.da_multiplier else None,
         mattress_count=booking.mattress_count or 0, member_id=booking.member_id,
-        stay_type=booking.stay_type,
+        stay_type=booking.stay_type, discount_rate=float(booking.discount_rate) if booking.discount_rate else 0,
     )
     return effective, pricing
 
@@ -249,7 +249,7 @@ def compute_booking_price(
     db: Session, room, *, check_in: date, check_out: date,
     client_category: str, nature_of_duty: str = "visit", rank: str = None,
     da_multiplier: float = None, mattress_count: int = 0, member_id: int = None,
-    stay_type: str = None,
+    stay_type: str = None, discount_rate: float = 0,
 ) -> dict:
     nights = max((check_out - check_in).days, 1)
     category = normalize_category(client_category)
@@ -319,7 +319,12 @@ def compute_booking_price(
     )
     mattress_total = round(mattress_count * mattress_daily * nights, 2)
     room_total = round(nightly * nights, 2)
-    total = monthly_total if monthly_total is not None else round(room_total + mattress_total, 2)
+    pre_discount_total = monthly_total if monthly_total is not None else round(room_total + mattress_total, 2)
+    # Manager's standing discount on the stay (Guest Discounts page) - applied
+    # last, on top of whatever pricing mode produced the total, so it survives
+    # every re-price (category change, early/late actual departure) rather
+    # than being a one-off edit to total_amount that the next re-price erases.
+    total = round(pre_discount_total * (1 - discount_rate / 100), 2) if discount_rate else pre_discount_total
 
     return {
         "pricing_mode": mode,
@@ -332,6 +337,8 @@ def compute_booking_price(
         "mattress_count": mattress_count,
         "mattress_daily": mattress_daily if mattress_count else 0,
         "mattress_total": mattress_total,
+        "discount_rate": discount_rate,
+        "pre_discount_total": pre_discount_total,
         "total": total,
         "note": note,
     }

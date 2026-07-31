@@ -8,16 +8,19 @@ import { formatCurrency } from '@/lib/currency';
 import { ROOM_CHARGE_HEADS, MESS_CHARGE_HEADS, CUSTOM_CHARGE_HEAD, type BookingCharge } from '@/pages/bookings/shared';
 
 /** Where charges get logged as a guest incurs them (Clerk for room charges via
-    the Billing page's quick action, Kitchen/Mess Staff for mess charges) - a
-    running tally only, no invoice or checkout action here. The Clerk turns
-    this into a bill later. */
+    the Billing page's quick action) - a running tally only, no invoice or
+    checkout action here. The Clerk turns this into a bill later. Mess
+    charges (Extra Messing/Sui Gas) are no longer logged this way - they're
+    computed automatically at checkout from what was actually ordered (see
+    backend/services/mess_charge_calc.py) - so isMess mode only ever offers
+    "Custom..." for a genuinely separate ad-hoc mess charge. */
 export function GuestChargePanel({ bookingId, isMess, title, onChanged, onTotalsChange }: {
   bookingId: number; isMess: boolean; title?: string; onChanged?: () => void; onTotalsChange?: (total: number) => void;
 }) {
   const presetHeads = isMess ? MESS_CHARGE_HEADS : ROOM_CHARGE_HEADS;
   const [charges, setCharges] = useState<BookingCharge[]>([]);
   const [loading, setLoading] = useState(true);
-  const [head, setHead] = useState(presetHeads[0]);
+  const [head, setHead] = useState(presetHeads[0] ?? CUSTOM_CHARGE_HEAD);
   const [customLabel, setCustomLabel] = useState('');
   const [amount, setAmount] = useState('');
 

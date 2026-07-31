@@ -5,7 +5,10 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { todayISO, addDays, fmtDay, type CalendarDaySummary, type RoomWeekData, type RoomWeekRoom } from './shared';
+import {
+  todayISO, addDays, fmtDay, cellKind, isOpenEnded, OCCUPANCY_META,
+  type CalendarDaySummary, type RoomWeekData, type RoomWeekRoom, type OccupancyKind,
+} from './shared';
 
 type ViewMode = 'week' | 'month' | 'room-month';
 
@@ -18,12 +21,26 @@ interface CalendarTabProps {
   onOpenRoom: (roomId: number) => void;
 }
 
-const CELL_COLORS: Record<string, string> = {
-  occupied: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100',
-  reserved: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100',
-  maintenance: 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
-  vacant: '',
-};
+// Which kinds get a legend entry in the grid views, in reading order.
+const GRID_LEGEND: OccupancyKind[] = [
+  'guest', 'hra', 'indefinite', 'official_duty', 'leave', 'reserved', 'departed', 'maintenance',
+];
+// The month view only ever aggregates these four buckets (see the backend's
+// kind_counts) - official_duty/leave fold into 'guest' there.
+const MONTH_MIX: OccupancyKind[] = ['hra', 'indefinite', 'guest', 'reserved'];
+
+function LegendSwatch({ kind, faded }: { kind: OccupancyKind; faded?: boolean }) {
+  const meta = OCCUPANCY_META[kind];
+  return (
+    <span className="flex items-center gap-1">
+      <span className="w-3 h-3 rounded-sm inline-block"
+        style={faded
+          ? { background: `linear-gradient(to right, ${meta.hex}, transparent)` }
+          : { background: meta.hex }} />
+      {faded ? 'Continues (no end date)' : meta.label}
+    </span>
+  );
+}
 
 function addMonths(iso: string, n: number): string {
   const [y, m] = iso.split('-').map(Number);
@@ -86,13 +103,34 @@ function RoomWeekGrid({ data, onOpenRoom }: { data: RoomGridData; onOpenRoom: (r
                     <td className="py-1.5 px-3 font-medium sticky left-0 bg-white dark:bg-gray-950 cursor-pointer hover:underline" onClick={() => onOpenRoom(r.id)}>
                       {r.room_number}
                     </td>
-                    {r.cells.map(c => (
-                      <td key={c.date} title={c.guest_name ? `${c.guest_name}${c.booking_reference ? ` (${c.booking_reference})` : ''}` : c.status}
-                        onClick={() => onOpenRoom(r.id)}
-                        className={`text-center text-[11px] py-1.5 px-1 cursor-pointer truncate max-w-20 ${CELL_COLORS[c.status] || ''} ${c.date === today ? 'ring-1 ring-inset ring-gray-400' : ''}`}>
-                        {c.guest_name ? c.guest_name.split(' ')[0] : ''}
-                      </td>
-                    ))}
+                    {r.cells.map((c, i) => {
+                      const kind = cellKind(c);
+                      const meta = OCCUPANCY_META[kind];
+                      // A run with no real end date gets its trailing edge
+                      // faded rather than stopping in a hard line - the stay
+                      // genuinely continues past whatever the window shows,
+                      // so a crisp edge would be asserting a departure date
+                      // nobody has agreed to.
+                      const next = r.cells[i + 1];
+                      const fadeEdge = isOpenEnded(c)
+                        && (!next || !isOpenEnded(next) || next.booking_reference !== c.booking_reference);
+                      const openEnded = isOpenEnded(c);
+                      return (
+                        <td key={c.date}
+                          title={c.guest_name
+                            ? `${c.guest_name}${c.booking_reference ? ` (${c.booking_reference})` : ''} — ${meta.label}${openEnded ? ', no end date set' : ''}`
+                            : meta.label}
+                          onClick={() => onOpenRoom(r.id)}
+                          className={`p-0 cursor-pointer max-w-20 ${c.date === today ? 'ring-1 ring-inset ring-gray-400' : ''}`}>
+                          <div
+                            className={`text-center text-[11px] py-1.5 px-1 truncate ${fadeEdge ? '' : meta.cell}`}
+                            style={fadeEdge ? { background: `linear-gradient(to right, ${meta.hex}, transparent)` } : undefined}>
+                            {c.guest_name ? c.guest_name.split(' ')[0] : ''}
+                            {fadeEdge && <span className="text-gray-500 dark:text-gray-300"> ›</span>}
+                          </div>
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </Fragment>
@@ -102,6 +140,34 @@ function RoomWeekGrid({ data, onOpenRoom }: { data: RoomGridData; onOpenRoom: (r
       </CardContent>
     </Card>
   );
+}
+
+/** The day's occupancy split as one thin stacked bar. The intensity wash
+    behind a month cell says HOW full the mess was; this says WHAT of - a
+    day that's full of long-term residents is a completely different
+    business day from one full of two-night guests, and the ratio alone
+    could never show that. */
+function MixBar({ counts, total }: { counts: CalendarDaySummary['kind_counts']; total: number }) {
+  const kinds = MONTH_MIX.filter(k => (counts?.[k as keyof typeof counts] ?? 0) > 0);
+  if (!total || kinds.length === 0) return <div className="h-1" />;
+  return (
+    <div className="flex h-1 w-full rounded-sm overflow-hidden bg-gray-200/60 dark:bg-gray-700/60">
+      {kinds.map(k => (
+        <span key={k}
+          style={{ background: OCCUPANCY_META[k].hex, width: `${(counts[k as keyof typeof counts] / total) * 100}%` }} />
+      ))}
+    </div>
+  );
+}
+
+function guestKind(g: CalendarDaySummary['guests'][number]): OccupancyKind {
+  if (g.nature_of_duty === 'hra') return 'hra';
+  if (g.status === 'checked_out') return 'departed';
+  if (g.is_indefinite) return 'indefinite';
+  if (g.status === 'confirmed') return 'reserved';
+  if (g.nature_of_duty === 'official_duty') return 'official_duty';
+  if (g.nature_of_duty === 'leave') return 'leave';
+  return 'guest';
 }
 
 function DayCell({ day, isToday, onOpenRoom }: { day: CalendarDaySummary; isToday: boolean; onOpenRoom: (roomId: number) => void }) {
@@ -119,9 +185,13 @@ function DayCell({ day, isToday, onOpenRoom }: { day: CalendarDaySummary; isToda
             <span className="text-xs font-medium">{dayNum}</span>
             {day.total_rooms > 0 && <span className="text-[10px] text-gray-600 dark:text-gray-300">{day.occupied}/{day.total_rooms}</span>}
           </div>
+          <MixBar counts={day.kind_counts} total={day.total_rooms} />
           <div className="flex-1 space-y-0.5 overflow-hidden">
             {shown.map((g, i) => (
-              <p key={i} className="text-[10px] leading-tight truncate text-gray-700 dark:text-gray-300">{g.guest_name}</p>
+              <p key={i} className="text-[10px] leading-tight truncate flex items-center gap-1 text-gray-700 dark:text-gray-300">
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: OCCUPANCY_META[guestKind(g)].hex }} />
+                {g.guest_name}
+              </p>
             ))}
             {overflow > 0 && <p className="text-[10px] leading-tight text-gray-400">+{overflow} more</p>}
           </div>
@@ -134,16 +204,33 @@ function DayCell({ day, isToday, onOpenRoom }: { day: CalendarDaySummary; isToda
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-80">
-        <p className="text-sm font-medium mb-2">{fmtDay(day.date)}</p>
+        <p className="text-sm font-medium mb-1">{fmtDay(day.date)}</p>
+        {day.kind_counts && day.occupied + day.reserved > 0 && (
+          <p className="text-xs text-gray-500 mb-2 flex flex-wrap gap-x-2 gap-y-0.5">
+            {MONTH_MIX.filter(k => day.kind_counts[k as keyof typeof day.kind_counts] > 0).map(k => (
+              <span key={k} className="flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full" style={{ background: OCCUPANCY_META[k].hex }} />
+                {day.kind_counts[k as keyof typeof day.kind_counts]} {OCCUPANCY_META[k].label.toLowerCase()}
+              </span>
+            ))}
+          </p>
+        )}
         {day.guests.length === 0 && <p className="text-xs text-gray-400">No bookings this day</p>}
         <div className="space-y-1 max-h-64 overflow-y-auto">
-          {day.guests.map((g, i) => (
-            <button key={i} type="button" onClick={() => onOpenRoom(g.room_id)}
-              className="w-full flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-left">
-              <span className="truncate">{g.rank ? `${g.rank} ` : ''}{g.guest_name}</span>
-              <span className="text-gray-400 shrink-0">Rm {g.room_number} · {g.status.replace(/_/g, ' ')}</span>
-            </button>
-          ))}
+          {day.guests.map((g, i) => {
+            const k = guestKind(g);
+            return (
+              <button key={i} type="button" onClick={() => onOpenRoom(g.room_id)}
+                className="w-full flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-left">
+                <span className="truncate flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: OCCUPANCY_META[k].hex }} />
+                  {g.rank ? `${g.rank} ` : ''}{g.guest_name}
+                  {(k === 'hra' || k === 'indefinite') && <span className="text-gray-400 shrink-0">›</span>}
+                </span>
+                <span className="text-gray-400 shrink-0">Rm {g.room_number} · {OCCUPANCY_META[k].label}</span>
+              </button>
+            );
+          })}
         </div>
       </PopoverContent>
     </Popover>
@@ -238,19 +325,25 @@ export default function CalendarTab({ onOpenRoom }: CalendarTabProps) {
       {!loading && viewMode === 'room-month' && roomMonthData && <RoomWeekGrid data={roomMonthData} onOpenRoom={onOpenRoom} />}
 
       {!loading && viewMode === 'month' && (
-        <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
-          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 inline-block" /> Empty</span>
-          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-emerald-50 dark:bg-emerald-950 border border-emerald-200 dark:border-emerald-900 inline-block" /> Low occupancy</span>
-          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-900 inline-block" /> Busy</span>
-          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-900 inline-block" /> Full</span>
-          <span>A = arrivals, D = departures</span>
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
+            <span className="text-gray-400">Cell shade = how full:</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 inline-block" /> Empty</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-emerald-50 dark:bg-emerald-950 border border-emerald-200 dark:border-emerald-900 inline-block" /> Low occupancy</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-900 inline-block" /> Busy</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-900 inline-block" /> Full</span>
+            <span>A = arrivals, D = departures</span>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
+            <span className="text-gray-400">Bar &amp; dots = what of:</span>
+            {MONTH_MIX.map(k => <LegendSwatch key={k} kind={k} />)}
+          </div>
         </div>
       )}
       {!loading && (viewMode === 'week' || viewMode === 'room-month') && (
         <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
-          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-red-100 dark:bg-red-900 inline-block" /> Occupied</span>
-          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-blue-100 dark:bg-blue-900 inline-block" /> Reserved</span>
-          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-gray-200 dark:bg-gray-700 inline-block" /> Maintenance</span>
+          {GRID_LEGEND.map(k => <LegendSwatch key={k} kind={k} />)}
+          <LegendSwatch kind="indefinite" faded />
         </div>
       )}
     </div>

@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Date, Text, ForeignKey, Enum, Numeric, Index
 from sqlalchemy.orm import relationship
 from backend.database import Base
-from backend.models.enums import IngredientType, WasteCategory
+from backend.models.enums import WasteCategory
 
 
 class InventoryCategory(Base):
@@ -27,10 +27,6 @@ class InventoryItem(Base):
     unit = Column(String(50), nullable=False)  # kg, l, pcs, etc.
     reorder_level = Column(Float, default=0)
     reorder_quantity = Column(Float, default=0)
-    # Nullable: only meaningful for cookable ingredients that need a
-    # cup/tbsp/tsp <-> unit density bridge (see unit_conversion.py) - non-food
-    # items and count-based ingredients (pcs) leave this unset.
-    ingredient_type = Column(Enum(IngredientType), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -49,10 +45,14 @@ class StockBatch(Base):
     expiry_date = Column(Date, nullable=True)
     received_date = Column(Date, default=datetime.utcnow)
     unit_cost = Column(Numeric(12, 2), default=0)
+    # Who this batch was bought from, for self-purchase intake (see
+    # StockIntakeCreate) - optional, no vendor required to log a purchase.
+    vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     item = relationship("InventoryItem")
+    vendor = relationship("Vendor")
 
     __table_args__ = (
         Index("idx_stock_item", "item_id"),
@@ -65,9 +65,9 @@ class StockMovement(Base):
     id = Column(Integer, primary_key=True)
     batch_id = Column(Integer, ForeignKey("stock_batches.id"), nullable=False)
     item_id = Column(Integer, ForeignKey("inventory_items.id"), nullable=False)
-    movement_type = Column(String(50), nullable=False)  # receipt, issue, adjustment, waste, recipe_deduction
+    movement_type = Column(String(50), nullable=False)  # receipt, issue, adjustment, waste
     quantity = Column(Float, nullable=False)
-    reference_type = Column(String(50))  # po, recipe, booking, etc.
+    reference_type = Column(String(50))  # po, cycle_count, booking, etc.
     reference_id = Column(Integer)
     notes = Column(Text)
     created_by = Column(Integer, ForeignKey("users.id"))

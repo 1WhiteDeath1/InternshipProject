@@ -43,7 +43,7 @@ const emptyForm = (checkIn: string, checkOut: string, checkInNow: boolean, atten
   source: 'walk_in', online_voucher_no: '',
   advance_payment_amount: '', advance_paid_at: todayISO(),
   check_in: checkIn, check_out: checkOut, check_in_now: checkInNow,
-  attendant_id: attendantId, stay_type: '',
+  attendant_id: attendantId, stay_type: '', is_indefinite: false,
 });
 
 export type BookingFormState = ReturnType<typeof emptyForm>;
@@ -51,6 +51,8 @@ export type BookingFormState = ReturnType<typeof emptyForm>;
 interface GuestSuggestion {
   id: number; full_name: string; phone: string | null;
   id_type: string | null; id_number: string | null; unit_address: string | null;
+  last_client_category: string | null; last_rank: string | null;
+  last_nature_of_duty: string | null; last_stay_type: string | null;
 }
 
 interface TransferOption {
@@ -195,6 +197,13 @@ export default function RoomSection({ roomId, open, onClose, onChanged, members,
       ...f, guest_name: g.full_name, guest_phone: g.phone || f.guest_phone,
       guest_id_type: g.id_type || f.guest_id_type, guest_id_number: g.id_number || f.guest_id_number,
       unit_address: g.unit_address || f.unit_address,
+      // Prefilled from this guest's last stay, when known - nature_of_duty
+      // is only carried over for non-HRA stays (HRA needs a member link the
+      // guest search can't supply, see backend/routers/guests.py).
+      client_category: g.last_client_category || f.client_category,
+      rank: g.last_rank || f.rank,
+      nature_of_duty: g.last_nature_of_duty || f.nature_of_duty,
+      stay_type: g.last_stay_type || f.stay_type,
     }));
     setGuestSuggestions([]);
   };
@@ -216,6 +225,21 @@ export default function RoomSection({ roomId, open, onClose, onChanged, members,
     setExtendDate(addDays(current.check_out > today ? current.check_out : today, 1));
     setTransferOptions(null);
     setExtendOpen(true);
+  };
+
+  // Move the guest to a different room without touching their dates - reuses
+  // the same /extend endpoint's transfer_room_id path (it already accepts a
+  // same-date transfer), just pre-filled with the current checkout instead
+  // of requiring a failed date-extend first.
+  const openChangeRoom = async () => {
+    if (!current) return;
+    setExtendDate(current.check_out);
+    setTransferOptions(null);
+    setExtendOpen(true);
+    try {
+      const avail = await api.get(`/bookings/availability?check_in=${today}&check_out=${current.check_out}`);
+      setTransferOptions((avail.data.items as (TransferOption & { id: number })[]).filter(r => r.id !== roomId));
+    } catch { setTransferOptions([]); }
   };
 
   const handleExtend = async (transferRoomId?: number) => {
@@ -281,6 +305,7 @@ export default function RoomSection({ roomId, open, onClose, onChanged, members,
         check_in_now: effectiveCheckInNow,
         attendant_id: form.attendant_id ? Number(form.attendant_id) : null,
         stay_type: form.stay_type || null,
+        is_indefinite: form.is_indefinite,
       });
       const p = res.data.pricing;
       const amountText = p.pricing_mode === 'hra_monthly' ? `${formatCurrency(res.data.total_amount)}/month (HRA)` : formatCurrency(res.data.total_amount);
@@ -389,7 +414,8 @@ export default function RoomSection({ roomId, open, onClose, onChanged, members,
                 current={current ?? null} arrivalToday={arrivalToday} roomReady={roomReady} today={today}
                 roomChargesTotal={roomChargesTotal} onTotalsChange={setRoomChargesTotal}
                 extendOpen={extendOpen} extendDate={extendDate} extending={extending} transferOptions={transferOptions}
-                onOpenExtend={openExtend} onCloseExtend={() => { setExtendOpen(false); setTransferOptions(null); }}
+                onOpenExtend={openExtend} onOpenChangeRoom={openChangeRoom}
+                onCloseExtend={() => { setExtendOpen(false); setTransferOptions(null); }}
                 onExtendDateChange={d => { setExtendDate(d); setTransferOptions(null); }}
                 onExtend={handleExtend}
                 onEndResidency={() => current && setConfirm({

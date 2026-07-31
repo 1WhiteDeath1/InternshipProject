@@ -36,7 +36,7 @@ class Event(Base):
 
 class EventMenuItem(Base):
     """A guest-requested dish, free-text - deliberately not linked to the
-    Recipe catalog (no costing/stock-deduction integration for events).
+    Menu catalog (events price and track their own menu independently).
     estimated_price is per unit; quantity defaults to the event's headcount
     at creation time but can be overridden (e.g. a shared platter dish)."""
     __tablename__ = "event_menu_items"

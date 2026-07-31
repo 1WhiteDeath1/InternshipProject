@@ -28,6 +28,11 @@ class Booking(Base):
     total_amount = Column(Numeric(10, 2))
     processed_by = Column(Integer, ForeignKey("users.id"))
     client_category = Column(Enum(ClientCategory), default=ClientCategory.NON_MEMBER_CIVILIAN)
+    # Manager's standing discount on this stay (Guest Discounts page), 0-100.
+    # Applied inside compute_booking_price() so it survives every re-price
+    # (category change, early/late actual departure) instead of being a
+    # one-off edit to total_amount that the next re-price would erase.
+    discount_rate = Column(Numeric(5, 2), default=0)
     member_id = Column(Integer, ForeignKey("members.id"), nullable=True)  # set when a permanent member occupies a room
     # Snapshot of the room's attendant at check-in time - independent of
     # rooms.attendant_id so later reassignment doesn't rewrite this stay's history.
@@ -43,6 +48,11 @@ class Booking(Base):
     # Mandatory for civilian guests, optional for officers/institutional guests.
     reference_person = Column(String(100))
     nature_of_duty = Column(String(20), default="visit")  # visit | leave | official_duty | hra
+    # Non-HRA "open-ended" stay: check_out is set to a far-future placeholder
+    # at creation (see create_booking) instead of a real date, and real
+    # checkout re-prices to actual nights the same way an early departure
+    # already does - no fixed end date is required up front.
+    is_indefinite = Column(Boolean, default=False)
     da_multiplier = Column(Numeric(3, 1))  # 1.0 or 1.5 for official-duty DA billing
     mattress_count = Column(Integer, default=0)
     # Booking channel: walk_in (at the desk) or online (transcribed from the

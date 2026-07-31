@@ -1,4 +1,6 @@
-import { type RefObject } from 'react';
+import { useState, type RefObject } from 'react';
+import api, { getErrorMessage } from '@/lib/api';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,7 +15,11 @@ import type { BookingFormState } from './RoomSection';
 interface GuestSuggestion {
   id: number; full_name: string; phone: string | null;
   id_type: string | null; id_number: string | null; unit_address: string | null;
+  last_client_category: string | null; last_rank: string | null;
+  last_nature_of_duty: string | null; last_stay_type: string | null;
 }
+
+const emptyNewMember = { service_number: '', full_name: '', rank: '', unit: '', mess_category: 'officers' };
 
 interface RoomBookingFormProps {
   form: BookingFormState;
@@ -47,6 +53,29 @@ export function RoomBookingForm({
   attendants, members, saving, onSubmit, onCancel, firstFieldRef,
 }: RoomBookingFormProps) {
   const isOfficer = form.client_category !== 'civilian';
+  const [localMembers, setLocalMembers] = useState<MemberOption[]>([]);
+  const [newMemberOpen, setNewMemberOpen] = useState(false);
+  const [newMemberSaving, setNewMemberSaving] = useState(false);
+  const [newMember, setNewMember] = useState(emptyNewMember);
+  const allMembers = [...members, ...localMembers];
+
+  const saveNewMember = async () => {
+    if (!newMember.service_number.trim() || !newMember.full_name.trim() || !newMember.rank) {
+      toast.error('Service number, name, and rank are required');
+      return;
+    }
+    setNewMemberSaving(true);
+    try {
+      const res = await api.post('/members', newMember);
+      const created: MemberOption = { id: res.data.id, full_name: res.data.full_name, service_number: res.data.service_number };
+      setLocalMembers(m => [...m, created]);
+      setForm({ ...form, member_id: created.id });
+      setNewMember(emptyNewMember);
+      setNewMemberOpen(false);
+      toast.success(`${created.full_name} registered`);
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to register member')); }
+    finally { setNewMemberSaving(false); }
+  };
 
   return (
     <div className="rounded-lg border-2 border-primary/20 shadow-sm p-4 space-y-3.5">
@@ -92,9 +121,24 @@ export function RoomBookingForm({
           <p className="text-xs text-gray-500 mt-1">Ongoing residency — renews automatically each time a mess bill is generated for this member, no fixed checkout needed.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-2">
-          <div><Label className="text-xs">Check In</Label><Input type="date" value={form.check_in} min={today} onChange={e => setForm({ ...form, check_in: e.target.value, check_out: form.check_out > e.target.value ? form.check_out : addDays(e.target.value, 1) })} /></div>
-          <div><Label className="text-xs">Check Out</Label><Input type="date" value={form.check_out} min={addDays(form.check_in, 1)} onChange={e => setForm({ ...form, check_out: e.target.value })} /></div>
+        <div className="space-y-1.5">
+          <div className="grid grid-cols-2 gap-2">
+            <div><Label className="text-xs">Check In</Label><Input type="date" value={form.check_in} min={today}
+              onChange={e => setForm({ ...form, check_in: e.target.value, check_out: form.is_indefinite ? addDays(e.target.value, 1) : (form.check_out > e.target.value ? form.check_out : addDays(e.target.value, 1)) })} /></div>
+            <div>
+              <Label className="text-xs">Check Out</Label>
+              <Input type="date" value={form.check_out} min={addDays(form.check_in, 1)} disabled={form.is_indefinite}
+                onChange={e => setForm({ ...form, check_out: e.target.value })} />
+            </div>
+          </div>
+          <label className="text-xs flex items-center gap-1.5 text-gray-700 dark:text-gray-200">
+            <input type="checkbox" checked={form.is_indefinite}
+              onChange={e => setForm({ ...form, is_indefinite: e.target.checked, check_out: addDays(form.check_in, 1) })} />
+            Indefinite stay — departure date not yet known
+          </label>
+          {form.is_indefinite && (
+            <p className="text-xs text-gray-500">Open-ended — the room stays reserved until checkout; actual nights are billed then. Rate shown below is the nightly rate.</p>
+          )}
         </div>
       )}
       <label className={`text-xs flex items-center gap-1.5 ${form.check_in === today && roomFreeToday && roomReady ? 'text-gray-700 dark:text-gray-200' : 'text-gray-400'}`}>
@@ -135,7 +179,7 @@ export function RoomBookingForm({
         <div>
           <Label className="text-xs">Type of Guest</Label>
           <select className={selectClass} value={form.nature_of_duty === 'hra' ? 'member' : 'non_member'}
-            onChange={e => setForm({ ...form, nature_of_duty: e.target.value === 'member' ? 'hra' : 'visit' })}>
+            onChange={e => setForm({ ...form, nature_of_duty: e.target.value === 'member' ? 'hra' : 'visit', is_indefinite: false })}>
             <option value="non_member">Non-member</option>
             {isOfficer && <option value="member">Member (HRA)</option>}
           </select>
@@ -215,10 +259,44 @@ export function RoomBookingForm({
             className={form.client_category === 'civilian' && !form.reference_person.trim() ? 'border-red-400' : ''}
             value={form.reference_person} onChange={e => setForm({ ...form, reference_person: e.target.value })} />
         </div>
-        <select className={`${selectClass} col-span-2 ${form.nature_of_duty === 'hra' && !form.member_id ? 'border-red-400' : ''}`} value={form.member_id} onChange={e => setForm({ ...form, member_id: Number(e.target.value) })}>
-          <option value="0">{form.nature_of_duty === 'hra' ? 'Select member (required for HRA)' : 'Link to member (optional)'}</option>
-          {members.map(m => <option key={m.id} value={m.id}>{m.full_name} ({m.service_number})</option>)}
-        </select>
+        {form.nature_of_duty === 'hra' && (
+          <div className="col-span-2 space-y-1.5">
+            <div className="flex gap-1.5">
+              <select className={`${selectClass} ${!form.member_id ? 'border-red-400' : ''}`} value={form.member_id}
+                onChange={e => setForm({ ...form, member_id: Number(e.target.value) })}>
+                <option value="0">Select member (required for HRA)</option>
+                {allMembers.map(m => <option key={m.id} value={m.id}>{m.full_name} ({m.service_number})</option>)}
+              </select>
+              <Button type="button" size="sm" variant="outline" className="shrink-0"
+                onClick={() => setNewMemberOpen(o => !o)}>
+                {newMemberOpen ? 'Cancel' : '+ Register new'}
+              </Button>
+            </div>
+            {newMemberOpen && (
+              <div className="rounded-md border p-2.5 space-y-1.5">
+                <p className="text-xs font-semibold text-gray-500">Register new HRA member</p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <Input placeholder="Service number *" value={newMember.service_number}
+                    onChange={e => setNewMember({ ...newMember, service_number: e.target.value })} />
+                  <Input placeholder="Full name *" value={newMember.full_name}
+                    onChange={e => setNewMember({ ...newMember, full_name: e.target.value })} />
+                  <select className={selectClass} value={newMember.rank} onChange={e => setNewMember({ ...newMember, rank: e.target.value })}>
+                    <option value="">Rank *</option>
+                    {RANKS.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                  <select className={selectClass} value={newMember.mess_category} onChange={e => setNewMember({ ...newMember, mess_category: e.target.value })}>
+                    <option value="officers">Officers</option>
+                    <option value="jcos">JCOs</option>
+                    <option value="ors">ORs</option>
+                  </select>
+                  <Input className="col-span-2" placeholder="Unit" value={newMember.unit}
+                    onChange={e => setNewMember({ ...newMember, unit: e.target.value })} />
+                </div>
+                <Button type="button" size="sm" disabled={newMemberSaving} onClick={saveNewMember}>Save Member</Button>
+              </div>
+            )}
+          </div>
+        )}
         <Input className="col-span-2" placeholder="Remarks / special requests" value={form.special_requests} onChange={e => setForm({ ...form, special_requests: e.target.value })} />
       </div>
 

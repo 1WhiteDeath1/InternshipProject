@@ -1,14 +1,26 @@
 import { useEffect, useState } from 'react';
 import api, { getErrorMessage } from '@/lib/api';
+import { useAuth } from '@/contexts/useAuth';
+import { hasPermission } from '@/contexts/auth-context';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { Search, Users as UsersIcon, Eye } from 'lucide-react';
 import { formatCurrency } from '@/lib/currency';
 import { BillPrintView } from '@/components/BillPrint';
+
+const CATEGORY_OPTIONS: { value: string; label: string }[] = [
+  { value: 'serving_officer', label: 'Serving Officer' },
+  { value: 'retired_officer', label: 'Retired Officer' },
+  { value: 'civilian', label: 'Civilian' },
+  { value: 'permanent_member', label: 'Member' },
+  { value: 'non_member_civilian', label: 'Non-Member Civilian' },
+  { value: 'non_member_non_civilian', label: 'Non-Member Non-Civilian' },
+];
 
 interface GuestListItem {
   id: number;
@@ -67,6 +79,8 @@ const classificationLabel = (c: string | null) => {
 };
 
 export default function Guests() {
+  const { user } = useAuth();
+  const canOverrideCategory = hasPermission(user, 'bookings', 'approve');
   const [guests, setGuests] = useState<GuestListItem[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -75,6 +89,17 @@ export default function Guests() {
   const [profile, setProfile] = useState<GuestProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [previewInvoiceIds, setPreviewInvoiceIds] = useState<number[] | null>(null);
+  const [updatingCategoryId, setUpdatingCategoryId] = useState<number | null>(null);
+
+  const overrideCategory = async (bookingId: number, client_category: string) => {
+    setUpdatingCategoryId(bookingId);
+    try {
+      await api.put(`/bookings/${bookingId}/category`, { client_category });
+      toast.success('Category updated and bill re-priced');
+      if (selectedId) await openProfile(selectedId);
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to update category')); }
+    finally { setUpdatingCategoryId(null); }
+  };
 
   const fetchGuests = async () => {
     try {
@@ -169,9 +194,24 @@ export default function Guests() {
                 <div className="space-y-1.5 max-h-48 overflow-y-auto">
                   {profile.bookings.length === 0 && <p className="text-sm text-gray-400">No stays recorded</p>}
                   {profile.bookings.map(b => (
-                    <div key={b.id} className="flex items-center justify-between text-sm border rounded-md px-3 py-2">
+                    <div key={b.id} className="flex items-center justify-between text-sm border rounded-md px-3 py-2 gap-2">
                       <span>Room {b.room_number || '—'} <span className="text-gray-400">· {b.check_in} → {b.check_out}</span></span>
-                      <Badge variant="outline" className="capitalize">{b.status.replace('_', ' ')}</Badge>
+                      <span className="flex items-center gap-2">
+                        {canOverrideCategory && b.status !== 'checked_out' && b.status !== 'cancelled' && b.status !== 'no_show' ? (
+                          <Select value={b.client_category} disabled={updatingCategoryId === b.id}
+                            onValueChange={(v) => overrideCategory(b.id, v)}>
+                            <SelectTrigger className="h-7 w-[168px] text-xs" title="Manager override: changing this re-prices the bill">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {CATEGORY_OPTIONS.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <span className="capitalize text-gray-400">{classificationLabel(b.client_category)}</span>
+                        )}
+                        <Badge variant="outline" className="capitalize">{b.status.replace('_', ' ')}</Badge>
+                      </span>
                     </div>
                   ))}
                 </div>

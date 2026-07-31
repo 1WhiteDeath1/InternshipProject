@@ -75,16 +75,17 @@ class InvoicePayment(Base):
 
 
 class InvoiceEditRequest(Base):
-    """A Clerk-proposed correction to one already-generated invoice line
-    (wrong room rate, wrong mess charge...), sitting pending until a Manager
-    approves or rejects it. Scoped to description/unit_price only - quantity
-    is untouched and total_price is always derived. Distinct from the
-    discount/complimentary action on Invoice, which stays Clerk-autonomous
-    with no approval step."""
+    """A Clerk-proposed correction to an already-generated invoice, sitting
+    pending until a Manager approves or rejects it. Scoped to
+    description/unit_price only - quantity is untouched and total_price is
+    always derived. invoice_item_id is null when the request adds a new
+    line under a head that's currently zero/uncharged rather than
+    correcting an existing one - on approval a new InvoiceItem is created
+    instead of an existing one being updated."""
     __tablename__ = "invoice_edit_requests"
 
     id = Column(Integer, primary_key=True)
-    invoice_item_id = Column(Integer, ForeignKey("invoice_items.id"), nullable=False)
+    invoice_item_id = Column(Integer, ForeignKey("invoice_items.id"), nullable=True)
     invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=False)
     original_description = Column(String(255), nullable=False)
     original_unit_price = Column(Numeric(10, 2), nullable=False)

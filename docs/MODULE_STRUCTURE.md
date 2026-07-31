@@ -21,8 +21,8 @@ The domain list today:
 | `audit` | AuditLog | ✓ | `audit` |
 | `alerts` | Alert | ✓ | `alerts` |
 | `inventory` | InventoryCategory, InventoryItem, StockBatch, StockMovement, WasteLog, CycleCount | ✓ | `inventory` |
-| `kitchen` | Recipe, RecipeIngredient, KitchenOrder, MenuPrice | ✓ | `kitchen`, `recipes`, `menu_prices` |
-| `procurement` | Vendor, PurchaseOrder, PurchaseOrderItem, ThreeWayMatch | ✓ | `procurement` |
+| `kitchen` | MenuItem, MenuItemEditRequest, GasChargeRate, GasChargeRateHistory, KitchenOrder | ✓ | `kitchen` |
+| `procurement` | Vendor (self-purchase lookup list only — no PO workflow, see Inventory's `StockBatch.vendor_id`) | ✓ | `procurement` |
 | `rooms` | Room, Attendant, RoomPhoto | ✓ | `attendants` (room CRUD lives in `bookings` router) |
 | `rates` | RoomRate, DutyRate, HraRankRate, WomensBlocRankRate, HraUtilityRate, TariffRate | ✓ | `tariffs`, `womens_bloc_rates` |
 | `guests` | Guest | ✓ | `guests` |

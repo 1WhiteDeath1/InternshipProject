@@ -106,34 +106,34 @@ vendors = [
 db.add_all(vendors)
 db.commit()
 
-# --- Purchase Orders ---
-po = PurchaseOrder(po_number="PO-20260701-0001", vendor_id=vendors[0].id, status=POStatus.RECEIVED,
-                   total_amount=375.0, expected_delivery=date(2026, 7, 5), created_by=admin.id)
-db.add(po)
-db.commit()
-poi = PurchaseOrderItem(po_id=po.id, item_id=items[0].id, quantity_ordered=100, quantity_delivered=100, quantity_received=100, unit_price=2.5, total_price=250.0)
-poi2 = PurchaseOrderItem(po_id=po.id, item_id=items[4].id, quantity_ordered=50, quantity_delivered=50, quantity_received=50, unit_price=2.5, total_price=125.0)
-db.add_all([poi, poi2])
+# --- Self-purchase stock intake (vendor-tagged, demoing Daily Stock Intake) ---
+vendor_batches = [
+    StockBatch(item_id=items[0].id, batch_number="SI-DEMO-001", quantity=100, unit_cost=2.5, vendor_id=vendors[0].id),
+    StockBatch(item_id=items[4].id, batch_number="SI-DEMO-002", quantity=50, unit_cost=2.5, vendor_id=vendors[0].id),
+]
+db.add_all(vendor_batches)
 db.commit()
 
-# --- Rooms (three classes per the rate card) ---
+# --- Rooms (28 total, per the mess's actual room register) ---
 rooms = []
-for floor in range(1, 4):
-    for room_num in range(1, 9):
-        rooms.append(Room(
-            room_number=f"{floor}0{room_num}",
-            room_type=RoomType.STANDARD,
-            floor=floor,
-            capacity=2,
-            base_price=3500,  # card total for a serving officer
-        ))
+# "VIP" rooms are just the mess's naming convention for standard rooms -
+# not a distinct RoomType. Numbered 2-14 and 20-26 (15-19 don't exist).
+for room_num in list(range(2, 15)) + list(range(20, 27)):
+    rooms.append(Room(
+        room_number=f"VIP-{room_num}",
+        room_type=RoomType.STANDARD,
+        floor=1,
+        capacity=2,
+        base_price=3500,  # card total for a serving officer
+    ))
 
 # Named suites (A-C are 2xAC, D-F are 1xAC - the AC count drives the HRA
-# monthly utility figure) and the DG suite.
+# monthly utility figure) and the two DG suites.
 for suite_name, acs in [("Suite-A", 2), ("Suite-B", 2), ("Suite-C", 2),
                         ("Suite-D", 1), ("Suite-E", 1), ("Suite-F", 1)]:
     rooms.append(Room(room_number=suite_name, room_type=RoomType.SUITE, ac_count=acs, floor=1, capacity=2, base_price=4500))
-rooms.append(Room(room_number="DG-Suite", room_type=RoomType.DG_SUITE, ac_count=2, floor=3, capacity=2, base_price=4500))
+rooms.append(Room(room_number="DG-Suite-1", room_type=RoomType.DG_SUITE, ac_count=2, floor=3, capacity=2, base_price=4500))
+rooms.append(Room(room_number="DG-Suite-2", room_type=RoomType.DG_SUITE, ac_count=2, floor=3, capacity=2, base_price=4500))
 db.add_all(rooms)
 db.commit()
 
@@ -205,7 +205,7 @@ inv = Invoice(invoice_number="INV-202607-00001", booking_id=1, issue_date=date(2
               status=InvoiceStatus.ISSUED, created_by=admin.id)
 db.add(inv)
 db.commit()
-ii = InvoiceItem(invoice_id=inv.id, description="Room 101 - 5 nights", quantity=5, unit_price=50, total_price=250)
+ii = InvoiceItem(invoice_id=inv.id, description="Room VIP-2 - 5 nights", quantity=5, unit_price=50, total_price=250)
 db.add(ii)
 db.commit()
 
@@ -214,43 +214,62 @@ waste = WasteLog(item_id=items[2].id, quantity=2, category=WasteCategory.SPOILAG
 db.add(waste)
 db.commit()
 
-# --- Recipes / Menu Items (breakfast/lunch/hitea/dinner options for the
-# Attendance page's "Today's menu item" picker and Kitchen production) ---
-recipes = [
-    Recipe(name="Anda Paratha", description="Fried egg wrapped in a buttered paratha", menu_category="breakfast", portions=1),
-    Recipe(name="Plain Omelette", description="Two-egg omelette with butter", menu_category="breakfast", portions=1),
-    Recipe(name="Tea & Toast", description="Buttered toast with a cup of tea", menu_category="breakfast", portions=1),
-    Recipe(name="Chicken Karahi", description="Chicken cooked with tomatoes and onions", menu_category="lunch", portions=4),
-    Recipe(name="Vegetable Pulao", description="Basmati rice with sauteed onions and tomatoes", menu_category="lunch", portions=6),
-    Recipe(name="Plain Rice & Curry", description="Steamed basmati rice with mixed vegetable curry", menu_category="lunch", portions=6),
-    Recipe(name="Tea & Biscuits", description="Hi-tea service with assorted biscuits", menu_category="hitea", portions=1),
-    Recipe(name="Coffee & Samosa", description="Hi-tea service with fried samosas", menu_category="hitea", portions=1),
-    Recipe(name="Chicken Biryani", description="Layered rice with spiced chicken, onions and tomatoes", menu_category="dinner", portions=4),
-    Recipe(name="Roti & Chicken Curry", description="Wheat flatbread with chicken curry", menu_category="dinner", portions=4),
+# --- Menu (the mess's actual weekly lunch/dinner rotation - Executive Mess
+# Rawat's paper menu - plus a small generic breakfast/hitea set since the
+# paper menu only covers lunch/dinner). Prices are Kitchen NCO-editable
+# estimates, not costed figures - there's no ingredient/recipe data behind
+# them anymore. Feeds the Attendance page's "Today's menu item" picker and
+# Kitchen production.) ---
+WEEKLY_MENU = [
+    # (day_of_week, meal_type, name, price)
+    ("monday", "lunch", "Chana Pulao", 200), ("monday", "lunch", "Raita", 80), ("monday", "lunch", "Chicken Shami Kebab (2 pcs)", 250),
+    ("monday", "dinner", "Malai Boti (3 skewers)", 350), ("monday", "dinner", "Kebab (1 pc)", 200),
+    ("monday", "dinner", "1/8 Chicken Tikka", 300), ("monday", "dinner", "Naan / Puri Paratha", 60),
+
+    ("tuesday", "lunch", "Chicken Qorma", 300), ("tuesday", "lunch", "Naan", 50), ("tuesday", "lunch", "Salad", 80),
+    ("tuesday", "dinner", "Chicken Karahi", 350), ("tuesday", "dinner", "Tandoori Roti", 40),
+
+    ("wednesday", "lunch", "Mixed Vegetables", 180), ("wednesday", "lunch", "Chapati", 30),
+    ("wednesday", "dinner", "Chicken Makhni Handi", 350), ("wednesday", "dinner", "Chapati", 30), ("wednesday", "dinner", "Raita", 80),
+
+    ("thursday", "lunch", "Mixed Daal", 150), ("thursday", "lunch", "1/2 Rice", 100), ("thursday", "lunch", "Roti (2 pcs)", 30),
+    ("thursday", "dinner", "Chicken Qorma", 300), ("thursday", "dinner", "Tandoori Roti", 40),
+
+    ("friday", "lunch", "Chicken Karahi", 350), ("friday", "lunch", "Naan", 50), ("friday", "lunch", "Raita", 80),
+    ("friday", "dinner", "Daal Mash", 150), ("friday", "dinner", "1/8 Roasted Chicken", 280),
+    ("friday", "dinner", "Chapati", 30), ("friday", "dinner", "Tandoori Roti", 40),
+
+    ("saturday", "lunch", "Lahori Chana", 180), ("saturday", "lunch", "Naan", 50),
+    ("saturday", "dinner", "Plain Pulao", 150), ("saturday", "dinner", "Chicken Karahi", 350),
+
+    # Sunday: the regular afternoon/night rows plus the paper menu's separate
+    # "Sunday Special" rotation choices for the same two slots.
+    ("sunday", "lunch", "Paratha", 60), ("sunday", "lunch", "Aloo Keema", 220), ("sunday", "lunch", "Egg", 40),
+    ("sunday", "lunch", "Puri Chutney", 80), ("sunday", "lunch", "Chana Pulao", 200), ("sunday", "lunch", "Raita / Soup", 90),
+    ("sunday", "lunch", "Naan", 50), ("sunday", "lunch", "Reshmi Kebab (1 pc)", 250), ("sunday", "lunch", "1/8 Chicken Tikka", 300),
+    ("sunday", "lunch", "Chicken Biryani", 280), ("sunday", "lunch", "Tandoori Roti", 40),
+    ("sunday", "dinner", "Boneless Chicken", 320), ("sunday", "dinner", "Aloo Anda Gravy", 200), ("sunday", "dinner", "Tandoori Roti", 40),
+    ("sunday", "dinner", "Malai Boti (3 skewers)", 350), ("sunday", "dinner", "Kebab (1 pc)", 200), ("sunday", "dinner", "Reshmi Kebab (1 pc)", 250),
+    ("sunday", "dinner", "1/8 Chicken Tikka", 300), ("sunday", "dinner", "Naan / Puri Paratha", 60),
+    ("sunday", "dinner", "Chicken Biryani", 280), ("sunday", "dinner", "Aloo Keema Gravy", 230),
+
+    # Not on the paper menu (lunch/dinner only) - a small generic set so
+    # breakfast/hitea aren't empty in the picker.
+    (None, "breakfast", "Anda Paratha", 100), (None, "breakfast", "Plain Omelette", 90), (None, "breakfast", "Tea & Toast", 70),
+    (None, "hitea", "Tea & Biscuits", 60), (None, "hitea", "Coffee & Samosa", 90),
 ]
-db.add_all(recipes)
+menu_items = [MenuItem(day_of_week=day, meal_type=meal, name=name, price=price) for day, meal, name, price in WEEKLY_MENU]
+db.add_all(menu_items)
 db.commit()
 
-recipe_ingredients = [
-    RecipeIngredient(recipe_id=recipes[0].id, item_id=items[3].id, quantity=1, unit="pcs"),   # Anda Paratha - Eggs
-    RecipeIngredient(recipe_id=recipes[0].id, item_id=items[8].id, quantity=0.1, unit="kg"),  # - Flour
-    RecipeIngredient(recipe_id=recipes[0].id, item_id=items[9].id, quantity=0.02, unit="kg"), # - Butter
-    RecipeIngredient(recipe_id=recipes[1].id, item_id=items[3].id, quantity=2, unit="pcs"),   # Plain Omelette - Eggs
-    RecipeIngredient(recipe_id=recipes[1].id, item_id=items[9].id, quantity=0.02, unit="kg"), # - Butter
-    RecipeIngredient(recipe_id=recipes[3].id, item_id=items[1].id, quantity=1.0, unit="kg"),  # Chicken Karahi - Chicken
-    RecipeIngredient(recipe_id=recipes[3].id, item_id=items[5].id, quantity=0.3, unit="kg"),  # - Tomatoes
-    RecipeIngredient(recipe_id=recipes[3].id, item_id=items[4].id, quantity=0.3, unit="kg"),  # - Onions
-    RecipeIngredient(recipe_id=recipes[4].id, item_id=items[0].id, quantity=1.5, unit="kg"),  # Vegetable Pulao - Rice
-    RecipeIngredient(recipe_id=recipes[4].id, item_id=items[4].id, quantity=0.2, unit="kg"),  # - Onions
-    RecipeIngredient(recipe_id=recipes[8].id, item_id=items[0].id, quantity=1.5, unit="kg"),  # Chicken Biryani - Rice
-    RecipeIngredient(recipe_id=recipes[8].id, item_id=items[1].id, quantity=1.0, unit="kg"),  # - Chicken
-    RecipeIngredient(recipe_id=recipes[8].id, item_id=items[4].id, quantity=0.3, unit="kg"),  # - Onions
-]
-db.add_all(recipe_ingredients)
+# --- Gas charge rate (Kitchen NCO-set percentage of the computed Extra
+# Messing total; Extra Messing itself has no rate to seed - it's always
+# computed from actual orders) ---
+db.add(GasChargeRate(percentage=10, updated_by=kitchen_user.id))
 db.commit()
 
 # --- Security Logs ---
-sec_log = SecurityLog(event_type="check_in", guest_name="Ahmed Hassan", room_number="101", processed_by=front_user.id)
+sec_log = SecurityLog(event_type="check_in", guest_name="Ahmed Hassan", room_number="VIP-2", processed_by=front_user.id)
 db.add(sec_log)
 db.commit()
 
@@ -269,12 +288,12 @@ for entry_data in [
 db.commit()
 
 print("Demo data seeded successfully!")
-print(f"  - {db.query(Recipe).count()} recipes")
+print(f"  - {db.query(MenuItem).count()} menu items")
 print(f"  - {db.query(Role).count()} roles")
-print(f"  - {db.query(User).count()} users (admin/admin123)")
+print(f"  - {db.query(User).count()} users (manager/deputy/clerk/kitchen/booking/security, password 123456)")
 print(f"  - {db.query(InventoryItem).count()} inventory items")
 print(f"  - {db.query(Room).count()} rooms")
 print(f"  - {db.query(Booking).count()} bookings")
 print(f"  - {db.query(Member).count()} members ({db.query(Booking).filter(Booking.nature_of_duty == 'hra').count()} HRA resident)")
 print(f"  - {db.query(Vendor).count()} vendors")
-print("Login with: admin / admin123")
+print("Login with any of: manager / deputy / clerk / kitchen / booking / security, password 123456")

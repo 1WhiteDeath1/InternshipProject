@@ -34,6 +34,9 @@ import Reports from '@/pages/Reports';
 import Settings from '@/pages/Settings';
 import ImportExport from '@/pages/ImportExport';
 import Events from '@/pages/Events';
+import Directives from '@/pages/Directives';
+import GuestDiscounts from '@/pages/GuestDiscounts';
+import MemberDiscounts from '@/pages/MemberDiscounts';
 import NotFound from '@/pages/NotFound';
 
 function App() {
@@ -71,11 +74,14 @@ function App() {
                 <Route path="/roles" element={<Roles />} />
                 <Route path="/audit-log" element={<AuditLog />} />
                 <Route path="/alerts" element={<Alerts />} />
+                <Route path="/directives" element={<Directives />} />
                 <Route path="/approvals" element={<Approvals />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/import-export" element={<ImportExport />} />
                 <Route path="/events" element={<Events />} />
+                <Route path="/guest-discounts" element={<GuestDiscounts />} />
+                <Route path="/member-discounts" element={<MemberDiscounts />} />
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>

@@ -5,18 +5,6 @@ from backend.logging_config import get_logger
 logger = get_logger("app")
 
 
-def _migrate_inventory_ingredient_type(engine):
-    # Additive, nullable column - plain ALTER TABLE ADD COLUMN is safe, no rebuild needed.
-    with engine.connect() as conn:
-        cols = conn.execute(text("PRAGMA table_info(inventory_items)")).fetchall()
-        if not cols:
-            return
-        if "ingredient_type" not in {c[1] for c in cols}:
-            conn.execute(text("ALTER TABLE inventory_items ADD COLUMN ingredient_type VARCHAR(20)"))
-            conn.commit()
-            logger.info("migration: added inventory_items.ingredient_type")
-
-
 def _migrate_stock_zone_removal(engine):
     # There is only one physical stock location - the warehouse/kitchen zone
     # split never matched reality and was the root cause of stock landing
@@ -114,7 +102,21 @@ def _rebuild_stock_movements_without_zone(cur):
     cur.execute("CREATE INDEX idx_movement_type ON stock_movements (movement_type)")
 
 
+def _migrate_stock_batch_vendor(engine):
+    # Self-purchase intake: which vendor a batch was bought from, entered
+    # directly on Daily Stock Intake. Nullable - a batch never needs a
+    # vendor to be logged. Plain ALTER TABLE ADD COLUMN, no rebuild needed.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(stock_batches)")).fetchall()
+        if not cols:
+            return
+        if "vendor_id" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE stock_batches ADD COLUMN vendor_id INTEGER REFERENCES vendors(id)"))
+            conn.commit()
+            logger.info("migration: added stock_batches.vendor_id")
+
+
 MIGRATIONS = [
-    _migrate_inventory_ingredient_type,
     _migrate_stock_zone_removal,
+    _migrate_stock_batch_vendor,
 ]

@@ -13,7 +13,7 @@ interface LookupResult {
   id: number;
   name: string;
   sub_label: string | null;
-  recipe_id: number | null;
+  menu_item_id: number | null;
   attendance_id: number | null;
   attendance_status: string | null;
 }
@@ -75,7 +75,7 @@ export function MealServiceTab({ onSpecialOrder }: MealServiceTabProps) {
       const res = await api.post('/attendance/serve', {
         member_id: r.kind === 'member' ? r.id : undefined,
         booking_id: r.kind === 'booking' ? r.id : undefined,
-        date, meal_type: meal, recipe_id: r.recipe_id ?? undefined,
+        date, meal_type: meal, menu_item_id: r.menu_item_id ?? undefined,
       });
       // Patch just this row in place - do not clear the search string or
       // refetch, so the omnibar's focus and query survive back-to-back serves.

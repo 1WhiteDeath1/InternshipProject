@@ -17,11 +17,11 @@ from backend.routers.branding import router as branding_router
 from backend.routers.members import router as members_router
 from backend.routers.attendance import router as attendance_router
 from backend.routers.mess_billing import router as mess_billing_router
-from backend.routers.recipes import router as recipes_router
 from backend.routers.kitchen import router as kitchen_router
-from backend.routers.menu_prices import router as menu_prices_router
 from backend.routers.guests import router as guests_router
 from backend.routers.attendants import router as attendants_router
 from backend.routers.tariffs import router as tariffs_router
 from backend.routers.womens_bloc_rates import router as womens_bloc_rates_router
 from backend.routers.events import router as events_router
+from backend.routers.rate_card import router as rate_card_router
+from backend.routers.directives import router as directives_router

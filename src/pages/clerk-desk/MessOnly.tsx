@@ -3,11 +3,12 @@ import api, { getErrorMessage } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { UtensilsCrossed, Wallet } from 'lucide-react';
+import { UtensilsCrossed, Wallet, History } from 'lucide-react';
 import { BillPrintView } from '@/components/BillPrint';
 import { ChargeSplitBar } from '@/components/ChargeSplitBar';
 import { BillStatusBadge } from '@/components/BillStatusBadge';
 import { formatCurrency } from '@/lib/currency';
+import { OrderHistoryDialog } from '@/components/OrderHistoryDialog';
 import { useClerkDesk, type UnsettledInvoice } from './context';
 
 // Walk-in "mess-only" guests: they ate but booked no room, so there's no
@@ -17,6 +18,7 @@ export default function MessOnly() {
   const { messOnly, loading, refresh } = useClerkDesk();
   const [settleInvoiceIds, setSettleInvoiceIds] = useState<number[] | null>(null);
   const [generatingId, setGeneratingId] = useState<number | null>(null);
+  const [historyGuest, setHistoryGuest] = useState<{ id: number; name: string } | null>(null);
 
   const generate = async (guestId: number) => {
     setGeneratingId(guestId);
@@ -91,11 +93,16 @@ export default function MessOnly() {
                     { label: 'Food', amount: bal.mess_bill_total, colorClass: 'bg-teal-500' },
                   ]} />
                   {bal.unpriced_items.length > 0 && <p className="text-xs text-amber-600">Needs pricing: {bal.unpriced_items.join(', ')}</p>}
-                  <Button size="sm" className="w-full" disabled={generatingId === g.id || bal.mess_bill_total <= 0}
-                    onClick={() => generate(g.id)}>
-                    <UtensilsCrossed size={14} className="mr-1" />
-                    {generatingId === g.id ? 'Working…' : 'Generate Mess Bill'}
-                  </Button>
+                  <div className="flex gap-1.5">
+                    <Button size="sm" variant="outline" onClick={() => setHistoryGuest({ id: g.id, name: g.guest_name })}>
+                      <History size={14} />
+                    </Button>
+                    <Button size="sm" className="flex-1" disabled={generatingId === g.id || bal.mess_bill_total <= 0}
+                      onClick={() => generate(g.id)}>
+                      <UtensilsCrossed size={14} className="mr-1" />
+                      {generatingId === g.id ? 'Working…' : 'Generate Mess Bill'}
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             );
@@ -106,6 +113,11 @@ export default function MessOnly() {
       <BillPrintView invoiceIds={settleInvoiceIds}
         onClose={() => setSettleInvoiceIds(null)}
         allowPayments onPaymentsChanged={refresh} />
+
+      <OrderHistoryDialog
+        open={historyGuest !== null} onOpenChange={open => { if (!open) setHistoryGuest(null); }}
+        guestId={historyGuest?.id} personName={historyGuest?.name}
+      />
     </div>
   );
 }

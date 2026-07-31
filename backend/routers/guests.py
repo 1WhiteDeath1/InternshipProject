@@ -18,9 +18,21 @@ async def search_guests(q: str = Query(..., min_length=2), db: Session = Depends
     # name/CNIC autocomplete (_find_or_create_guest matching).
     if not (check_permission(current_user, "guests", "view") or check_permission(current_user, "bookings", "view")):
         raise HTTPException(status_code=403, detail="Permission denied")
-    return db.query(Guest).filter(
+    guests = db.query(Guest).filter(
         (Guest.full_name.contains(q)) | (Guest.phone.contains(q)) | (Guest.id_number.contains(q))
     ).order_by(Guest.updated_at.desc()).limit(8).all()
+    results = []
+    for g in guests:
+        latest = db.query(Booking).filter(Booking.guest_id == g.id).order_by(Booking.check_in.desc()).first()
+        results.append(GuestOut(
+            id=g.id, full_name=g.full_name, phone=g.phone, id_type=g.id_type,
+            id_number=g.id_number, unit_address=g.unit_address,
+            last_client_category=latest.client_category.value if latest else None,
+            last_rank=latest.rank if latest else None,
+            last_nature_of_duty=latest.nature_of_duty if latest and latest.nature_of_duty != "hra" else None,
+            last_stay_type=latest.stay_type if latest else None,
+        ))
+    return results
 
 
 @router.post("", response_model=GuestOut)

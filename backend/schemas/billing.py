@@ -20,7 +20,6 @@ class InvoiceItemCreate(BaseModel):
     description: str
     quantity: float = Field(1, gt=0)
     unit_price: float = Field(..., ge=0)
-    is_meal_charge: bool = False  # if true, unit_price is scaled by the booking's client_category meal multiplier
 
 class InvoiceBase(BaseModel):
     booking_id: int
@@ -79,7 +78,7 @@ class InvoiceEditRequestOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     invoice_id: int
-    invoice_item_id: int
+    invoice_item_id: Optional[int] = None
     bill_type: str
     original_description: str
     original_unit_price: float

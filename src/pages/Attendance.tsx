@@ -13,11 +13,11 @@ interface AttendeeRow {
   kind: 'member' | 'booking' | 'guest';
   name: string;
   sub_label: string | null;
-  recipe_name: string | null;
+  menu_item_name: string | null;
   status: string;
 }
 
-interface RecipeOption { id: number; name: string; }
+interface MenuItemOption { id: number; name: string; }
 interface CutoffInfo { cutoff: string; locked: boolean; }
 
 const MEAL_TYPES = ['breakfast', 'lunch', 'dinner'];
@@ -44,8 +44,8 @@ export default function Attendance() {
   const [attendeesByMeal, setAttendeesByMeal] = useState<Record<string, AttendeeRow[]>>({});
   const [cutoffs, setCutoffs] = useState<Record<string, CutoffInfo>>({});
   const [loading, setLoading] = useState(true);
-  const [recipes, setRecipes] = useState<RecipeOption[]>([]);
-  const [menuRecipeId, setMenuRecipeId] = useState(0);
+  const [menuItems, setMenuItems] = useState<MenuItemOption[]>([]);
+  const [selectedMenuItemId, setSelectedMenuItemId] = useState(0);
 
   const isPast = new Date(date) < new Date(new Date().toDateString());
 
@@ -70,9 +70,9 @@ export default function Attendance() {
     finally { setLoading(false); }
   }, [date]);
 
-  const fetchRecipes = useCallback(async () => {
-    try { const res = await api.get(`/recipes?menu_category=${mealType}`); setRecipes(res.data.items); }
-    catch { toast.error('Failed to load recipes'); }
+  const fetchMenuItems = useCallback(async () => {
+    try { const res = await api.get(`/kitchen/menu?meal_type=${mealType}`); setMenuItems(res.data); }
+    catch { toast.error('Failed to load menu items'); }
   }, [mealType]);
 
   useEffect(() => {
@@ -80,8 +80,8 @@ export default function Attendance() {
   }, [date, fetchAttendees]);
 
   useEffect(() => {
-    queueMicrotask(() => { setMenuRecipeId(0); fetchRecipes(); });
-  }, [mealType, fetchRecipes]);
+    queueMicrotask(() => { setSelectedMenuItemId(0); fetchMenuItems(); });
+  }, [mealType, fetchMenuItems]);
 
   const handleRemove = async (row: AttendeeRow) => {
     let reason: string | undefined;
@@ -155,16 +155,16 @@ export default function Attendance() {
           <div className="flex items-end gap-3 flex-wrap">
             <div className="min-w-52 max-w-xs">
               <Label className="text-xs text-gray-500">Today's menu item <span className="text-gray-400">(optional)</span></Label>
-              <select className="mt-1 w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={menuRecipeId} onChange={e => setMenuRecipeId(Number(e.target.value))}>
+              <select className="mt-1 w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={selectedMenuItemId} onChange={e => setSelectedMenuItemId(Number(e.target.value))}>
                 <option value="0">Not specified</option>
-                {recipes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                {menuItems.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
             </div>
             <div className="flex-1" />
             <Badge className="bg-green-100 text-green-800">{currentAttendees.length} confirmed for {MEAL_LABELS[mealType]}</Badge>
           </div>
           <MealAttendanceOmnibar
-            date={date} mealType={mealType} recipeId={menuRecipeId} onAdded={fetchAttendees}
+            date={date} mealType={mealType} menuItemId={selectedMenuItemId} onAdded={fetchAttendees}
             mealTypes={MEAL_TYPES} mealLabels={MEAL_LABELS} lockedMeals={lockedMeals}
           />
         </CardContent>
@@ -183,7 +183,7 @@ export default function Attendance() {
             <div key={row.attendance_id} className="flex items-center justify-between gap-3 px-4 py-3 border-b last:border-0 border-gray-100 dark:border-gray-800">
               <div>
                 <p className="font-medium text-sm">{row.name} <span className="text-xs text-gray-400">({KIND_LABEL[row.kind]})</span></p>
-                <p className="text-xs text-gray-500">{row.sub_label}{row.recipe_name ? ` · ${row.recipe_name}` : ''}</p>
+                <p className="text-xs text-gray-500">{row.sub_label}{row.menu_item_name ? ` · ${row.menu_item_name}` : ''}</p>
               </div>
               <div className="flex items-center gap-2">
                 <Badge className={row.status === 'attended' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}>{row.status}</Badge>

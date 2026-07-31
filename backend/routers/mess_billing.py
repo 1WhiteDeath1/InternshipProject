@@ -5,9 +5,10 @@ from calendar import monthrange
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from backend.database import get_db
+from sqlalchemy import func
 from backend.models import (
-    Member, MemberStatus, MessBill, MessBillStatus, GuestMealCharge,
-    PurchaseOrder, POStatus, Booking, KitchenOrder, Room, Alert, AlertStatus, AlertSeverity,
+    Member, MemberStatus, DiningStatus, MessBill, MessBillStatus, GuestMealCharge,
+    StockBatch, Booking, KitchenOrder, Room, Alert, AlertStatus, AlertSeverity,
 )
 from backend.schemas import GuestMealChargeCreate, DiscountApplyRequest
 from backend.auth import get_current_user, check_permission, PermissionChecker
@@ -47,6 +48,7 @@ async def list_bills(
          "member_service_number": b.member.service_number if b.member else None,
          "member_mess_category": b.member.mess_category.value if b.member else None,
          "member_is_womens_bloc": bool(b.member.is_womens_bloc) if b.member else False,
+         "member_dining_status": (b.member.dining_status.value if b.member and b.member.dining_status else "dining"),
          "month": b.month, "year": b.year, "man_days": b.man_days, "per_head_rate": float(b.per_head_rate),
          "base_menu_amount": float(b.base_menu_amount), "stay_amount": float(b.stay_amount or 0),
          "extra_meals_amount": float(b.extra_meals_amount or 0), "ala_carte_amount": float(b.ala_carte_amount or 0),
@@ -216,17 +218,25 @@ async def generate_bills(month: int = Query(..., ge=1, le=12), year: int = Query
     period_start_dt = datetime.combine(period_start, datetime.min.time())
     period_end_dt = datetime.combine(period_end, datetime.max.time())
 
-    # Total expenditure: SUM of received POs touched in this period.
-    # KNOWN APPROXIMATION: PurchaseOrder has no explicit received_at column,
-    # so `updated_at` (touched by confirm_receipt) stands in for it.
-    total_expenditure = db.query(PurchaseOrder).filter(
-        PurchaseOrder.status == POStatus.RECEIVED,
-        PurchaseOrder.updated_at >= period_start_dt,
-        PurchaseOrder.updated_at <= period_end_dt,
-    ).all()
-    total_expenditure = float(sum(po.total_amount for po in total_expenditure))
+    # Total expenditure: self-purchase stock spend (Daily Stock Intake /
+    # Smart Intake batches) logged in this period - the mess buys its own
+    # ingredients directly, so every StockBatch is committed spend.
+    total_expenditure = float(db.query(func.sum(StockBatch.quantity * StockBatch.unit_cost)).filter(
+        StockBatch.created_at >= period_start_dt, StockBatch.created_at <= period_end_dt,
+    ).scalar() or 0)
 
-    active_members = db.query(Member).filter(Member.status == MemberStatus.ACTIVE).all()
+    # Non-dining members are excluded entirely - not just skipped from
+    # billing but from the man-day pool that sets the per-head rate, so a
+    # member marked non-dining (e.g. away, or an HRA resident who isn't
+    # actually eating there) doesn't distort the mess-wide rate either.
+    active_members = db.query(Member).filter(
+        Member.status == MemberStatus.ACTIVE, Member.dining_status != DiningStatus.NON_DINING,
+    ).all()
+    skipped_non_dining = [
+        m.id for m in db.query(Member).filter(
+            Member.status == MemberStatus.ACTIVE, Member.dining_status == DiningStatus.NON_DINING,
+        ).all()
+    ]
     total_man_days = sum(get_man_days(db, m.id, month, year) for m in active_members)
     if total_man_days == 0:
         raise HTTPException(status_code=400, detail="No attendance recorded for this period - cannot compute a per-head rate")
@@ -261,15 +271,14 @@ async def generate_bills(month: int = Query(..., ge=1, le=12), year: int = Query
                 GuestMealCharge.sponsor_member_id == member.id, GuestMealCharge.date >= period_start, GuestMealCharge.date <= period_end,
             ).all()
         ))
-        # Member's own a la carte custom orders for the period, billed at cost
-        # (food_cost, no markup - MenuPrice is the guest-facing list, not
-        # member-facing) and not yet pulled into a bill.
+        # Member's own a la carte custom orders for the period, billed at
+        # MenuItem.price - same rate guests pay - and not yet pulled into a bill.
         ala_carte_orders = db.query(KitchenOrder).filter(
             KitchenOrder.member_id == member.id, KitchenOrder.is_ala_carte == True,
             KitchenOrder.status == "served", KitchenOrder.invoiced_at.is_(None),
             KitchenOrder.created_at >= period_start_dt, KitchenOrder.created_at <= period_end_dt,
         ).all()
-        ala_carte_amount = float(sum(o.food_cost or 0 for o in ala_carte_orders))
+        ala_carte_amount = float(sum((o.menu_item.price if o.menu_item else 0) * o.quantity_ordered for o in ala_carte_orders))
         discount_rate = float(member.custom_discount_rate) if member.custom_discount_rate and member.custom_discount_rate > 0 else default_discount_rate
         discount_amount = base_menu_amount * discount_rate / 100
         total_amount = base_menu_amount - discount_amount + stay_amount + extra_meals_amount + ala_carte_amount
@@ -299,9 +308,10 @@ async def generate_bills(month: int = Query(..., ge=1, le=12), year: int = Query
 
     log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "mess_bills", None,
               after_state={"month": month, "year": year, "generated": len(generated), "skipped_finalized": len(skipped),
+                           "skipped_non_dining": len(skipped_non_dining),
                            "total_expenditure": total_expenditure, "total_man_days": total_man_days, "hra_residents_billed": hra_billed_count},
               ip_address=request.client.host if request else None)
-    return {"generated": generated, "skipped_finalized": skipped, "per_head_rate": per_head_rate}
+    return {"generated": generated, "skipped_finalized": skipped, "skipped_non_dining": skipped_non_dining, "per_head_rate": per_head_rate}
 
 
 @router.post("/issue-all")

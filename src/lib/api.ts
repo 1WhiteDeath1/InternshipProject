@@ -25,7 +25,11 @@ export function getErrorMessage(err: unknown, fallback = 'Something went wrong')
 }
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token') || memoryToken;
+  // memoryToken first: if *this* tab logged in this session (remember-me off),
+  // that's the session this tab should use even if some other tab's
+  // remember-me login has since written a different token to localStorage.
+  // Only a tab with no login of its own falls back to the shared/remembered one.
+  const token = memoryToken || localStorage.getItem('token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
@@ -34,7 +38,7 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      const hasToken = localStorage.getItem('token') || memoryToken;
+      const hasToken = memoryToken || localStorage.getItem('token');
 
       // Only clear storage and force a hard redirect if a token actually existed
       // (meaning an active session expired)

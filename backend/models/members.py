@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, Text, ForeignKey, Enum, Numeric, Index
 from sqlalchemy.orm import relationship
 from backend.database import Base
-from backend.models.enums import MessCategory, ClientCategory, MemberStatus, LeaveStatus
+from backend.models.enums import MessCategory, ClientCategory, MemberStatus, LeaveStatus, DiningStatus
 
 
 class Member(Base):
@@ -20,6 +20,11 @@ class Member(Base):
     # officers/jcos/ors; when set, HRA billing uses WomensBlocRankRate
     # instead of HraRankRate for the same rank band.
     is_womens_bloc = Column(Boolean, default=False)
+    # NON_DINING members are excluded entirely from mess_billing.generate_bills
+    # (both the per-head rate's man-day pool and bill generation itself) -
+    # Kitchen NCO edits this per member (e.g. an HRA resident who isn't
+    # actually eating in the mess). Defaults to DINING for every new member.
+    dining_status = Column(Enum(DiningStatus), default=DiningStatus.DINING)
     custom_discount_rate = Column(Numeric(4, 2), default=0.00)  # per-member override, 0-100
     phone = Column(String(50))
     email = Column(String(255))

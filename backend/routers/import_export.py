@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 from openpyxl import Workbook, load_workbook
 from backend.database import get_db
 from backend.models import (
-    InventoryItem, InventoryCategory, Vendor, Room, Recipe, RecipeIngredient,
-    Booking, PurchaseOrder, PurchaseOrderItem, StockBatch,
+    InventoryItem, InventoryCategory, Vendor, Room,
+    Booking, StockBatch,
 )
 from backend.auth import get_current_user, check_permission
 from backend.audit import log_audit, AuditAction
@@ -22,7 +22,6 @@ TEMPLATES = {
     "inventory": ["sku", "name", "category", "unit", "reorder_level", "reorder_quantity"],
     "vendors": ["name", "contact_person", "phone", "email", "address", "tax_id", "payment_terms"],
     "rooms": ["room_number", "room_type", "floor", "capacity", "base_price", "amenities"],
-    "recipes": ["name", "description", "menu_category", "portions"],
     "bookings": ["guest_name", "guest_phone", "guest_email", "room_number", "check_in", "check_out", "adults", "children"],
     "opening_stock": ["sku", "batch_number", "quantity", "bin_location", "expiry_date", "unit_cost"],
 }
@@ -115,10 +114,10 @@ async def export_data(module: str, db: Session = Depends(get_db), current_user=D
         for b in bookings:
             ws.append([b.id, b.booking_reference, b.guest_name, b.guest_phone, b.room.room_number if b.room else "", b.check_in, b.check_out, b.status.value, float(b.total_amount) if b.total_amount else ""])
     elif module == "vendors":
-        ws.append(["ID", "Name", "Contact", "Phone", "Email", "Address", "Tax ID", "Accuracy"])
+        ws.append(["ID", "Name", "Contact", "Phone", "Email", "Address", "Tax ID"])
         vendors = db.query(Vendor).filter(Vendor.is_active == True).all()
         for v in vendors:
-            ws.append([v.id, v.name, v.contact_person, v.phone, v.email, v.address, v.tax_id, v.delivery_accuracy])
+            ws.append([v.id, v.name, v.contact_person, v.phone, v.email, v.address, v.tax_id])
     elif module == "audit":
         from sqlalchemy import desc
         from backend.models import AuditLog

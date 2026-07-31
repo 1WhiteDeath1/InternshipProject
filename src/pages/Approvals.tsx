@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import api, { getErrorMessage } from '@/lib/api';
 import { useAuth } from '@/contexts/useAuth';
 import { hasPermission } from '@/contexts/auth-context';
@@ -7,30 +7,17 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { toast } from 'sonner';
-import { CheckCircle2, ClipboardCheck, PackageCheck, XCircle, FileEdit } from 'lucide-react';
+import { ClipboardCheck, CheckCircle2, XCircle, FileEdit, UtensilsCrossed } from 'lucide-react';
 import { formatCurrency } from '@/lib/currency';
 
-// The Manager/Deputy Manager decision queue. Managers don't operate the
-// Procurement module (that's the Kitchen NCO's job - raising POs); they only
-// sign off the spend. This surfaces exactly the POs awaiting that decision,
-// nothing else operational. Discounts/comps are NOT here either - those stay
-// the Clerk's own authority, no approval, overseen after the fact via the
-// dashboard's Discounts figure. What IS here: a Clerk's request to CORRECT a
-// line item on an already-generated bill (wrong rate/charge entered) - a
-// different, rarer action than a routine discount, so it routes through this
-// same Approvals inbox instead of being Clerk-autonomous.
-interface POItem { id: number; item_name: string | null; quantity_ordered: number; unit_price: number; total_price: number; }
-interface PurchaseOrder {
-  id: number;
-  po_number: string;
-  vendor_name: string | null;
-  status: string;
-  total_amount: number;
-  expected_delivery: string | null;
-  created_at: string;
-  items: POItem[];
-}
-
+// The Manager/Deputy Manager decision queue. There's no procurement
+// approval here - the mess buys and restocks itself (Kitchen NCO logs it
+// via Daily Stock Intake), no PO to sign off on. Discounts/comps aren't
+// here either - those are the Manager's own direct authority via the
+// Guest Discounts / Member Discounts pages, no approval step. What IS
+// here: a Clerk's request to CORRECT a line item on an already-generated
+// bill (wrong rate/charge entered) - a different, rarer action than a
+// routine discount - and Kitchen NCO's proposed menu/price changes.
 interface EditRequest {
   id: number; invoice_id: number; invoice_item_id: number; bill_type: string;
   original_description: string; original_unit_price: number;
@@ -40,27 +27,36 @@ interface EditRequest {
   guest_name: string | null; room_number: string | null;
 }
 
+interface MenuEditRequest {
+  id: number; is_new_item: boolean;
+  original_name: string | null; original_price: number | null;
+  proposed_name: string; proposed_price: number; proposed_meal_type: string; proposed_day_of_week: string | null;
+  reason: string | null; status: string;
+  requested_by_name: string | null; requested_at: string;
+}
+
 const BILL_LABELS: Record<string, string> = { room: 'Room Bill', mess: 'Mess Bill', combined: 'Bill' };
 
 export default function Approvals() {
   const { user } = useAuth();
-  const [pending, setPending] = useState<PurchaseOrder[]>([]);
   const [editRequests, setEditRequests] = useState<EditRequest[]>([]);
+  const [menuRequests, setMenuRequests] = useState<MenuEditRequest[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState<number | null>(null);
   const [deciding, setDeciding] = useState<number | null>(null);
+  const [decidingMenu, setDecidingMenu] = useState<number | null>(null);
 
   const canApproveBillEdits = hasPermission(user, 'billing', 'approve');
+  const canApproveMenu = hasPermission(user, 'menu', 'approve');
 
   const fetchPending = async () => {
     setLoading(true);
     try {
-      const [poRes, editRes] = await Promise.all([
-        api.get('/procurement/purchase-orders?status=draft'),
+      const [editRes, menuRes] = await Promise.all([
         canApproveBillEdits ? api.get('/billing/edit-requests?status=pending') : Promise.resolve({ data: [] }),
+        canApproveMenu ? api.get('/kitchen/menu/edit-requests?status=pending') : Promise.resolve({ data: [] }),
       ]);
-      setPending(poRes.data.items || []);
       setEditRequests(editRes.data || []);
+      setMenuRequests(menuRes.data || []);
     } catch {
       toast.error('Failed to load approvals');
     } finally {
@@ -69,16 +65,6 @@ export default function Approvals() {
   };
 
   useEffect(() => { queueMicrotask(fetchPending); }, []);
-
-  const approve = async (po: PurchaseOrder) => {
-    try {
-      await api.post(`/procurement/purchase-orders/${po.id}/approve`);
-      toast.success(`${po.po_number} approved`);
-      fetchPending();
-    } catch (e) {
-      toast.error(getErrorMessage(e));
-    }
-  };
 
   const approveEdit = async (req: EditRequest) => {
     setDeciding(req.id);
@@ -108,94 +94,42 @@ export default function Approvals() {
     }
   };
 
-  const totalPending = pending.reduce((s, p) => s + (p.total_amount || 0), 0);
+  const approveMenu = async (req: MenuEditRequest) => {
+    setDecidingMenu(req.id);
+    try {
+      await api.post(`/kitchen/menu/edit-requests/${req.id}/approve`);
+      toast.success('Menu change approved');
+      fetchPending();
+    } catch (e) {
+      toast.error(getErrorMessage(e));
+    } finally {
+      setDecidingMenu(null);
+    }
+  };
+
+  const rejectMenu = async (req: MenuEditRequest) => {
+    const reason = prompt('Reason for rejecting this menu change:');
+    if (!reason) return;
+    setDecidingMenu(req.id);
+    try {
+      await api.post(`/kitchen/menu/edit-requests/${req.id}/reject`, { reason });
+      toast.success('Menu change rejected');
+      fetchPending();
+    } catch (e) {
+      toast.error(getErrorMessage(e));
+    } finally {
+      setDecidingMenu(null);
+    }
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         <ClipboardCheck size={24} className="text-gray-700 dark:text-gray-300" />
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Approvals</h1>
-        {pending.length > 0 && <Badge variant="destructive">{pending.length} PO{pending.length > 1 ? 's' : ''} awaiting sign-off</Badge>}
         {editRequests.length > 0 && <Badge variant="destructive">{editRequests.length} bill correction{editRequests.length > 1 ? 's' : ''} pending</Badge>}
+        {menuRequests.length > 0 && <Badge variant="destructive">{menuRequests.length} menu change{menuRequests.length > 1 ? 's' : ''} pending</Badge>}
       </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Card>
-          <CardContent className="p-5 flex items-center gap-4">
-            <div className="w-10 h-10 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-              <PackageCheck size={20} className="text-amber-600" />
-            </div>
-            <div>
-              <p className="text-xs text-gray-500">Purchase Orders Pending</p>
-              <p className="text-2xl font-bold">{pending.length}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5 flex items-center gap-4">
-            <div className="w-10 h-10 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
-              <CheckCircle2 size={20} className="text-emerald-600" />
-            </div>
-            <div>
-              <p className="text-xs text-gray-500">Value Awaiting Approval</p>
-              <p className="text-2xl font-bold">{formatCurrency(totalPending)}</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>PO Number</TableHead>
-                <TableHead>Vendor</TableHead>
-                <TableHead>Expected</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead className="text-right">Action</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pending.map(po => (
-                <Fragment key={po.id}>
-                  <TableRow className="cursor-pointer" onClick={() => setExpanded(expanded === po.id ? null : po.id)}>
-                    <TableCell className="font-medium">{po.po_number}</TableCell>
-                    <TableCell>{po.vendor_name || '—'}</TableCell>
-                    <TableCell className="text-sm text-gray-500">{po.expected_delivery ? new Date(po.expected_delivery).toLocaleDateString() : '—'}</TableCell>
-                    <TableCell className="text-right font-mono font-semibold">{formatCurrency(po.total_amount)}</TableCell>
-                    <TableCell className="text-right">
-                      <Button size="sm" onClick={(e) => { e.stopPropagation(); approve(po); }}>
-                        <CheckCircle2 size={16} className="mr-1" /> Approve
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                  {expanded === po.id && (
-                    <TableRow>
-                      <TableCell colSpan={5} className="bg-gray-50 dark:bg-gray-900/40">
-                        <div className="text-sm space-y-1 py-1">
-                          {po.items.map(it => (
-                            <div key={it.id} className="flex justify-between max-w-md">
-                              <span>{it.item_name || `Item #${it.id}`} × {it.quantity_ordered}</span>
-                              <span className="font-mono text-gray-500">{formatCurrency(it.total_price)}</span>
-                            </div>
-                          ))}
-                          {po.items.length === 0 && <span className="text-gray-400">No line items</span>}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </Fragment>
-              ))}
-              {!loading && pending.length === 0 && (
-                <TableRow><TableCell colSpan={5} className="text-center py-10 text-gray-500">
-                  Nothing awaiting approval ✓
-                </TableCell></TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
 
       {canApproveBillEdits && (
         <Card>
@@ -248,6 +182,67 @@ export default function Approvals() {
               </TableBody>
             </Table>
           </CardContent>
+        </Card>
+      )}
+
+      {canApproveMenu && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg font-semibold flex items-center gap-2">
+              <UtensilsCrossed size={18} /> Menu Changes
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Change</TableHead>
+                  <TableHead>Meal</TableHead>
+                  <TableHead>Reason</TableHead>
+                  <TableHead>Requested by</TableHead>
+                  <TableHead className="text-right">Decision</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {menuRequests.map(req => (
+                  <TableRow key={req.id}>
+                    <TableCell className="text-sm">
+                      {req.is_new_item ? (
+                        <p className="font-medium">New item: {req.proposed_name} — {formatCurrency(req.proposed_price)}</p>
+                      ) : (
+                        <>
+                          <p className="text-gray-500 line-through">{req.original_name} — {formatCurrency(req.original_price || 0)}</p>
+                          <p className="font-medium">{req.proposed_name} — {formatCurrency(req.proposed_price)}</p>
+                        </>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-sm capitalize">{req.proposed_meal_type}{req.proposed_day_of_week && ` · ${req.proposed_day_of_week}`}</TableCell>
+                    <TableCell className="text-sm max-w-xs">{req.reason || '—'}</TableCell>
+                    <TableCell className="text-sm text-gray-500">{req.requested_by_name || '—'}</TableCell>
+                    <TableCell className="text-right whitespace-nowrap">
+                      <Button size="sm" disabled={decidingMenu === req.id} onClick={() => approveMenu(req)} className="mr-1.5">
+                        <CheckCircle2 size={14} className="mr-1" /> Approve
+                      </Button>
+                      <Button size="sm" variant="outline" disabled={decidingMenu === req.id} onClick={() => rejectMenu(req)}>
+                        <XCircle size={14} className="mr-1" /> Reject
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {!loading && menuRequests.length === 0 && (
+                  <TableRow><TableCell colSpan={5} className="text-center py-10 text-gray-500">
+                    No menu changes awaiting approval ✓
+                  </TableCell></TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {!canApproveBillEdits && !canApproveMenu && (
+        <Card>
+          <CardContent className="text-center py-10 text-gray-500">Nothing to approve for your role.</CardContent>
         </Card>
       )}
     </div>

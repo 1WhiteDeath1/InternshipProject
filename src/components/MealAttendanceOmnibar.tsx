@@ -11,7 +11,7 @@ interface LookupResult {
   id: number;
   name: string;
   sub_label: string | null;
-  recipe_id: number | null;
+  menu_item_id: number | null;
   attendance_id: number | null;
   attendance_status: string | null;
 }
@@ -37,11 +37,11 @@ const KIND_LABEL: Record<LookupResult['kind'], string> = { member: 'Member', boo
  * meal that hasn't happened yet.
  */
 export function MealAttendanceOmnibar({
-  date, mealType, recipeId, onAdded, mealTypes, mealLabels, lockedMeals,
+  date, mealType, menuItemId, onAdded, mealTypes, mealLabels, lockedMeals,
 }: {
   date: string;
   mealType: string;
-  recipeId: number;
+  menuItemId: number;
   onAdded: () => void;
   mealTypes: string[];
   mealLabels: Record<string, string>;
@@ -97,7 +97,7 @@ export function MealAttendanceOmnibar({
   };
 
   const addToOneMeal = async (payload: { member_id?: number; booking_id?: number; guest_id?: number }, mt: string) => {
-    const body = { ...payload, date, meal_type: mt, recipe_id: mt === mealType && recipeId ? recipeId : undefined };
+    const body = { ...payload, date, meal_type: mt, menu_item_id: mt === mealType && menuItemId ? menuItemId : undefined };
     if (isFutureDate) await api.post('/attendance', body);
     else await api.post('/attendance/serve', body);
   };

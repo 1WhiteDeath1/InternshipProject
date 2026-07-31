@@ -37,11 +37,14 @@ export function hasPermission(user: User | null | undefined, module: string, act
   return user.permissions?.some(p => p.module === module && p.action === action) ?? false;
 }
 
-// Booking NCO (the only role with bookings:view but neither reports:view nor
-// clerk_desk:view) has no Dashboard of its own - Bookings is home instead.
+// Booking NCO (bookings:view but neither reports:view, clerk_desk:view, nor
+// kitchen:view) has no Dashboard of its own - Bookings is home instead.
+// Kitchen NCO also holds bookings:view now (read-only, for guest lookup) but
+// DOES have its own tailored Dashboard, hence the added kitchen:view carve-out.
 // Keyed off permissions, not role name, so a cloned custom role follows suit.
 export function getHomePath(user: User | null | undefined): string {
-  if (hasPermission(user, 'bookings', 'view') && !hasPermission(user, 'reports', 'view') && !hasPermission(user, 'clerk_desk', 'view')) {
+  if (hasPermission(user, 'bookings', 'view') && !hasPermission(user, 'reports', 'view')
+      && !hasPermission(user, 'clerk_desk', 'view') && !hasPermission(user, 'kitchen', 'view')) {
     return '/bookings';
   }
   return '/dashboard';

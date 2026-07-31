@@ -22,6 +22,7 @@ interface Member {
   mess_category: string;
   client_category: string;
   is_womens_bloc: boolean;
+  dining_status: string;
   custom_discount_rate: number;
   phone: string | null;
   email: string | null;
@@ -30,7 +31,7 @@ interface Member {
   current_room_number: string | null;
 }
 
-const emptyForm = { service_number: '', full_name: '', rank: '', unit: '', mess_category: 'officers', is_womens_bloc: false, phone: '', email: '', custom_discount_rate: 0 };
+const emptyForm = { service_number: '', full_name: '', rank: '', unit: '', mess_category: 'officers', is_womens_bloc: false, dining_status: 'dining', phone: '', email: '', custom_discount_rate: 0 };
 
 // Fixed set of 5 rank bands - same as the HRA table, always all 5 editable
 // rows (missing ones just default to Rs 0 via the backend fallback), unlike
@@ -83,7 +84,8 @@ export default function Members() {
     setEditingId(m.id);
     setForm({
       service_number: m.service_number, full_name: m.full_name, rank: m.rank,
-      unit: m.unit || '', mess_category: m.mess_category, is_womens_bloc: m.is_womens_bloc, phone: m.phone || '',
+      unit: m.unit || '', mess_category: m.mess_category, is_womens_bloc: m.is_womens_bloc,
+      dining_status: m.dining_status || 'dining', phone: m.phone || '',
       email: m.email || '', custom_discount_rate: m.custom_discount_rate,
     });
     setDialogOpen(true);
@@ -92,8 +94,8 @@ export default function Members() {
   const handleSave = async () => {
     try {
       if (editingId) {
-        const { full_name, rank, unit, mess_category, is_womens_bloc, phone, email, custom_discount_rate } = form;
-        await api.put(`/members/${editingId}`, { full_name, rank, unit, mess_category, is_womens_bloc, phone, email, custom_discount_rate });
+        const { full_name, rank, unit, mess_category, is_womens_bloc, dining_status, phone, email, custom_discount_rate } = form;
+        await api.put(`/members/${editingId}`, { full_name, rank, unit, mess_category, is_womens_bloc, dining_status, phone, email, custom_discount_rate });
         toast.success('Member updated');
       } else {
         await api.post('/members', form);
@@ -176,13 +178,22 @@ export default function Members() {
                 <Input placeholder="Rank" value={form.rank} onChange={e => setForm({...form, rank: e.target.value})} />
                 <Input placeholder="Unit" value={form.unit} onChange={e => setForm({...form, unit: e.target.value})} />
               </div>
-              <div>
-                <Label>Mess Category</Label>
-                <select className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={form.mess_category} onChange={e => setForm({...form, mess_category: e.target.value})}>
-                  <option value="officers">Officers</option>
-                  <option value="jcos">JCOs</option>
-                  <option value="ors">ORs</option>
-                </select>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Mess Category</Label>
+                  <select className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={form.mess_category} onChange={e => setForm({...form, mess_category: e.target.value})}>
+                    <option value="officers">Officers</option>
+                    <option value="jcos">JCOs</option>
+                    <option value="ors">ORs</option>
+                  </select>
+                </div>
+                <div>
+                  <Label>Dining Status</Label>
+                  <select className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={form.dining_status} onChange={e => setForm({...form, dining_status: e.target.value})}>
+                    <option value="dining">Dining</option>
+                    <option value="non_dining">Non-Dining</option>
+                  </select>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <Input placeholder="Phone" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} />
@@ -219,9 +230,9 @@ export default function Members() {
       <Card>
         <CardContent className="p-0">
           <Table>
-            <TableHeader><TableRow><TableHead>Service #</TableHead><TableHead>Name</TableHead><TableHead>Rank</TableHead><TableHead>Unit</TableHead><TableHead>Category</TableHead><TableHead>Current Room</TableHead><TableHead>Status</TableHead><TableHead className="w-24">Actions</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead>Service #</TableHead><TableHead>Name</TableHead><TableHead>Rank</TableHead><TableHead>Unit</TableHead><TableHead>Category</TableHead><TableHead>Dining</TableHead><TableHead>Current Room</TableHead><TableHead>Status</TableHead><TableHead className="w-24">Actions</TableHead></TableRow></TableHeader>
             <TableBody>
-              {loading && <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">Loading members...</TableCell></TableRow>}
+              {loading && <TableRow><TableCell colSpan={9} className="text-center py-8 text-gray-500">Loading members...</TableCell></TableRow>}
               {!loading && members.map(m => (
                 <TableRow key={m.id} className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900" onClick={() => openEdit(m)}>
                   <TableCell className="font-medium">{m.service_number}</TableCell>
@@ -229,6 +240,7 @@ export default function Members() {
                   <TableCell>{m.rank}</TableCell>
                   <TableCell>{m.unit || '-'}</TableCell>
                   <TableCell className="capitalize">{m.mess_category}</TableCell>
+                  <TableCell>{m.dining_status === 'non_dining' ? <Badge variant="outline">Non-Dining</Badge> : <span className="text-gray-400">Dining</span>}</TableCell>
                   <TableCell>{m.current_room_number ? <Badge className="bg-purple-100 text-purple-800">{m.current_room_number} (HRA)</Badge> : <span className="text-gray-400">-</span>}</TableCell>
                   <TableCell>{statusBadge(m.status)}</TableCell>
                   <TableCell>
@@ -245,7 +257,7 @@ export default function Members() {
                   </TableCell>
                 </TableRow>
               ))}
-              {!loading && members.length === 0 && <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">No members found</TableCell></TableRow>}
+              {!loading && members.length === 0 && <TableRow><TableCell colSpan={9} className="text-center py-8 text-gray-500">No members found</TableCell></TableRow>}
             </TableBody>
           </Table>
         </CardContent>

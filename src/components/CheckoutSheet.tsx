@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import api, { getErrorMessage } from '@/lib/api';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { toast } from 'sonner';
 import { BedDouble, Receipt, UtensilsCrossed } from 'lucide-react';
@@ -28,6 +30,8 @@ interface BalanceItem { description: string; amount: number; }
 export interface RunningBalance {
   room_bill_total: number;
   mess_bill_total: number;
+  mess_charge_amount: number; // computed "Extra Messing" total (sum of everything ordered)
+  gas_charge_amount: number; // computed "Sui Gas Charges on Messing" (gas % of mess_charge_amount)
   room_items: BalanceItem[];
   mess_items: BalanceItem[];
   total: number;
@@ -71,6 +75,8 @@ export function CheckoutSheet({ guest, onOpenChange, onDone }: {
   const [checkingOut, setCheckingOut] = useState(false);
   const [printInvoiceIds, setPrintInvoiceIds] = useState<number[] | null>(null);
   const [printBookingId, setPrintBookingId] = useState<number | null>(null);
+  const [messOverride, setMessOverride] = useState('');
+  const [gasOverride, setGasOverride] = useState('');
 
   const guestId = guest?.id;
 
@@ -79,6 +85,10 @@ export function CheckoutSheet({ guest, onOpenChange, onDone }: {
     try {
       const res = await api.get(`/billing/bookings/${guestId}/running-balance`);
       setBalance(res.data);
+      if (!res.data.mess_billed) {
+        setMessOverride(String(res.data.mess_charge_amount));
+        setGasOverride(String(res.data.gas_charge_amount));
+      }
     } catch (err) { toast.error(getErrorMessage(err, 'Failed to load the guest\'s balance')); }
   }, [guestId]);
 
@@ -104,7 +114,11 @@ export function CheckoutSheet({ guest, onOpenChange, onDone }: {
     if (balance?.room_billed && balance?.mess_billed) { await openExistingInvoices(); return; }
     setCheckingOut(true);
     try {
-      const res = await api.post(`/billing/bookings/${guest.id}/instant-checkout`, {});
+      const body = balance?.mess_billed ? {} : {
+        mess_charge_override: Number(messOverride) || 0,
+        gas_charge_override: Number(gasOverride) || 0,
+      };
+      const res = await api.post(`/billing/bookings/${guest.id}/instant-checkout`, body);
       const invoices: { id: number; bill_type: string }[] = res.data.invoices;
       setPrintInvoiceIds(invoices.map(i => i.id));
       setPrintBookingId(guest.id);
@@ -145,8 +159,20 @@ export function CheckoutSheet({ guest, onOpenChange, onDone }: {
                         total={balance.mess_bill_total} billed={balance.mess_billed} accent="border-orange-300 dark:border-orange-800" />
                     </div>
                     <p className="text-xs text-gray-500">
-                      Room and mess charges are logged as the stay goes on (the "+ Log Charge" quick action / Kitchen's Guest Mess Charges tab) — this total reflects everything logged so far.
+                      Room charges are logged as the stay goes on (the "+ Log Charge" quick action). Extra Messing is computed automatically from everything ordered through the kitchen; Sui Gas is that total times the Kitchen NCO's gas percentage — both adjustable below before checkout.
                     </p>
+                    {!balance.mess_billed && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label className="text-xs">Extra Messing (Rs)</Label>
+                          <Input type="number" min={0} value={messOverride} onChange={e => setMessOverride(e.target.value)} />
+                        </div>
+                        <div>
+                          <Label className="text-xs">Sui Gas Charges (Rs)</Label>
+                          <Input type="number" min={0} value={gasOverride} onChange={e => setGasOverride(e.target.value)} />
+                        </div>
+                      </div>
+                    )}
                     <div className="rounded-lg border p-3 text-sm space-y-1">
                       {balance.advance_credit_applied > 0 && (
                         <div className="flex justify-between text-xs text-emerald-600 dark:text-emerald-400">

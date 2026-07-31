@@ -28,6 +28,7 @@ interface RoomOccupantCardProps {
   extending: boolean;
   transferOptions: TransferOption[] | null;
   onOpenExtend: () => void;
+  onOpenChangeRoom: () => void;
   onCloseExtend: () => void;
   onExtendDateChange: (date: string) => void;
   onExtend: (transferRoomId?: number) => void;
@@ -47,7 +48,7 @@ interface RoomOccupantCardProps {
 export function RoomOccupantCard({
   current, arrivalToday, roomReady, today, roomChargesTotal, onTotalsChange,
   extendOpen, extendDate, extending, transferOptions,
-  onOpenExtend, onCloseExtend, onExtendDateChange, onExtend, onEndResidency, onSendToClerkDesk,
+  onOpenExtend, onOpenChangeRoom, onCloseExtend, onExtendDateChange, onExtend, onEndResidency, onSendToClerkDesk,
   attendants, arrivalAttendantId, onArrivalAttendantChange, onCheckInArrival,
   reloadCalendar, onChanged,
 }: RoomOccupantCardProps) {
@@ -67,6 +68,9 @@ export function RoomOccupantCard({
         <div className="flex items-center gap-1.5 mb-1">
           <p className="text-xs text-gray-400">{current.nature_of_duty === 'hra' ? 'HRA resident' : 'Now staying'}</p>
           {current.nature_of_duty === 'hra' && <HraBadge />}
+          {current.nature_of_duty !== 'hra' && current.is_indefinite && (
+            <span className="text-[10px] font-medium text-violet-700 bg-violet-50 dark:bg-violet-950 dark:text-violet-300 rounded px-1 py-0.5">Open-ended</span>
+          )}
           {current.source === 'online' && <span className="text-[10px] font-medium text-blue-700 bg-blue-50 dark:bg-blue-950 dark:text-blue-300 rounded px-1 py-0.5">Online{current.online_voucher_no ? ` · V/No ${current.online_voucher_no}` : ''}</span>}
         </div>
         <p className="font-medium">{current.rank ? `${current.rank} ` : ''}{current.guest_name}</p>
@@ -82,16 +86,21 @@ export function RoomOccupantCard({
           {current.special_requests && <p className="col-span-2"><span className="text-gray-400">Remarks:</span> {current.special_requests}</p>}
         </div>
         <div className="flex items-center justify-between mt-2 text-sm">
-          <span>{current.nature_of_duty === 'hra' ? `Resident since ${fmtDay(current.check_in)}` : `${fmtDay(current.check_in)} → ${fmtDay(current.check_out)}`}</span>
+          <span>
+            {current.nature_of_duty === 'hra' ? `Resident since ${fmtDay(current.check_in)}`
+              : current.is_indefinite ? `Since ${fmtDay(current.check_in)} — open-ended`
+              : `${fmtDay(current.check_in)} → ${fmtDay(current.check_out)}`}
+          </span>
           {current.nature_of_duty !== 'hra' && <span className="font-medium">{formatCurrency(current.total_amount)}</span>}
         </div>
         {current.nature_of_duty === 'hra' && <p className="text-xs text-gray-500 mt-0.5">Billed monthly via the mess bill, not a fixed total</p>}
+        {current.nature_of_duty !== 'hra' && current.is_indefinite && <p className="text-xs text-gray-500 mt-0.5">Nightly-rate estimate shown — actual total is billed at checkout</p>}
 
         {current.nature_of_duty !== 'hra' && (
           <div className="mt-2 rounded-md border bg-gray-50 dark:bg-gray-900/40 px-2.5 py-2 text-xs space-y-1">
             <p className="font-semibold text-gray-500 uppercase tracking-wide text-[10px] mb-1">Live Bill Summary</p>
             <div className="flex justify-between">
-              <span>Room Stay Base ({fmtDay(current.check_in)} - {fmtDay(current.check_out)})</span>
+              <span>Room Stay Base {current.is_indefinite ? '(open-ended)' : `(${fmtDay(current.check_in)} - ${fmtDay(current.check_out)})`}</span>
               <span className="font-mono">{formatCurrency(current.total_amount)}</span>
             </div>
             {roomChargesTotal > 0 && (
@@ -113,6 +122,9 @@ export function RoomOccupantCard({
               <>
                 <Button size="sm" variant={current.checkout_due ? 'default' : 'outline'} className="flex-1" onClick={onOpenExtend}>
                   <CalendarPlus size={14} className="mr-1" /> Extend Stay
+                </Button>
+                <Button size="sm" variant="outline" className="flex-1" onClick={onOpenChangeRoom}>
+                  <ArrowRight size={14} className="mr-1" /> Change Room
                 </Button>
                 <Button size="sm" variant={current.checkout_due ? 'destructive' : 'default'} className="flex-1" onClick={onSendToClerkDesk}>
                   <ArrowRight size={14} className="mr-1" /> Send to Clerk Desk for Billing

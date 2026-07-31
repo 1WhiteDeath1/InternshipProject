@@ -10,10 +10,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { toast } from 'sonner';
 import {
   IdCard, CheckCircle2, DollarSign, Percent, FileText, Printer,
-  ChevronDown, ChevronRight, Sparkles, Clock, BadgeCheck,
+  ChevronDown, ChevronRight, Sparkles, Clock, BadgeCheck, History,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/currency';
 import { RoomLeaseDispatchView, DietInvoiceView } from '@/components/MessBillPrint';
+import { OrderHistoryDialog } from '@/components/OrderHistoryDialog';
 import { useClerkDesk, type MemberBill } from './context';
 
 // Member billing, merged in from the old standalone Mess Billing page (Clerk
@@ -78,6 +79,7 @@ export default function Members() {
 
   const [dispatchOpen, setDispatchOpen] = useState(false);
   const [dietInvoiceBillId, setDietInvoiceBillId] = useState<number | null>(null);
+  const [historyMember, setHistoryMember] = useState<{ id: number; name: string } | null>(null);
 
   const canApprove = hasPermission(user, 'mess_billing', 'approve');
   const canEdit = hasPermission(user, 'mess_billing', 'edit');
@@ -200,6 +202,9 @@ export default function Members() {
             )}
             <Button size="sm" variant="ghost" onClick={() => setDietInvoiceBillId(bill.id)}>
               <FileText size={14} className="mr-1" /> Print Diet Invoice
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setHistoryMember({ id: bill.member_id, name: bill.member_name || `Member #${bill.member_id}` })}>
+              <History size={14} className="mr-1" /> Order History
             </Button>
           </div>
         </CardContent>
@@ -333,6 +338,10 @@ export default function Members() {
 
       {dispatchOpen && <RoomLeaseDispatchView month={month} year={year} onClose={() => setDispatchOpen(false)} />}
       <DietInvoiceView billId={dietInvoiceBillId} onClose={() => setDietInvoiceBillId(null)} />
+      <OrderHistoryDialog
+        open={historyMember !== null} onOpenChange={open => { if (!open) setHistoryMember(null); }}
+        memberId={historyMember?.id} personName={historyMember?.name}
+      />
     </div>
   );
 }

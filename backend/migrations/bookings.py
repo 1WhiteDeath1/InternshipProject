@@ -120,6 +120,35 @@ def _migrate_bookings_advance_payment(engine):
         conn.commit()
 
 
+def _migrate_bookings_is_indefinite(engine):
+    # Non-HRA "open-ended stay" flag - lets a walk-in guest be booked without
+    # a known departure date; check_out is set to a far-future placeholder at
+    # creation and real checkout re-prices to actual nights as normal.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(bookings)")).fetchall()
+        if not cols:
+            return
+        if "is_indefinite" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE bookings ADD COLUMN is_indefinite BOOLEAN DEFAULT 0"))
+            conn.commit()
+            logger.info("migration: added bookings.is_indefinite")
+
+
+def _migrate_bookings_discount_rate(engine):
+    # Manager's standing discount on an in-house guest's stay (Guest
+    # Discounts page) - applied inside compute_booking_price() alongside
+    # client_category, so it survives every re-price (category change,
+    # early/late actual departure) rather than being a one-off total edit.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(bookings)")).fetchall()
+        if not cols:
+            return
+        if "discount_rate" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE bookings ADD COLUMN discount_rate NUMERIC(5, 2) DEFAULT 0"))
+            conn.commit()
+            logger.info("migration: added bookings.discount_rate")
+
+
 MIGRATIONS = [
     _migrate_bookings_register_fields,
     _migrate_bookings_source_fields,
@@ -127,4 +156,6 @@ MIGRATIONS = [
     _migrate_bookings_attendant,
     _migrate_bookings_stay_type,
     _migrate_bookings_advance_payment,
+    _migrate_bookings_is_indefinite,
+    _migrate_bookings_discount_rate,
 ]

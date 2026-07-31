@@ -7,16 +7,41 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Hotel, Loader2 } from 'lucide-react';
+import { Hotel, Loader2, Briefcase, Users, Receipt, BedDouble, ChefHat } from 'lucide-react';
 import { toast } from 'sonner';
+
+// Matches backend/seed_demo.py: one demo account per RBAC role, username =
+// role, password "123456" for all - deliberately trivial, demo data only.
+// Lets a client trying the app before real deployment (or a dev) jump
+// straight into any role's view without memorizing six username/password
+// pairs. Remove or gate this before shipping a build with real user data.
+const QUICK_LOGINS = [
+  { username: 'manager', label: 'Manager', icon: Briefcase },
+  { username: 'deputy', label: 'Deputy Manager', icon: Users },
+  { username: 'clerk', label: 'Clerk', icon: Receipt },
+  { username: 'booking', label: 'Booking NCO', icon: BedDouble },
+  { username: 'kitchen', label: 'Kitchen NCO', icon: ChefHat },
+] as const;
+const DEMO_PASSWORD = '123456';
 
 export default function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [quickLoading, setQuickLoading] = useState<string | null>(null);
   const { login } = useAuth();
   const navigate = useNavigate();
+
+  const doLogin = async (user: string, pass: string) => {
+    try {
+      const loggedInUser = await login(user, pass, rememberMe);
+      toast.success('Login successful');
+      navigate(getHomePath(loggedInUser));
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Login failed'));
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,15 +50,12 @@ export default function Login() {
       return;
     }
     setLoading(true);
-    try {
-      const loggedInUser = await login(username, password, rememberMe);
-      toast.success('Login successful');
-      navigate(getHomePath(loggedInUser));
-    } catch (err) {
-      toast.error(getErrorMessage(err, 'Login failed'));
-    } finally {
-      setLoading(false);
-    }
+    try { await doLogin(username, password); } finally { setLoading(false); }
+  };
+
+  const handleQuickLogin = async (user: string) => {
+    setQuickLoading(user);
+    try { await doLogin(user, DEMO_PASSWORD); } finally { setQuickLoading(null); }
   };
 
   return (
@@ -86,13 +108,34 @@ export default function Login() {
               </Label>
             </div>
 
-            <Button type="submit" className="w-full h-11 text-base font-medium" disabled={loading}>
+            <Button type="submit" className="w-full h-11 text-base font-medium" disabled={loading || !!quickLoading}>
               {loading ? <Loader2 className="animate-spin mr-2" size={18} /> : null}
               {loading ? 'Signing in...' : 'Sign In'}
             </Button>
           </form>
 
-          <p className="text-center text-xs text-gray-400 mt-6">
+          <div className="mt-6 pt-5 border-t border-gray-200 dark:border-gray-800">
+            <p className="text-center text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">
+              Quick Demo Login
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {QUICK_LOGINS.map(({ username: u, label, icon: Icon }) => (
+                <Button
+                  key={u}
+                  type="button"
+                  variant="outline"
+                  className="h-10 justify-start gap-2 text-sm font-normal"
+                  disabled={loading || !!quickLoading}
+                  onClick={() => handleQuickLogin(u)}
+                >
+                  {quickLoading === u ? <Loader2 className="animate-spin shrink-0" size={16} /> : <Icon size={16} className="shrink-0 text-gray-400" />}
+                  {label}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <p className="text-center text-xs text-gray-400 mt-4">
             Default supervisor: admin / admin123
           </p>
         </div>

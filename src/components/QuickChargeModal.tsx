@@ -98,7 +98,7 @@ export function QuickChargeModal({ open, onOpenChange }: QuickChargeModalProps) 
                 {([[false, 'Room Charge'], [true, 'Mess Charge']] as const).map(([val, label]) => (
                   <button key={label} type="button"
                     className={`flex-1 py-1.5 ${isMess === val ? 'bg-primary text-primary-foreground font-medium' : 'bg-transparent text-gray-500 hover:text-gray-700'}`}
-                    onClick={() => { setIsMess(val); setHead(val ? MESS_CHARGE_HEADS[0] : ROOM_CHARGE_HEADS[0]); }}>
+                    onClick={() => { setIsMess(val); setHead((val ? MESS_CHARGE_HEADS[0] : ROOM_CHARGE_HEADS[0]) ?? CUSTOM_CHARGE_HEAD); }}>
                     {label}
                   </button>
                 ))}

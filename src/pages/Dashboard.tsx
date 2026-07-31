@@ -5,7 +5,7 @@ import { hasPermission } from '@/contexts/auth-context';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   AlertTriangle, BedDouble, LogIn, LogOut, Wallet, ArrowRight, ClipboardCheck, CalendarDays,
-  ChefHat, PackageX, Utensils, Clock, Star,
+  ChefHat, PackageX, Utensils, Clock, Star, Shield,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, CartesianGrid, XAxis, YAxis, Tooltip, Legend,
@@ -48,7 +48,7 @@ interface BillingStats {
 interface MemberBillLite { status: string; total_amount: number; }
 
 interface KitchenOrderLite {
-  id: number; recipe_name: string | null; quantity_ordered: number; status: string;
+  id: number; menu_item_name: string | null; quantity_ordered: number; status: string;
   consumer_name: string | null; is_ala_carte: boolean;
 }
 
@@ -56,7 +56,15 @@ interface LowStockItemLite {
   id: number; name: string; unit: string; total_stock: number; reorder_level: number;
 }
 
+interface ExpiringBatchLite {
+  batch_id: number; item_id: number; item_name: string; quantity: number; unit: string; expiry_date: string;
+}
+
 interface AttendanceLite { meal_type: string; status: string; }
+
+interface IncidentLite {
+  id: number; title: string; location: string | null; severity: string; status: string; created_at: string;
+}
 
 const MEAL_TYPE_LABELS: Record<string, string> = {
   breakfast: 'Breakfast', lunch: 'Lunch', hitea: 'Hi-Tea', dinner: 'Dinner',
@@ -121,8 +129,11 @@ export default function Dashboard() {
   const [lateOrderCount, setLateOrderCount] = useState(0);
   const [lowStockCount, setLowStockCount] = useState(0);
   const [lowStockItems, setLowStockItems] = useState<LowStockItemLite[]>([]);
+  const [expiringItems, setExpiringItems] = useState<ExpiringBatchLite[]>([]);
   const [todayAttendance, setTodayAttendance] = useState<AttendanceLite[]>([]);
+  const [tomorrowMealCount, setTomorrowMealCount] = useState(0);
   const [weeklyMealVolume, setWeeklyMealVolume] = useState<{ date: string; count: number }[]>([]);
+  const [openIncidents, setOpenIncidents] = useState<IncidentLite[]>([]);
   const [loading, setLoading] = useState(true);
   const { darkMode } = useTheme();
 
@@ -132,6 +143,12 @@ export default function Dashboard() {
   // ever changing under a future role that also touches the kitchen module.
   const isKitchen = hasPermission(user, 'kitchen', 'view')
     && !hasPermission(user, 'clerk_desk', 'view') && !hasPermission(user, 'billing', 'view');
+  // Security Guard holds only security:view now (see access.py) - no other
+  // role has it, but the exclusions match the isKitchen/isClerk pattern
+  // above so a future role change can't silently pull it into this board.
+  const isSecurity = hasPermission(user, 'security', 'view')
+    && !hasPermission(user, 'bookings', 'view') && !hasPermission(user, 'clerk_desk', 'view') && !hasPermission(user, 'billing', 'view');
+  const canSeeOccupancy = hasPermission(user, 'bookings', 'view');
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -139,8 +156,15 @@ export default function Dashboard() {
       const canSeeDesk = hasPermission(user, 'billing', 'view') || hasPermission(user, 'clerk_desk', 'view');
       const todayStr = new Date().toISOString().slice(0, 10);
       const common = [
-        api.get('/bookings/occupancy').then(res => setOccupancy(res.data)),
+        // Guest names/rooms are PII - only fetched when the role actually
+        // has bookings:view (Booking NCO, Kitchen NCO), matching the same
+        // gate the backend now enforces.
+        ...(canSeeOccupancy ? [api.get('/bookings/occupancy').then(res => setOccupancy(res.data))] : []),
         ...(canSeeDesk ? [api.get('/billing/desk').then(res => setUnsettled(res.data.unsettled_invoices || []))] : []),
+        ...(isSecurity ? [
+          api.get('/security/incidents', { params: { page_size: 100 } })
+            .then(res => setOpenIncidents((res.data.items || []).filter((i: IncidentLite) => i.status === 'open' || i.status === 'investigating'))),
+        ] : []),
         // The Clerk's own cashier figures (collections today/month) - not part
         // of the cross-module reports.view board, so fetched separately, gated
         // on the same billing.view Clerk has. Member bills are folded in too so
@@ -160,8 +184,17 @@ export default function Dashboard() {
           api.get('/inventory/dashboard').then(res => setLowStockCount(res.data.low_stock_count || 0)),
           api.get('/inventory/items', { params: { low_stock: true, page_size: 6 } })
             .then(res => setLowStockItems(res.data.items || [])),
+          // check_expiring_items() (backend/alerts.py) generates this as an
+          // Alert, but Kitchen NCO has no alerts:view - surfaced here
+          // directly instead, same pattern as low-stock above.
+          api.get('/inventory/expiring', { params: { days: 3 } })
+            .then(res => setExpiringItems(res.data || [])),
           api.get('/attendance', { params: { date: todayStr, page_size: 100 } })
             .then(res => setTodayAttendance(res.data.items || [])),
+          // Tomorrow's booked meals - what actually drives what to cook and
+          // buy, unlike today's count which has already happened.
+          api.get('/attendance', { params: { date: new Date(Date.now() + 86400000).toISOString().slice(0, 10), page_size: 100 } })
+            .then(res => setTomorrowMealCount((res.data.items || []).filter((a: AttendanceLite) => a.status === 'booked' || a.status === 'attended').length)),
           // Weekly volume chart - one lightweight call per of the last 7 days
           // rather than a wide date_from/date_to range, since /attendance's
           // page_size caps at 100 and a week across every meal/member could
@@ -183,7 +216,7 @@ export default function Dashboard() {
         .catch(() => toast.error('Failed to load dashboard data'))
         .finally(() => setLoading(false));
     });
-  }, [user, isClerk, isKitchen]);
+  }, [user, isClerk, isKitchen, isSecurity, canSeeOccupancy]);
 
   const overdueDepartures = occupancy?.departures.filter(d => d.overdue) ?? [];
   const billsAmount = unsettled.reduce((s, i) => s + i.balance_due, 0);
@@ -323,7 +356,7 @@ export default function Dashboard() {
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Welcome, {user?.full_name}</h1>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
           <HeroTile label="Meals Booked Today" value={<StatValue loading={loading} value={mealsToday} />}
-            sub="Members & guests, all meals"
+            sub={<>Members &amp; guests, all meals · Tomorrow: <strong>{tomorrowMealCount}</strong> booked so far</>}
             icon={Utensils} tone="bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600" onClick={() => navigate('/attendance')} />
           <HeroTile label="Special Orders" value={<StatValue loading={loading} value={specialOrders.length} />}
             sub={specialOrders.length > 0 ? 'À la carte requests in queue' : 'None right now'}
@@ -336,7 +369,8 @@ export default function Dashboard() {
             icon={Clock} tone="bg-red-100 dark:bg-red-900/30 text-red-600" onClick={() => navigate('/kitchen')} alert={lateOrderCount > 0} />
           <HeroTile label="Low Stock Items" value={<StatValue loading={loading} value={lowStockCount} />}
             sub={lowStockCount > 0 ? 'At or below reorder level' : 'Stock levels healthy'}
-            icon={PackageX} tone="bg-purple-100 dark:bg-purple-900/30 text-purple-600" onClick={() => navigate('/inventory')} alert={lowStockCount > 0} />
+            icon={PackageX} tone="bg-purple-100 dark:bg-purple-900/30 text-purple-600"
+            onClick={() => navigate('/stock', { state: { openIntake: true } })} alert={lowStockCount > 0} />
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -374,7 +408,7 @@ export default function Dashboard() {
           </SectionCard>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
           <SectionCard title="Kitchen Queue"
             action={<button className="text-sm text-blue-600 hover:underline flex items-center gap-1" onClick={() => navigate('/kitchen')}>Kitchen <ArrowRight size={15} /></button>}>
             {activeOrders.length === 0 && <p className="text-base text-gray-400">Nothing in the queue right now</p>}
@@ -385,7 +419,7 @@ export default function Dashboard() {
                   <span className="min-w-0">
                     <span className="text-base font-medium flex items-center gap-1.5 truncate">
                       {o.is_ala_carte && <Star size={13} className="text-amber-500 shrink-0" />}
-                      {o.recipe_name || '—'}
+                      {o.menu_item_name || '—'}
                     </span>
                     <span className="text-sm text-gray-500">
                       {o.is_ala_carte ? (o.consumer_name || 'À la carte') : `${o.quantity_ordered} portions`}
@@ -399,11 +433,11 @@ export default function Dashboard() {
           </SectionCard>
 
           <SectionCard title="Low Stock Items"
-            action={<button className="text-sm text-blue-600 hover:underline flex items-center gap-1" onClick={() => navigate('/inventory')}>Inventory <ArrowRight size={15} /></button>}>
+            action={<button className="text-sm text-blue-600 hover:underline flex items-center gap-1" onClick={() => navigate('/stock', { state: { openIntake: true } })}>Restock <ArrowRight size={15} /></button>}>
             {lowStockItems.length === 0 && <p className="text-base text-gray-400">Nothing below reorder level ✓</p>}
             <div className="space-y-2">
               {lowStockItems.slice(0, 6).map(it => (
-                <button key={it.id} type="button" onClick={() => navigate('/inventory')}
+                <button key={it.id} type="button" onClick={() => navigate('/stock', { state: { openIntake: true, itemId: it.id } })}
                   className="w-full flex items-center justify-between gap-2 rounded-lg border px-3 py-2 hover:border-red-400 transition-colors text-left">
                   <span className="text-base font-medium truncate">{it.name}</span>
                   <span className="text-sm font-medium text-red-600 shrink-0">{it.total_stock} / {it.reorder_level} {it.unit}</span>
@@ -412,7 +446,54 @@ export default function Dashboard() {
               {lowStockCount > lowStockItems.length && <p className="text-sm text-gray-500">+ {lowStockCount - lowStockItems.length} more below reorder level</p>}
             </div>
           </SectionCard>
+
+          <SectionCard title="Expiring Soon"
+            action={<button className="text-sm text-blue-600 hover:underline flex items-center gap-1" onClick={() => navigate('/stock')}>Inventory <ArrowRight size={15} /></button>}>
+            {expiringItems.length === 0 && <p className="text-base text-gray-400">Nothing expiring in the next 3 days ✓</p>}
+            <div className="space-y-2">
+              {expiringItems.slice(0, 6).map(b => (
+                <div key={b.batch_id} className="w-full flex items-center justify-between gap-2 rounded-lg border px-3 py-2">
+                  <span className="text-base font-medium truncate">{b.item_name}</span>
+                  <span className="text-sm font-medium text-amber-600 shrink-0">{b.quantity} {b.unit} · {new Date(b.expiry_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
+                </div>
+              ))}
+              {expiringItems.length > 6 && <p className="text-sm text-gray-500">+ {expiringItems.length - 6} more expiring soon</p>}
+            </div>
+          </SectionCard>
         </div>
+      </div>
+    );
+  }
+
+  // ---- Security Guard: open incidents only - this role holds nothing
+  // else (see access.py), so there's no occupancy/billing data to show
+  // and showing it anyway would be either broken or misleading. ----
+  if (isSecurity) {
+    return (
+      <div className="space-y-6">
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Welcome, {user?.full_name}</h1>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <HeroTile label="Open Incidents" value={<StatValue loading={loading} value={openIncidents.length} />}
+            sub={openIncidents.length > 0 ? 'Open or under investigation' : 'Nothing outstanding'}
+            icon={Shield} tone="bg-red-100 dark:bg-red-900/30 text-red-600" onClick={() => navigate('/security')} alert={openIncidents.length > 0} />
+        </div>
+        <SectionCard title="Open Incidents"
+          action={<button className="text-sm text-blue-600 hover:underline flex items-center gap-1" onClick={() => navigate('/security')}>Security <ArrowRight size={15} /></button>}>
+          {openIncidents.length === 0 && <p className="text-base text-gray-400">Nothing open right now ✓</p>}
+          <div className="space-y-2">
+            {openIncidents.slice(0, 8).map(inc => (
+              <button key={inc.id} type="button" onClick={() => navigate('/security')}
+                className="w-full flex items-center justify-between gap-2 rounded-lg border px-3 py-2 hover:border-red-400 transition-colors text-left">
+                <span className="min-w-0">
+                  <span className="text-base font-medium truncate block">{inc.title}</span>
+                  <span className="text-sm text-gray-500">{inc.location || '—'}</span>
+                </span>
+                <span className="text-sm font-medium capitalize shrink-0 text-gray-500">{inc.severity}</span>
+              </button>
+            ))}
+            {openIncidents.length > 8 && <p className="text-sm text-gray-500">+ {openIncidents.length - 8} more on Security</p>}
+          </div>
+        </SectionCard>
       </div>
     );
   }

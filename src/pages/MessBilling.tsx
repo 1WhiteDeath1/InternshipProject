@@ -21,6 +21,7 @@ interface MessBill {
   id: number;
   member_id: number;
   member_name: string | null;
+  member_dining_status: string;
   month: number;
   year: number;
   man_days: number;
@@ -207,13 +208,14 @@ export default function MessBilling() {
             <CardContent className="p-0">
               <Table>
                 <TableHeader>
-                  <TableRow><TableHead>Member</TableHead><TableHead>Man-Days</TableHead><TableHead>Menu</TableHead><TableHead>Stay</TableHead><TableHead>Extras</TableHead><TableHead>A La Carte</TableHead><TableHead>Discount</TableHead><TableHead>Total</TableHead><TableHead>Status</TableHead><TableHead className="w-32">Actions</TableHead></TableRow>
+                  <TableRow><TableHead>Member</TableHead><TableHead>Dining</TableHead><TableHead>Man-Days</TableHead><TableHead>Menu</TableHead><TableHead>Stay</TableHead><TableHead>Extras</TableHead><TableHead>A La Carte</TableHead><TableHead>Discount</TableHead><TableHead>Total</TableHead><TableHead>Status</TableHead><TableHead className="w-32">Actions</TableHead></TableRow>
                 </TableHeader>
                 <TableBody>
-                  {loading && <TableRow><TableCell colSpan={10} className="text-center py-8 text-gray-500">Loading bills...</TableCell></TableRow>}
+                  {loading && <TableRow><TableCell colSpan={11} className="text-center py-8 text-gray-500">Loading bills...</TableCell></TableRow>}
                   {!loading && bills.map(b => (
                     <TableRow key={b.id}>
                       <TableCell className="font-medium">{b.member_name}</TableCell>
+                      <TableCell>{b.member_dining_status === 'non_dining' ? <Badge variant="outline">Non-Dining</Badge> : <span className="text-gray-400">Dining</span>}</TableCell>
                       <TableCell>{b.man_days}</TableCell>
                       <TableCell>{formatCurrency(b.base_menu_amount)}</TableCell>
                       <TableCell>{formatCurrency(b.stay_amount)}</TableCell>
@@ -238,7 +240,7 @@ export default function MessBilling() {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {!loading && bills.length === 0 && <TableRow><TableCell colSpan={10} className="text-center py-8 text-gray-500">No bills for this period - click Generate Bills</TableCell></TableRow>}
+                  {!loading && bills.length === 0 && <TableRow><TableCell colSpan={11} className="text-center py-8 text-gray-500">No bills for this period - click Generate Bills</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </CardContent>

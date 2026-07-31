@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api, { getErrorMessage } from '@/lib/api';
 import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ResizableDialog } from '@/components/dashboard/ResizableDialog';
 import { Badge } from '@/components/ui/badge';
 import { CalendarDays, Users, MapPin } from 'lucide-react';
 
@@ -54,33 +54,39 @@ function EventsDetailDialog({ open, onClose }: { open: boolean; onClose: () => v
   }, [open]);
 
   return (
-    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle className="flex items-center gap-2"><CalendarDays size={20} /> Upcoming Events</DialogTitle></DialogHeader>
+    <ResizableDialog open={open} onClose={onClose} storageKey="events" defaultWidth={560} defaultHeight={620}
+      title={<><CalendarDays size={20} /> Upcoming Events</>}>
+      {({ bucket }) => (
+        <>
+          {loading && <p className="text-sm text-gray-500 py-8 text-center">Loading…</p>}
+          {!loading && events.length === 0 && <p className="text-sm text-gray-500 py-8 text-center">No upcoming events booked.</p>}
 
-        {loading && <p className="text-sm text-gray-500 py-8 text-center">Loading…</p>}
-        {!loading && events.length === 0 && <p className="text-sm text-gray-500 py-8 text-center">No upcoming events booked.</p>}
-
-        <div className="space-y-3">
-          {events.map(e => (
-            <div key={e.id} className="rounded-lg border p-3 space-y-1.5 text-sm">
-              <div className="flex items-start justify-between gap-2">
-                <p className="font-bold">{e.title}</p>
-                <Badge className={STATUS_COLORS[e.status]}>{STATUS_LABELS[e.status] || e.status}</Badge>
+          {/* Flexbox instead of a fixed-column grid: a short last row (e.g. 2
+              cards after two full rows of 3) grows to fill the row's width
+              instead of leaving an empty trailing slot. */}
+          <div className="flex flex-wrap gap-3">
+            {events.map(e => (
+              <div key={e.id} className={`rounded-lg border p-3 space-y-1.5 text-sm flex-1 ${bucket === 'lg' ? 'basis-[30%] min-w-[220px]' : bucket === 'md' ? 'basis-[45%] min-w-[220px]' : 'basis-full'}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-bold">{e.title}</p>
+                  <Badge className={STATUS_COLORS[e.status]}>{STATUS_LABELS[e.status] || e.status}</Badge>
+                </div>
+                <div className={`grid gap-1.5 text-gray-600 dark:text-gray-300 ${bucket === 'sm' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                  <p className="flex items-center gap-1.5"><CalendarDays size={13} className="text-gray-400" /> {fmtDate(e.event_date)}</p>
+                  <p className="flex items-center gap-1.5"><Users size={13} className="text-gray-400" /> {e.headcount} people</p>
+                  <p className={`flex items-center gap-1.5 ${bucket === 'sm' ? 'col-span-2' : ''}`}><MapPin size={13} className="text-gray-400" /> {e.hall_name} (capacity {e.capacity})</p>
+                </div>
+                <p className="text-xs text-gray-500">Organizer: {e.guest_name}{e.guest_phone ? ` · ${e.guest_phone}` : ''} · {e.billing_type === 'split' ? 'Cost split among guests' : 'One person pays'}</p>
+                {/* The long free-text fields are the first thing to go when
+                    each card is only a third of the width. */}
+                {bucket !== 'lg' && e.requirements && <p className="text-xs"><span className="text-gray-400">Requirements:</span> {e.requirements}</p>}
+                {bucket !== 'lg' && e.arrangement && <p className="text-xs"><span className="text-gray-400">Arrangement:</span> {e.arrangement}</p>}
               </div>
-              <div className="grid grid-cols-2 gap-1.5 text-gray-600 dark:text-gray-300">
-                <p className="flex items-center gap-1.5"><CalendarDays size={13} className="text-gray-400" /> {fmtDate(e.event_date)}</p>
-                <p className="flex items-center gap-1.5"><Users size={13} className="text-gray-400" /> {e.headcount} people</p>
-                <p className="flex items-center gap-1.5 col-span-2"><MapPin size={13} className="text-gray-400" /> {e.hall_name} (capacity {e.capacity})</p>
-              </div>
-              <p className="text-xs text-gray-500">Organizer: {e.guest_name}{e.guest_phone ? ` · ${e.guest_phone}` : ''} · {e.billing_type === 'split' ? 'Cost split among guests' : 'One person pays'}</p>
-              {e.requirements && <p className="text-xs"><span className="text-gray-400">Requirements:</span> {e.requirements}</p>}
-              {e.arrangement && <p className="text-xs"><span className="text-gray-400">Arrangement:</span> {e.arrangement}</p>}
-            </div>
-          ))}
-        </div>
-      </DialogContent>
-    </Dialog>
+            ))}
+          </div>
+        </>
+      )}
+    </ResizableDialog>
   );
 }
 

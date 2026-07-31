@@ -13,6 +13,15 @@ class GuestOut(BaseModel):
     id_type: Optional[str] = None
     id_number: Optional[str] = None
     unit_address: Optional[str] = None
+    # Derived from this guest's most recent booking (Guest itself carries no
+    # category/rank data) - lets check-in autocomplete prefill a returning
+    # guest's usual classification instead of leaving it blank. None if the
+    # guest has no prior booking, or (for nature_of_duty) if their last stay
+    # was HRA, since that requires a member link this search can't supply.
+    last_client_category: Optional[str] = None
+    last_rank: Optional[str] = None
+    last_nature_of_duty: Optional[str] = None
+    last_stay_type: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
 class GuestListItem(BaseModel):

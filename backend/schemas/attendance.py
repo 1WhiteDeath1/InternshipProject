@@ -9,7 +9,7 @@ class MealAttendanceBase(BaseModel):
     member_id: Optional[int] = None
     booking_id: Optional[int] = None
     guest_id: Optional[int] = None
-    recipe_id: Optional[int] = None
+    menu_item_id: Optional[int] = None
     date: date
     meal_type: str
     method: str = "manual"
@@ -31,7 +31,7 @@ class MealAttendanceOut(MealAttendanceBase):
     marked_by: Optional[int] = None
     member_name: Optional[str] = None
     guest_name: Optional[str] = None
-    recipe_name: Optional[str] = None
+    menu_item_name: Optional[str] = None
 
 class AttendanceMarkRequest(BaseModel):
     status: str
@@ -50,7 +50,7 @@ class AttendanceLookupResult(BaseModel):
     id: int
     name: str
     sub_label: Optional[str] = None
-    recipe_id: Optional[int] = None
+    menu_item_id: Optional[int] = None
     attendance_id: Optional[int] = None
     attendance_status: Optional[str] = None
 
@@ -60,7 +60,7 @@ class ServeAttendanceRequest(BaseModel):
     guest_id: Optional[int] = None
     date: date
     meal_type: str
-    recipe_id: Optional[int] = None
+    menu_item_id: Optional[int] = None
 
     _check_meal_type = field_validator("meal_type")(_ensure_meal_type)
 

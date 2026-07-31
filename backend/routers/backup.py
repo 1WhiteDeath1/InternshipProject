@@ -3,12 +3,11 @@ import os
 import shutil
 import zipfile
 from datetime import datetime, timedelta
-from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from backend.database import get_db, engine
-from backend.config import BACKUP_DIR, DB_PATH
+from backend.config import BACKUP_DIR, DB_PATH, LOGS_DIR
 from backend.auth import PermissionChecker
 from backend.audit import log_audit, AuditAction
 from backend.logging_config import get_logger
@@ -40,9 +39,8 @@ async def create_backup(current_user=Depends(PermissionChecker("backup", "create
         if DB_PATH.exists():
             zf.write(DB_PATH, arcname="hotel_mess.db")
         # Include logs
-        logs_dir = Path(__file__).parent.parent / "logs"
-        if logs_dir.exists():
-            for log_file in logs_dir.glob("*.log"):
+        if LOGS_DIR.exists():
+            for log_file in LOGS_DIR.glob("*.log"):
                 zf.write(log_file, arcname=f"logs/{log_file.name}")
 
     log_audit(None, current_user.id, current_user.full_name, AuditAction.CREATE, "backups", reason=f"Manual backup: {filename}")

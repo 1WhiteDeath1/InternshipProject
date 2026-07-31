@@ -19,9 +19,7 @@ DEFAULT_FEATURES = [
     FeatureFlag(key="three_way_match", name="Three-way Match Verification", description="Verify PO, delivery note, and receipt quantities match", department="Procurement", enabled=True),
     FeatureFlag(key="purchase_forecasting", name="Smart Purchase Forecasting", description="Consumption-based reorder recommendations", department="Procurement", enabled=True),
     FeatureFlag(key="vendor_tracking", name="Vendor Performance Tracking", description="Track and score vendor delivery accuracy", department="Procurement", enabled=True),
-    FeatureFlag(key="recipe_deductions", name="Recipe-linked Stock Deductions", description="Auto-deduct ingredients when orders are placed", department="Kitchen Orders", enabled=True),
     FeatureFlag(key="portion_tracking", name="Portion Tracking", description="Track actual vs planned portions", department="Kitchen Orders", enabled=True),
-    FeatureFlag(key="food_cost_reports", name="Food Cost Reports", description="Generate food cost percentage reports", department="Kitchen Orders", enabled=True),
     FeatureFlag(key="live_occupancy", name="Live Occupancy View", description="Real-time room occupancy dashboard", department="Booking", enabled=True),
     FeatureFlag(key="double_booking_guard", name="Double-booking Guard", description="Prevent overlapping room bookings", department="Booking", enabled=True),
     FeatureFlag(key="guest_movement_log", name="Guest Movement Log", description="Track check-in, check-out, and room changes", department="Booking", enabled=True),
@@ -39,7 +37,7 @@ DEFAULT_FEATURES = [
     FeatureFlag(key="mess_members", name="Member Management", description="Army mess member/officer roster", department="Mess", enabled=True),
     FeatureFlag(key="mess_attendance", name="Meal Attendance & Booking", description="Advance meal booking and attendance tracking for members", department="Mess", enabled=True),
     FeatureFlag(key="mess_billing", name="Mess Billing", description="Communal per-head mess bill generation for members", department="Mess", enabled=True),
-    FeatureFlag(key="kitchen_module", name="Kitchen Module", description="Recipe/menu management and kitchen production orders", department="Mess", enabled=True),
+    FeatureFlag(key="kitchen_module", name="Kitchen Module", description="Menu management and kitchen production orders", department="Mess", enabled=True),
     FeatureFlag(key="clerk_desk", name="Clerk Desk", description="Front-desk guest/member balance grid with Instant Checkout", department="Billing", enabled=True),
 ]
 

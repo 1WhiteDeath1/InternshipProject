@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 import os
+import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -24,7 +25,7 @@ run_startup_migrations(engine)
 app = FastAPI(
     title="EME MESS Management",
     description="Production-grade Hotel & Mess Management System",
-    version="1.0.0",
+    version="1.3.0",
 )
 
 app.add_middleware(
@@ -60,24 +61,28 @@ app.include_router(routers.branding_router, prefix="/api/branding", tags=["Brand
 app.include_router(routers.members_router, prefix="/api/members", tags=["Members"])
 app.include_router(routers.attendance_router, prefix="/api/attendance", tags=["Attendance"])
 app.include_router(routers.mess_billing_router, prefix="/api/mess-billing", tags=["Mess Billing"])
-app.include_router(routers.recipes_router, prefix="/api/recipes", tags=["Recipes"])
 app.include_router(routers.kitchen_router, prefix="/api/kitchen", tags=["Kitchen"])
-app.include_router(routers.menu_prices_router, prefix="/api/menu-prices", tags=["Menu Prices"])
 app.include_router(routers.guests_router, prefix="/api/guests", tags=["Guests"])
 app.include_router(routers.attendants_router, prefix="/api/attendants", tags=["Attendants"])
 app.include_router(routers.tariffs_router, prefix="/api/tariffs", tags=["Tariffs"])
 app.include_router(routers.womens_bloc_rates_router, prefix="/api/womens-bloc-rates", tags=["Womens Bloc Rates"])
 app.include_router(routers.events_router, prefix="/api/events", tags=["Events"])
+app.include_router(routers.rate_card_router, prefix="/api/rate-card", tags=["Rate Card"])
+app.include_router(routers.directives_router, prefix="/api/directives", tags=["Directives"])
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok", "version": "1.0.0"}
+    return {"status": "ok", "version": "1.3.0"}
 
 
 # Serve static files (React build). Registered LAST so the "/{full_path:path}"
 # SPA fallback below cannot shadow real /api routes (FastAPI matches routes in
 # registration order - a catch-all declared before /api/health would swallow it).
-dist_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "dist")
+dist_path = (
+    os.path.join(sys._MEIPASS, "dist")
+    if getattr(sys, "frozen", False)
+    else os.path.join(os.path.dirname(os.path.dirname(__file__)), "dist")
+)
 if os.path.exists(dist_path):
     app.mount("/assets", StaticFiles(directory=os.path.join(dist_path, "assets")), name="assets")
 

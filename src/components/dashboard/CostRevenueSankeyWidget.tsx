@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { ResizableDialog } from '@/components/dashboard/ResizableDialog';
 import { Waves } from 'lucide-react';
 import { Sankey, ResponsiveContainer, Rectangle, Layer } from 'recharts';
 import { useTheme } from '@/contexts/useTheme';
@@ -70,7 +70,7 @@ function buildFlow(data: FlowData) {
   const revenueSources: [string, number, string][] = [
     ['Room Revenue', data.room_revenue, '#7C3AED'],
     ['Mess Revenue', data.mess_revenue, '#EA580C'],
-    ['Other Revenue', data.other_revenue, '#64748B'],
+    ['Event Revenue', data.other_revenue, '#64748B'],
   ];
 
   revenueSources.forEach(([name, value, color]) => add(name, color, value));
@@ -114,44 +114,86 @@ function SankeyDetailDialog({ open, onClose }: { open: boolean; onClose: () => v
   const flow = data ? buildFlow(data) : null;
 
   return (
-    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader><DialogTitle className="flex items-center gap-2"><Waves size={20} /> Revenue → Cost → Profit</DialogTitle></DialogHeader>
-
-        <ToggleGroup type="single" value={range} onValueChange={v => v && setRange(v)} variant="outline">
-          {RANGES.map(r => <ToggleGroupItem key={r.key} value={r.key}>{r.label}</ToggleGroupItem>)}
-        </ToggleGroup>
-
-        {loading && <p className="text-sm text-gray-500 py-8 text-center">Loading…</p>}
-
-        {!loading && flow && data && (
+    <ResizableDialog open={open} onClose={onClose} storageKey="sankey" defaultWidth={720} defaultHeight={620}
+      title={<><Waves size={20} /> Revenue → Cost → Profit</>}>
+      {({ bucket, chartHeight }) => {
+        // The Sankey's node labels sit in fixed-width margins either side of
+        // the flow, so label detail has to follow the available width or the
+        // labels either collide with the diagram or get clipped: amounts only
+        // once there's room for them, and names dropped entirely when there
+        // isn't even room for those (the totals below still carry the numbers).
+        const labelMode = bucket === 'lg' ? 'full' : bucket === 'md' ? 'short' : 'none';
+        const sideMargin = labelMode === 'full' ? { right: 140, left: 110 }
+          : labelMode === 'short' ? { right: 95, left: 80 }
+          : { right: 12, left: 12 };
+        return (
           <>
-            <div style={{ color: darkMode ? '#E5E7EB' : '#374151' }}>
-              <ResponsiveContainer width="100%" height={340}>
-                <Sankey data={flow} nodeWidth={14} nodePadding={28} linkCurvature={0.5}
-                  node={(props: unknown) => <LabeledNode {...(props as { x: number; y: number; width: number; height: number; payload: SankeyNodeDatum })} labelMode="full" />}
-                  link={{ stroke: darkMode ? '#9CA3AF' : '#64748B', strokeOpacity: 0.85 }}
-                  margin={{ top: 10, right: 140, bottom: 10, left: 110 }} />
-              </ResponsiveContainer>
-            </div>
-            <div className="grid grid-cols-3 gap-3 text-center">
-              <div className="rounded-lg border p-3">
-                <p className="text-xs text-gray-500">Total Revenue</p>
-                <p className="text-lg font-bold font-mono text-blue-600">{formatCurrency(data.total_revenue)}</p>
-              </div>
-              <div className="rounded-lg border p-3">
-                <p className="text-xs text-gray-500">Total Cost</p>
-                <p className="text-lg font-bold font-mono text-red-600">{formatCurrency(data.procurement_cost + data.waste_cost)}</p>
-              </div>
-              <div className="rounded-lg border p-3">
-                <p className="text-xs text-gray-500">{data.profit < 0 ? 'Loss' : 'Profit'}</p>
-                <p className={`text-lg font-bold font-mono ${data.profit < 0 ? 'text-red-700' : 'text-emerald-600'}`}>{formatCurrency(Math.abs(data.profit))}</p>
-              </div>
-            </div>
+            <ToggleGroup type="single" value={range} onValueChange={v => v && setRange(v)} variant="outline">
+              {RANGES.map(r => <ToggleGroupItem key={r.key} value={r.key}>{r.label}</ToggleGroupItem>)}
+            </ToggleGroup>
+
+            {loading && <p className="text-sm text-gray-500 py-8 text-center">Loading…</p>}
+
+            {!loading && flow && data && (
+              <>
+                <div style={{ color: darkMode ? '#E5E7EB' : '#374151' }}>
+                  <ResponsiveContainer width="100%" height={chartHeight}>
+                    <Sankey data={flow} nodeWidth={14} nodePadding={bucket === 'sm' ? 16 : 28} linkCurvature={0.5}
+                      node={(props: unknown) => <LabeledNode {...(props as { x: number; y: number; width: number; height: number; payload: SankeyNodeDatum })} labelMode={labelMode} />}
+                      link={{ stroke: darkMode ? '#9CA3AF' : '#64748B', strokeOpacity: 0.85 }}
+                      margin={{ top: 10, bottom: 10, ...sideMargin }} />
+                  </ResponsiveContainer>
+                </div>
+
+                {/* With labels suppressed the diagram alone can't say which
+                    band is which - so the colour key becomes the label. */}
+                {labelMode === 'none' && (
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500">
+                    {flow.nodes.map((n, i) => (
+                      <span key={i} className="flex items-center gap-1">
+                        <span className="w-2.5 h-2.5 rounded-sm" style={{ background: n.color }} />
+                        {n.name} <span className="font-semibold">{formatCurrency(n.amount)}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className={`grid gap-3 text-center ${bucket === 'sm' ? 'grid-cols-1' : 'grid-cols-3'}`}>
+                  <div className="rounded-lg border p-3">
+                    <p className="text-xs text-gray-500">Total Revenue</p>
+                    <p className="text-lg font-bold font-mono text-blue-600">{formatCurrency(data.total_revenue)}</p>
+                  </div>
+                  <div className="rounded-lg border p-3">
+                    <p className="text-xs text-gray-500">Total Cost</p>
+                    <p className="text-lg font-bold font-mono text-red-600">{formatCurrency(data.procurement_cost + data.waste_cost)}</p>
+                  </div>
+                  <div className="rounded-lg border p-3">
+                    <p className="text-xs text-gray-500">{data.profit < 0 ? 'Loss' : 'Profit'}</p>
+                    <p className={`text-lg font-bold font-mono ${data.profit < 0 ? 'text-red-700' : 'text-emerald-600'}`}>{formatCurrency(Math.abs(data.profit))}</p>
+                  </div>
+                </div>
+
+                {/* Only worth the space once there's space: the cost side
+                    broken out, which the diagram shows as bands but never
+                    quantifies next to its own label. */}
+                {bucket === 'lg' && (
+                  <div className="grid grid-cols-2 gap-3 text-center">
+                    <div className="rounded-lg border p-3">
+                      <p className="text-xs text-gray-500">Procurement</p>
+                      <p className="text-base font-bold font-mono">{formatCurrency(data.procurement_cost)}</p>
+                    </div>
+                    <div className="rounded-lg border p-3">
+                      <p className="text-xs text-gray-500">Waste</p>
+                      <p className="text-base font-bold font-mono">{formatCurrency(data.waste_cost)}</p>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </>
-        )}
-      </DialogContent>
-    </Dialog>
+        );
+      }}
+    </ResizableDialog>
   );
 }
 

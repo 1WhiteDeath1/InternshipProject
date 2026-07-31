@@ -34,15 +34,6 @@ class RoomType(str, enum.Enum):
     SUITE = "suite"
     DG_SUITE = "dg_suite"
 
-class POStatus(str, enum.Enum):
-    DRAFT = "draft"
-    APPROVED = "approved"
-    SENT = "sent"
-    DELIVERY_EXPECTED = "delivery_expected"
-    PARTIALLY_RECEIVED = "partially_received"
-    RECEIVED = "received"
-    CANCELLED = "cancelled"
-
 class InvoiceStatus(str, enum.Enum):
     DRAFT = "draft"
     ISSUED = "issued"
@@ -54,12 +45,6 @@ class EditRequestStatus(str, enum.Enum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
-
-class IngredientType(str, enum.Enum):
-    LIQUID = "liquid"
-    POWDER = "powder"
-    GRANULAR = "granular"
-    SOLID_PIECES = "solid_pieces"
 
 class WasteCategory(str, enum.Enum):
     SPOILAGE = "spoilage"
@@ -102,6 +87,18 @@ class MemberStatus(str, enum.Enum):
     ACTIVE = "active"
     TRANSFERRED = "transferred"
     LEFT = "left"
+
+class DiningStatus(str, enum.Enum):
+    # Orthogonal to whether a member also holds an HRA room. NON_DINING
+    # members are excluded from mess bill generation and the man-day pool
+    # entirely (see mess_billing.py:generate_bills) - not billed at all for
+    # that period, not just a reporting label.
+    DINING = "dining"
+    NON_DINING = "non_dining"
+
+class DirectiveStatus(str, enum.Enum):
+    NEW = "new"
+    ACKNOWLEDGED = "acknowledged"
 
 class ClientCategory(str, enum.Enum):
     PERMANENT_MEMBER = "permanent_member"

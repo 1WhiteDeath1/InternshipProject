@@ -18,9 +18,9 @@ def _migrate_meal_attendance(engine):
         if "booking_id" not in col_names:
             conn.execute(text("ALTER TABLE meal_attendance ADD COLUMN booking_id INTEGER REFERENCES bookings(id)"))
             logger.info("migration: added meal_attendance.booking_id")
-        if "recipe_id" not in col_names:
-            conn.execute(text("ALTER TABLE meal_attendance ADD COLUMN recipe_id INTEGER REFERENCES recipes(id)"))
-            logger.info("migration: added meal_attendance.recipe_id")
+        if "menu_item_id" not in col_names:
+            conn.execute(text("ALTER TABLE meal_attendance ADD COLUMN menu_item_id INTEGER REFERENCES menu_items(id)"))
+            logger.info("migration: added meal_attendance.menu_item_id")
         conn.commit()
 
         if member_id_not_null:
@@ -69,7 +69,7 @@ def _rebuild_meal_attendance_nullable_member(conn):
             id INTEGER NOT NULL PRIMARY KEY,
             member_id INTEGER,
             booking_id INTEGER,
-            recipe_id INTEGER,
+            menu_item_id INTEGER,
             date DATE NOT NULL,
             meal_type VARCHAR(9) NOT NULL,
             status VARCHAR(9),
@@ -79,13 +79,13 @@ def _rebuild_meal_attendance_nullable_member(conn):
             marked_by INTEGER,
             FOREIGN KEY(member_id) REFERENCES members (id),
             FOREIGN KEY(booking_id) REFERENCES bookings (id),
-            FOREIGN KEY(recipe_id) REFERENCES recipes (id),
+            FOREIGN KEY(menu_item_id) REFERENCES menu_items (id),
             FOREIGN KEY(marked_by) REFERENCES users (id)
         )
     """))
     conn.execute(text("""
-        INSERT INTO meal_attendance_new (id, member_id, booking_id, recipe_id, date, meal_type, status, method, booked_at, marked_at, marked_by)
-        SELECT id, member_id, booking_id, recipe_id, date, meal_type, status, method, booked_at, marked_at, marked_by
+        INSERT INTO meal_attendance_new (id, member_id, booking_id, menu_item_id, date, meal_type, status, method, booked_at, marked_at, marked_by)
+        SELECT id, member_id, booking_id, menu_item_id, date, meal_type, status, method, booked_at, marked_at, marked_by
         FROM meal_attendance
     """))
     conn.execute(text("DROP TABLE meal_attendance"))

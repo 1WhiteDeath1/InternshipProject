@@ -23,7 +23,8 @@ class MessBill(Base):
     discount_approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     discount_reason = Column(Text, nullable=True)
     # Member's own à la carte custom-order charges for the period, billed at
-    # cost (food_cost, no markup) since MenuPrice is the guest-facing list.
+    # MenuItem.price - same rate guests pay, since there's no separate
+    # ingredient-cost figure to bill members "at cost" anymore.
     ala_carte_amount = Column(Numeric(12, 2), default=0)
     total_amount = Column(Numeric(12, 2), nullable=False, default=0)
     status = Column(Enum(MessBillStatus), default=MessBillStatus.DRAFT)

@@ -74,8 +74,15 @@ interface RecentIntake {
   unit: string;
   unit_cost: number;
   total_cost: number;
+  vendor_id: number | null;
+  vendor_name: string | null;
   received_date: string | null;
   created_at: string | null;
+}
+
+interface Vendor {
+  id: number;
+  name: string;
 }
 
 // ── Main Component ──
@@ -87,14 +94,19 @@ export default function StockManagement() {
   const [prefillItemId, setPrefillItemId] = useState<number | null>(null);
   const [autoScan, setAutoScan] = useState(false);
 
-  // The global "Scan Receipt" shortcut (Layout.tsx) deep-links here with
-  // navigation state - consume it once, then clear the state so a
-  // back-navigation or remount doesn't reopen the dialog.
+  // The global "Scan Receipt" shortcut (Layout.tsx) and the Kitchen NCO
+  // dashboard's Low Stock panel both deep-link here with navigation state -
+  // consume it once, then clear the state so a back-navigation or remount
+  // doesn't reopen the dialog / re-apply the prefill.
   useEffect(() => { queueMicrotask(() => {
-    const state = location.state as { openScan?: boolean } | null;
+    const state = location.state as { openScan?: boolean; openIntake?: boolean; itemId?: number } | null;
     if (state?.openScan) {
       setActiveTab('intake');
       setAutoScan(true);
+      navigate(location.pathname, { replace: true, state: null });
+    } else if (state?.openIntake) {
+      setActiveTab('intake');
+      if (state.itemId != null) setPrefillItemId(state.itemId);
       navigate(location.pathname, { replace: true, state: null });
     }
   }); // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -381,10 +393,14 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
 }) {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
   const [selectedItemId, setSelectedItemId] = useState('');
+  const [vendorId, setVendorId] = useState('');
   const [quantity, setQuantity] = useState('');
   const [totalCost, setTotalCost] = useState('');
   const [saving, setSaving] = useState(false);
+  const [newVendorOpen, setNewVendorOpen] = useState(false);
+  const [newVendorName, setNewVendorName] = useState('');
   const [lastResult, setLastResult] = useState<{
     item_name: string; quantity: number; unit: string;
     unit_price: number; prev_unit_price: number | null;
@@ -418,11 +434,19 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
     } catch { /* silent */ }
   }, []);
 
+  const fetchVendors = useCallback(async () => {
+    try {
+      const res = await api.get('/procurement/vendors?page_size=100');
+      setVendors(res.data.items || []);
+    } catch { /* silent */ }
+  }, []);
+
   useEffect(() => {
     fetchItems();
     fetchRecent();
     fetchCategories();
-  }, [fetchItems, fetchRecent, fetchCategories]);
+    fetchVendors();
+  }, [fetchItems, fetchRecent, fetchCategories, fetchVendors]);
 
   useEffect(() => {
     if (prefillItemId != null) {
@@ -454,12 +478,14 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
         item_id: Number(selectedItemId),
         quantity: qtyNum,
         total_cost: costNum,
+        vendor_id: vendorId ? Number(vendorId) : undefined,
       });
       toast.success(`Logged ${res.data.quantity} ${res.data.unit} of ${res.data.item_name}`);
       setLastResult(res.data);
       setQuantity('');
       setTotalCost('');
       setSelectedItemId('');
+      setVendorId('');
       fetchItems();
       fetchRecent();
     } catch (err) {
@@ -483,6 +509,23 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
       setSelectedItemId(String(res.data.id));
     } catch (err) {
       toast.error(getErrorMessage(err, 'Failed to create item'));
+    }
+  };
+
+  const handleCreateVendor = async () => {
+    if (!newVendorName.trim()) {
+      toast.error('Vendor name is required');
+      return;
+    }
+    try {
+      const res = await api.post('/procurement/vendors', { name: newVendorName.trim() });
+      toast.success('Vendor added');
+      setNewVendorOpen(false);
+      setNewVendorName('');
+      await fetchVendors();
+      setVendorId(String(res.data.id));
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Failed to add vendor'));
     }
   };
 
@@ -526,6 +569,28 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
                 onClick={() => setNewItemOpen(true)}
               >
                 + Create New Ingredient Profile
+              </button>
+            </div>
+
+            {/* Optional: who this was bought from */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Bought From (optional)</Label>
+              <Select value={vendorId} onValueChange={setVendorId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select vendor..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {vendors.map(v => (
+                    <SelectItem key={v.id} value={String(v.id)}>{v.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <button
+                type="button"
+                className="text-sm text-blue-600 hover:underline"
+                onClick={() => setNewVendorOpen(true)}
+              >
+                + Add New Vendor
               </button>
             </div>
 
@@ -633,6 +698,7 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
                   <p className="font-medium text-gray-900 dark:text-white">{r.item_name}</p>
                   <p className="text-xs text-gray-500">
                     {r.quantity} {r.unit} @ Rs {r.unit_cost.toFixed(2)}/{r.unit}
+                    {r.vendor_name && ` · ${r.vendor_name}`}
                   </p>
                 </div>
                 <div className="text-right">
@@ -701,6 +767,27 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
               </div>
             </div>
             <Button onClick={handleCreateItem} className="w-full">Create Item</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* New Vendor Dialog */}
+      <Dialog open={newVendorOpen} onOpenChange={setNewVendorOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add New Vendor</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Name</Label>
+              <Input
+                placeholder="e.g. Imtiaz Super Market"
+                value={newVendorName}
+                onChange={e => setNewVendorName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleCreateVendor(); }}
+              />
+            </div>
+            <Button onClick={handleCreateVendor} className="w-full">Add Vendor</Button>
           </div>
         </DialogContent>
       </Dialog>

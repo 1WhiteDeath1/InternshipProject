@@ -12,7 +12,7 @@ class MealAttendance(Base):
     (booking_id), or a standalone walk-in Guest with no room booking
     (guest_id) - enforced in MealAttendanceCreate/ServeAttendanceRequest.
     guest_id exists specifically so a non-member can be logged as fast as a
-    member, without first needing a room booking. recipe_id optionally
+    member, without first needing a room booking. menu_item_id optionally
     records what menu item was consumed, feeding kitchen production planning."""
     __tablename__ = "meal_attendance"
 
@@ -20,7 +20,7 @@ class MealAttendance(Base):
     member_id = Column(Integer, ForeignKey("members.id"), nullable=True)
     booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=True)
     guest_id = Column(Integer, ForeignKey("guests.id"), nullable=True)
-    recipe_id = Column(Integer, ForeignKey("recipes.id"), nullable=True)
+    menu_item_id = Column(Integer, ForeignKey("menu_items.id"), nullable=True)
     date = Column(Date, nullable=False)
     meal_type = Column(Enum(MealType), nullable=False)
     status = Column(Enum(AttendanceStatus), default=AttendanceStatus.BOOKED)
@@ -29,14 +29,14 @@ class MealAttendance(Base):
     marked_at = Column(DateTime, nullable=True)
     marked_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     # Set once this row's routine-meal charge (non-member/guest pay-per-item,
-    # priced via MenuPrice) has been pulled into an Instant Checkout invoice -
-    # guards against double-billing the same meal on a repeat checkout.
+    # priced via MenuItem.price) has been pulled into an Instant Checkout
+    # invoice - guards against double-billing the same meal on a repeat checkout.
     invoiced_at = Column(DateTime, nullable=True)
 
     member = relationship("Member")
     booking = relationship("Booking")
     guest = relationship("Guest")
-    recipe = relationship("Recipe")
+    menu_item = relationship("MenuItem")
 
     __table_args__ = (
         Index("idx_attendance_member_date", "member_id", "date"),

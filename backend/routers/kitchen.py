@@ -1,23 +1,38 @@
 """Kitchen production orders - what everyone (member or guest) is eating,
 aggregated into suggested production quantities, and the actual
-prepare/serve workflow with inventory deduction. Also the custom a la carte
-order lifecycle (Pending -> Cooking -> Completed/Late) with SLA timers."""
+prepare/serve workflow. Also the custom a la carte order lifecycle
+(Pending -> Cooking -> Completed/Late) with SLA timers; the editable Menu
+(Kitchen NCO proposes, Manager approves); the Gas Charge percentage rate
+Kitchen NCO sets directly for guest bills; and the mess-charges overview +
+order-history views (Extra Messing itself is always computed from actual
+orders, see backend/services/mess_charge_calc.py)."""
 from datetime import datetime, date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend.database import get_db
-from backend.models import KitchenOrder, Recipe, MealAttendance, FeatureFlag, Member, Booking, AlertSeverity
-from backend.schemas import KitchenOrderCreate, KitchenOrderPrepareRequest
+from backend.models import (
+    KitchenOrder, MenuItem, MenuItemEditRequest, GasChargeRate, GasChargeRateHistory,
+    MealAttendance, Member, MemberStatus, Booking, AlertSeverity, EditRequestStatus, FeatureFlag,
+)
+from backend.models.enums import MealType
+from backend.schemas import (
+    KitchenOrderCreate, KitchenOrderPrepareRequest,
+    MenuItemProposal, EditRequestReject, GasChargeRateUpdate,
+)
 from backend.auth import get_current_user, check_permission, PermissionChecker
 from backend.audit import log_audit, serialize_model, AuditAction
 from backend.logging_config import get_logger
-from backend.services.kitchen_deduction import deduct_recipe_stock
 from backend.services.mess_billing_calc import get_setting_float
+from backend.services.mess_charge_calc import compute_unbilled_mess_total, get_order_history, meal_multiplier_for_booking
 from backend.alerts import create_alert
 
 logger = get_logger("app")
-router = APIRouter(dependencies=[Depends(PermissionChecker("kitchen", "view"))])
+# No router-level permission dependency: KitchenOrder endpoints below need
+# "kitchen" (Kitchen NCO only), but Menu/Mess-Gas-Rate endpoints are also
+# reached by Manager/Deputy (who never get "kitchen" access) via their own
+# "menu"/"mess_rates" permissions - each endpoint checks the module it owns.
+router = APIRouter()
 
 
 def _is_feature_enabled(db: Session, key: str) -> bool:
@@ -42,10 +57,10 @@ def _recompute_ala_carte_status(db: Session, order: KitchenOrder) -> None:
         db.commit()
     escalation_minutes = get_setting_float(db, "ala_carte_escalation_minutes", 15)
     if order.escalated_at is None and now > order.due_at + timedelta(minutes=escalation_minutes):
-        recipe_name = order.recipe.name if order.recipe else "Order"
+        item_name = order.menu_item.name if order.menu_item else "Order"
         create_alert(
             db, f"Kitchen order #{order.id} critically overdue",
-            f"{recipe_name} for {_consumer_name(order) or 'a guest'} is over {escalation_minutes:.0f} min past its SLA deadline.",
+            f"{item_name} for {_consumer_name(order) or 'a guest'} is over {escalation_minutes:.0f} min past its SLA deadline.",
             AlertSeverity.CRITICAL, "kitchen", "kitchen_order", order.id,
         )
         order.escalated_at = now
@@ -56,15 +71,15 @@ def _aggregate_suggestions(db: Session, order_date: str, meal_type: str):
     # Member and guest consumption rows combine identically here - the query
     # never discriminates on member_id vs booking_id - this is what makes the
     # suggestion reflect everyone eating that meal, not just members. Returns a
-    # list of (recipe_id, headcount) rows.
+    # list of (menu_item_id, headcount) rows.
     return db.query(
-        MealAttendance.recipe_id, func.count(MealAttendance.id).label("headcount"),
+        MealAttendance.menu_item_id, func.count(MealAttendance.id).label("headcount"),
     ).filter(
         MealAttendance.date == order_date,
         MealAttendance.meal_type == meal_type,
         MealAttendance.status.in_(["booked", "attended"]),
-        MealAttendance.recipe_id.isnot(None),
-    ).group_by(MealAttendance.recipe_id).all()
+        MealAttendance.menu_item_id.isnot(None),
+    ).group_by(MealAttendance.menu_item_id).all()
 
 
 @router.get("/orders")
@@ -73,6 +88,8 @@ async def list_kitchen_orders(
     page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db), current_user=Depends(get_current_user),
 ):
+    if not check_permission(current_user, "kitchen", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     query = db.query(KitchenOrder)
     if status:
         query = query.filter(KitchenOrder.status == status)
@@ -90,10 +107,9 @@ async def list_kitchen_orders(
     for o in orders:
         _recompute_ala_carte_status(db, o)
     return {"items": [
-        {"id": o.id, "recipe_id": o.recipe_id, "recipe_name": o.recipe.name if o.recipe else None,
+        {"id": o.id, "menu_item_id": o.menu_item_id, "menu_item_name": o.menu_item.name if o.menu_item else None,
          "quantity_ordered": o.quantity_ordered, "actual_portions": o.actual_portions,
-         "food_cost": float(o.food_cost) if o.food_cost else None, "status": o.status,
-         "notes": o.notes, "ordered_by": o.ordered_by, "created_at": o.created_at,
+         "status": o.status, "notes": o.notes, "ordered_by": o.ordered_by, "created_at": o.created_at,
          "is_ala_carte": bool(o.is_ala_carte), "consumer_type": o.consumer_type,
          "member_id": o.member_id, "booking_id": o.booking_id, "consumer_name": _consumer_name(o),
          "sla_minutes": o.sla_minutes, "due_at": o.due_at, "cooking_started_at": o.cooking_started_at,
@@ -112,16 +128,16 @@ def _consumer_name(order: KitchenOrder) -> str | None:
 async def create_kitchen_order(data: KitchenOrderCreate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     if not check_permission(current_user, "kitchen", "create"):
         raise HTTPException(status_code=403, detail="Permission denied")
-    recipe = db.query(Recipe).filter(Recipe.id == data.recipe_id).first()
-    if not recipe:
-        raise HTTPException(status_code=404, detail="Recipe not found")
+    menu_item = db.query(MenuItem).filter(MenuItem.id == data.menu_item_id).first()
+    if not menu_item:
+        raise HTTPException(status_code=404, detail="Menu item not found")
     if data.is_ala_carte:
         if data.member_id and not db.query(Member).filter(Member.id == data.member_id).first():
             raise HTTPException(status_code=404, detail="Member not found")
         if data.booking_id and not db.query(Booking).filter(Booking.id == data.booking_id).first():
             raise HTTPException(status_code=404, detail="Booking not found")
 
-    order = KitchenOrder(recipe_id=data.recipe_id, quantity_ordered=data.quantity_ordered, notes=data.notes, status="pending", source="manual", ordered_by=current_user.id)
+    order = KitchenOrder(menu_item_id=data.menu_item_id, quantity_ordered=data.quantity_ordered, notes=data.notes, status="pending", source="manual", ordered_by=current_user.id)
     if data.is_ala_carte:
         sla_minutes = data.sla_minutes or int(get_setting_float(db, "ala_carte_default_sla_minutes", 45))
         order.is_ala_carte = True
@@ -143,11 +159,13 @@ async def suggested_orders(
     order_date: str = Query(..., alias="date"), meal_type: str = Query(...),
     db: Session = Depends(get_db), current_user=Depends(get_current_user),
 ):
+    if not check_permission(current_user, "kitchen", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     rows = _aggregate_suggestions(db, order_date, meal_type)
-    recipe_ids = [r.recipe_id for r in rows]
-    recipes_by_id = {r.id: r for r in db.query(Recipe).filter(Recipe.id.in_(recipe_ids)).all()} if recipe_ids else {}
+    menu_item_ids = [r.menu_item_id for r in rows]
+    items_by_id = {i.id: i for i in db.query(MenuItem).filter(MenuItem.id.in_(menu_item_ids)).all()} if menu_item_ids else {}
 
-    return [{"recipe_id": r.recipe_id, "recipe_name": recipes_by_id[r.recipe_id].name if r.recipe_id in recipes_by_id else None,
+    return [{"menu_item_id": r.menu_item_id, "menu_item_name": items_by_id[r.menu_item_id].name if r.menu_item_id in items_by_id else None,
              "suggested_quantity": r.headcount} for r in rows]
 
 
@@ -157,7 +175,7 @@ async def generate_orders_from_bookings(
     request: Request = None, db: Session = Depends(get_db), current_user=Depends(get_current_user),
 ):
     """Promote a date/meal's combined member+guest bookings into pending kitchen
-    orders in one shot. Idempotent: a recipe that already has a non-cancelled
+    orders in one shot. Idempotent: a menu item that already has a non-cancelled
     order for the same meal_date/meal_type is skipped rather than duplicated."""
     if not check_permission(current_user, "kitchen", "create"):
         raise HTTPException(status_code=403, detail="Permission denied")
@@ -167,12 +185,12 @@ async def generate_orders_from_bookings(
         raise HTTPException(status_code=400, detail="date must be an ISO date (YYYY-MM-DD)")
 
     rows = _aggregate_suggestions(db, order_date, meal_type)
-    recipe_ids = [r.recipe_id for r in rows]
-    recipes_by_id = {r.id: r for r in db.query(Recipe).filter(Recipe.id.in_(recipe_ids)).all()} if recipe_ids else {}
+    menu_item_ids = [r.menu_item_id for r in rows]
+    items_by_id = {i.id: i for i in db.query(MenuItem).filter(MenuItem.id.in_(menu_item_ids)).all()} if menu_item_ids else {}
 
     # Existing non-cancelled orders already covering this meal_date/meal_type.
     already_ordered = {
-        o.recipe_id for o in db.query(KitchenOrder).filter(
+        o.menu_item_id for o in db.query(KitchenOrder).filter(
             KitchenOrder.meal_date == meal_date,
             KitchenOrder.meal_type == meal_type,
             KitchenOrder.status != "cancelled",
@@ -181,37 +199,24 @@ async def generate_orders_from_bookings(
 
     created, skipped = [], []
     for r in rows:
-        recipe_name = recipes_by_id[r.recipe_id].name if r.recipe_id in recipes_by_id else None
-        if r.recipe_id in already_ordered:
-            skipped.append({"recipe_id": r.recipe_id, "recipe_name": recipe_name})
+        item_name = items_by_id[r.menu_item_id].name if r.menu_item_id in items_by_id else None
+        if r.menu_item_id in already_ordered:
+            skipped.append({"menu_item_id": r.menu_item_id, "menu_item_name": item_name})
             continue
         order = KitchenOrder(
-            recipe_id=r.recipe_id, quantity_ordered=r.headcount, status="pending",
+            menu_item_id=r.menu_item_id, quantity_ordered=r.headcount, status="pending",
             meal_date=meal_date, meal_type=meal_type, source="auto_from_bookings",
             ordered_by=current_user.id,
         )
         db.add(order)
         db.commit()
         db.refresh(order)
-        created.append({"id": order.id, "recipe_id": r.recipe_id, "recipe_name": recipe_name, "quantity_ordered": r.headcount})
+        created.append({"id": order.id, "menu_item_id": r.menu_item_id, "menu_item_name": item_name, "quantity_ordered": r.headcount})
 
     log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "kitchen_orders", None,
               after_state={"date": order_date, "meal_type": meal_type, "created": len(created), "skipped": len(skipped)},
               ip_address=request.client.host if request else None)
     return {"created": created, "skipped": skipped}
-
-
-def _apply_deduction(db: Session, order: KitchenOrder, current_user, actual_portions=None):
-    """Shared body for prepare/cook: deduct recipe stock, auto-record food cost,
-    optionally capture actual portions. Feature-flag gated exactly as before."""
-    if _is_feature_enabled(db, "recipe_deductions"):
-        consumed_cost = deduct_recipe_stock(db, order.recipe, order.quantity_ordered, order.id, current_user.id)
-        # Auto-record food cost from the batches actually consumed, so cost
-        # reporting needs zero manual entry (gated by its own feature flag).
-        if _is_feature_enabled(db, "food_cost_reports"):
-            order.food_cost = consumed_cost
-    if _is_feature_enabled(db, "portion_tracking") and actual_portions is not None:
-        order.actual_portions = actual_portions
 
 
 @router.post("/orders/{order_id}/prepare")
@@ -225,7 +230,8 @@ async def prepare_kitchen_order(order_id: int, data: KitchenOrderPrepareRequest,
         raise HTTPException(status_code=400, detail="Only a pending order can be prepared")
 
     before = serialize_model(order)
-    _apply_deduction(db, order, current_user, data.actual_portions)
+    if _is_feature_enabled(db, "portion_tracking") and data.actual_portions is not None:
+        order.actual_portions = data.actual_portions
     order.status = "prepared"
     db.commit()
     db.refresh(order)
@@ -236,8 +242,8 @@ async def prepare_kitchen_order(order_id: int, data: KitchenOrderPrepareRequest,
 
 @router.post("/orders/{order_id}/cook")
 async def cook_kitchen_order(order_id: int, data: KitchenOrderPrepareRequest, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    """One-tap 'Mark Cooked' - collapses prepare+serve: deduct inventory and
-    take the order straight to served. Only a pending order can be cooked."""
+    """One-tap 'Mark Cooked' - collapses prepare+serve, straight to served.
+    Only a pending order can be cooked."""
     if not check_permission(current_user, "kitchen", "edit"):
         raise HTTPException(status_code=403, detail="Permission denied")
     order = db.query(KitchenOrder).filter(KitchenOrder.id == order_id).first()
@@ -247,7 +253,8 @@ async def cook_kitchen_order(order_id: int, data: KitchenOrderPrepareRequest, re
         raise HTTPException(status_code=400, detail="Only a pending order can be cooked")
 
     before = serialize_model(order)
-    _apply_deduction(db, order, current_user, data.actual_portions)
+    if _is_feature_enabled(db, "portion_tracking") and data.actual_portions is not None:
+        order.actual_portions = data.actual_portions
     order.status = "served"
     db.commit()
     db.refresh(order)
@@ -277,8 +284,7 @@ async def serve_kitchen_order(order_id: int, request: Request, db: Session = Dep
 
 @router.post("/orders/{order_id}/start-cooking")
 async def start_cooking_kitchen_order(order_id: int, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    """A la carte only: Pending/Late -> Cooking. THE moment inventory is
-    deducted, atomically, via the same deduct_recipe_stock used everywhere else."""
+    """A la carte only: Pending/Late -> Cooking."""
     if not check_permission(current_user, "kitchen", "edit"):
         raise HTTPException(status_code=403, detail="Permission denied")
     order = db.query(KitchenOrder).filter(KitchenOrder.id == order_id).first()
@@ -291,7 +297,6 @@ async def start_cooking_kitchen_order(order_id: int, request: Request, db: Sessi
         raise HTTPException(status_code=400, detail="Only a pending or late order can start cooking")
 
     before = serialize_model(order)
-    _apply_deduction(db, order, current_user)
     order.status = "cooking"
     order.cooking_started_at = datetime.utcnow()
     db.commit()
@@ -328,6 +333,8 @@ async def complete_ala_carte_order(order_id: int, request: Request, db: Session 
 @router.get("/orders/late-summary")
 async def late_orders_summary(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """Cheap count+list backing the Kitchen Production tab's late-orders banner."""
+    if not check_permission(current_user, "kitchen", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     candidates = db.query(KitchenOrder).filter(
         KitchenOrder.is_ala_carte == True, KitchenOrder.status.in_(["pending", "cooking", "late"]),
     ).all()
@@ -335,7 +342,7 @@ async def late_orders_summary(db: Session = Depends(get_db), current_user=Depend
         _recompute_ala_carte_status(db, o)
     late = [o for o in candidates if o.status == "late"]
     return {"count": len(late), "items": [
-        {"id": o.id, "recipe_name": o.recipe.name if o.recipe else None,
+        {"id": o.id, "menu_item_name": o.menu_item.name if o.menu_item else None,
          "consumer_name": _consumer_name(o), "due_at": o.due_at} for o in late]}
 
 
@@ -349,9 +356,6 @@ async def cancel_kitchen_order(order_id: int, request: Request, db: Session = De
     if order.status not in ("pending", "prepared", "cooking", "late"):
         raise HTTPException(status_code=400, detail="Only a pending, prepared, cooking, or late order can be cancelled")
 
-    # Known limitation: cancelling an already-prepared order does not reverse
-    # its inventory deduction - reversing consumed kitchen stock is a separate,
-    # deliberately out-of-scope concern for this change.
     before = serialize_model(order)
     order.status = "cancelled"
     db.commit()
@@ -359,3 +363,263 @@ async def cancel_kitchen_order(order_id: int, request: Request, db: Session = De
 
     log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "kitchen_orders", order.id, before_state=before, after_state=serialize_model(order), ip_address=request.client.host)
     return order
+
+
+# --- Menu: Kitchen NCO proposes, Manager approves (mirrors billing.py's
+# InvoiceEditRequest flow exactly) ---
+
+def _menu_item_edit_request_out(db: Session, req: MenuItemEditRequest) -> dict:
+    from backend.models import User
+    requester = db.query(User).filter(User.id == req.requested_by).first() if req.requested_by else None
+    original = req.menu_item
+    return {
+        "id": req.id, "menu_item_id": req.menu_item_id, "is_new_item": bool(req.is_new_item),
+        "original_name": original.name if original else None,
+        "original_price": float(original.price) if original else None,
+        "proposed_name": req.proposed_name, "proposed_price": float(req.proposed_price),
+        "proposed_meal_type": req.proposed_meal_type.value if hasattr(req.proposed_meal_type, "value") else req.proposed_meal_type,
+        "proposed_day_of_week": req.proposed_day_of_week,
+        "reason": req.reason, "status": req.status.value,
+        "requested_by_name": requester.full_name if requester else None,
+        "requested_at": req.requested_at, "decision_reason": req.decision_reason,
+    }
+
+
+def _parse_meal_type(value: str) -> MealType:
+    try:
+        return MealType(value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"meal_type must be one of {[m.value for m in MealType]}")
+
+
+@router.get("/menu")
+async def list_menu_items(meal_type: str = "", db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Open to any authenticated user - Billing/Attendance need to read
+    prices/items without operating the Kitchen module (same as the old
+    menu_prices GET)."""
+    query = db.query(MenuItem).filter(MenuItem.is_active == True)
+    if meal_type:
+        query = query.filter(MenuItem.meal_type == _parse_meal_type(meal_type))
+    items = query.order_by(MenuItem.day_of_week, MenuItem.name).all()
+    return [{"id": i.id, "name": i.name, "meal_type": i.meal_type.value, "day_of_week": i.day_of_week,
+             "price": float(i.price), "is_active": i.is_active} for i in items]
+
+
+@router.post("/menu")
+async def propose_new_menu_item(data: MenuItemProposal, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "menu", "create"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    req = MenuItemEditRequest(
+        is_new_item=True, proposed_name=data.name, proposed_price=data.price,
+        proposed_meal_type=_parse_meal_type(data.meal_type), proposed_day_of_week=data.day_of_week,
+        reason=data.reason, requested_by=current_user.id,
+    )
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "menu_item_edit_requests", req.id,
+              after_state=serialize_model(req), ip_address=request.client.host)
+    return _menu_item_edit_request_out(db, req)
+
+
+@router.put("/menu/{item_id}")
+async def propose_menu_item_edit(item_id: int, data: MenuItemProposal, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "menu", "edit"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    item = db.query(MenuItem).filter(MenuItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Menu item not found")
+    existing = db.query(MenuItemEditRequest).filter(
+        MenuItemEditRequest.menu_item_id == item_id, MenuItemEditRequest.status == EditRequestStatus.PENDING,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="This item already has a change pending approval")
+
+    req = MenuItemEditRequest(
+        menu_item_id=item_id, is_new_item=False, proposed_name=data.name, proposed_price=data.price,
+        proposed_meal_type=_parse_meal_type(data.meal_type), proposed_day_of_week=data.day_of_week,
+        reason=data.reason, requested_by=current_user.id,
+    )
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "menu_item_edit_requests", req.id,
+              after_state=serialize_model(req), ip_address=request.client.host)
+    return _menu_item_edit_request_out(db, req)
+
+
+@router.get("/menu/edit-requests")
+async def list_menu_edit_requests(status: str = "pending", db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Used both by the Kitchen NCO (their own submitted requests) and the
+    Manager (the approval queue)."""
+    if not (check_permission(current_user, "menu", "create") or check_permission(current_user, "menu", "edit")
+            or check_permission(current_user, "menu", "approve")):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    query = db.query(MenuItemEditRequest)
+    if status:
+        try:
+            query = query.filter(MenuItemEditRequest.status == EditRequestStatus(status))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="status must be pending, approved, or rejected")
+    reqs = query.order_by(MenuItemEditRequest.requested_at.desc()).all()
+    return [_menu_item_edit_request_out(db, r) for r in reqs]
+
+
+@router.post("/menu/edit-requests/{request_id}/approve")
+async def approve_menu_edit_request(request_id: int, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "menu", "approve"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    req = db.query(MenuItemEditRequest).filter(MenuItemEditRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Edit request not found")
+    if req.status != EditRequestStatus.PENDING:
+        raise HTTPException(status_code=400, detail=f"Request already {req.status.value}")
+
+    if req.is_new_item:
+        item = MenuItem(name=req.proposed_name, price=req.proposed_price,
+                         meal_type=req.proposed_meal_type, day_of_week=req.proposed_day_of_week)
+        db.add(item)
+        db.flush()
+        after_state = serialize_model(item)
+        before_state = None
+    else:
+        item = req.menu_item
+        if not item:
+            raise HTTPException(status_code=404, detail="Menu item no longer exists")
+        before_state = serialize_model(item)
+        item.name = req.proposed_name
+        item.price = req.proposed_price
+        item.meal_type = req.proposed_meal_type
+        item.day_of_week = req.proposed_day_of_week
+        after_state = serialize_model(item)
+
+    req.status = EditRequestStatus.APPROVED
+    req.decided_by = current_user.id
+    req.decided_at = datetime.utcnow()
+    db.commit()
+    db.refresh(item)
+    db.refresh(req)
+
+    log_audit(db, current_user.id, current_user.full_name,
+              AuditAction.CREATE if req.is_new_item else AuditAction.UPDATE, "menu_items", item.id,
+              before_state=before_state, after_state=after_state, reason=req.reason, ip_address=request.client.host)
+    return _menu_item_edit_request_out(db, req)
+
+
+@router.post("/menu/edit-requests/{request_id}/reject")
+async def reject_menu_edit_request(request_id: int, data: EditRequestReject, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "menu", "approve"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    req = db.query(MenuItemEditRequest).filter(MenuItemEditRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Edit request not found")
+    if req.status != EditRequestStatus.PENDING:
+        raise HTTPException(status_code=400, detail=f"Request already {req.status.value}")
+
+    before = serialize_model(req)
+    req.status = EditRequestStatus.REJECTED
+    req.decided_by = current_user.id
+    req.decided_at = datetime.utcnow()
+    req.decision_reason = data.reason
+    db.commit()
+    db.refresh(req)
+
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.OVERRIDE, "menu_item_edit_requests", req.id,
+              before_state=before, after_state=serialize_model(req), reason=data.reason, ip_address=request.client.host)
+    return _menu_item_edit_request_out(db, req)
+
+
+# --- Gas charge rate: Kitchen NCO sets this percentage directly (no
+# approval gate, unlike menu pricing above) - every change is logged to
+# GasChargeRateHistory for the Manager's trend graph. Extra Messing itself
+# is never a settable rate - see mess_charge_calc.py, it's always computed
+# from actual orders. ---
+
+@router.get("/gas-rate")
+async def get_gas_rate(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not (check_permission(current_user, "mess_rates", "view") or check_permission(current_user, "mess_rates", "edit")):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    row = db.query(GasChargeRate).first()
+    return {"percentage": float(row.percentage) if row else 0.0, "updated_at": row.updated_at if row else None}
+
+
+@router.put("/gas-rate")
+async def upsert_gas_rate(data: GasChargeRateUpdate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "mess_rates", "edit"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    row = db.query(GasChargeRate).first()
+    old_percentage = float(row.percentage) if row else 0.0
+    if row:
+        row.percentage = data.percentage
+        row.updated_by = current_user.id
+    else:
+        row = GasChargeRate(percentage=data.percentage, updated_by=current_user.id)
+        db.add(row)
+    db.add(GasChargeRateHistory(old_percentage=old_percentage, new_percentage=data.percentage, changed_by=current_user.id))
+    db.commit()
+    db.refresh(row)
+
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "gas_charge_rate", row.id,
+              before_state={"percentage": old_percentage}, after_state={"percentage": float(row.percentage)}, ip_address=request.client.host)
+    return {"percentage": float(row.percentage), "updated_at": row.updated_at}
+
+
+@router.get("/gas-rate/history")
+async def gas_rate_history(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not (check_permission(current_user, "mess_rates", "view") or check_permission(current_user, "mess_rates", "edit")):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    rows = db.query(GasChargeRateHistory).order_by(GasChargeRateHistory.changed_at).all()
+    return [{"old_percentage": float(r.old_percentage), "new_percentage": float(r.new_percentage),
+             "changed_at": r.changed_at} for r in rows]
+
+
+# --- Mess charges overview + order history: replaces the old one-guest-at-a-
+# time picker. Covers active Members and currently checked-in Guests
+# together - see mess_charge_calc.py for what "unbilled mess total" means
+# for each consumer type. ---
+
+def _can_view_mess_overview(current_user) -> bool:
+    return (check_permission(current_user, "kitchen", "view") or check_permission(current_user, "members", "view")
+            or check_permission(current_user, "clerk_desk", "view") or check_permission(current_user, "billing", "view"))
+
+
+@router.get("/mess-charges-overview")
+async def mess_charges_overview(consumer_type: str = "all", db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not _can_view_mess_overview(current_user):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    if consumer_type not in ("all", "member", "guest"):
+        raise HTTPException(status_code=400, detail="consumer_type must be 'all', 'member', or 'guest'")
+
+    rows = []
+    # HRA members currently occupying a room are shown once, as the richer
+    # "guest" row (with room number) - not double-counted as a member row too.
+    hra_member_ids = {b.member_id for b in db.query(Booking).filter(
+        Booking.status == "checked_in", Booking.nature_of_duty == "hra", Booking.member_id.isnot(None),
+    ).all()}
+
+    if consumer_type in ("all", "member"):
+        for m in db.query(Member).filter(Member.status == MemberStatus.ACTIVE).all():
+            if m.id in hra_member_ids:
+                continue
+            total, _, _, _ = compute_unbilled_mess_total(db, member_id=m.id)
+            rows.append({"consumer_type": "member", "consumer_id": m.id, "name": m.full_name,
+                         "sub_label": f"{m.rank} · {m.unit}" if m.unit else m.rank, "unbilled_mess_total": total})
+
+    if consumer_type in ("all", "guest"):
+        for b in db.query(Booking).filter(Booking.status == "checked_in").all():
+            meal_multiplier = meal_multiplier_for_booking(db, b)
+            total, _, _, _ = compute_unbilled_mess_total(db, booking_id=b.id, meal_multiplier=meal_multiplier)
+            rows.append({"consumer_type": "guest", "consumer_id": b.id, "name": b.guest_name,
+                         "sub_label": b.room.room_number if b.room else None, "unbilled_mess_total": total})
+
+    return rows
+
+
+@router.get("/order-history")
+async def order_history(member_id: int = 0, booking_id: int = 0, guest_id: int = 0, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not _can_view_mess_overview(current_user):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    if sum(bool(x) for x in (member_id, booking_id, guest_id)) != 1:
+        raise HTTPException(status_code=400, detail="Provide exactly one of member_id, booking_id, guest_id")
+    return get_order_history(db, member_id=member_id or None, booking_id=booking_id or None, guest_id=guest_id or None)

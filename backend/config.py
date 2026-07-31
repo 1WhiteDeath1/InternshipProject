@@ -1,17 +1,28 @@
 """Application configuration."""
 import os
+import sys
 from pathlib import Path
 from pydantic_settings import BaseSettings
 
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = BASE_DIR.parent
-DB_PATH = BASE_DIR / "hotel_mess.db"
-LOGS_DIR = BASE_DIR / "logs"
-BRANDING_FILE = BASE_DIR / "branding_config.enc"
-BACKUP_DIR = BASE_DIR / "backups"
-UPLOADS_DIR = BASE_DIR / "uploads"
 
-for d in [LOGS_DIR, BACKUP_DIR, UPLOADS_DIR]:
+# Under a PyInstaller build, __file__ lives inside the (read-only, reinstall-
+# clobbered) app bundle, so writable data goes to a stable per-user folder
+# instead - keeps the DB/logs/uploads across upgrades and needs no admin
+# write access. Plain `python -m uvicorn ...` dev runs are untouched.
+if getattr(sys, "frozen", False):
+    DATA_DIR = Path(os.getenv("LOCALAPPDATA", str(BASE_DIR))) / "EME MESS" / "data"
+else:
+    DATA_DIR = BASE_DIR
+
+DB_PATH = DATA_DIR / "hotel_mess.db"
+LOGS_DIR = DATA_DIR / "logs"
+BRANDING_FILE = DATA_DIR / "branding_config.enc"
+BACKUP_DIR = DATA_DIR / "backups"
+UPLOADS_DIR = DATA_DIR / "uploads"
+
+for d in [DATA_DIR, LOGS_DIR, BACKUP_DIR, UPLOADS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 class Settings(BaseSettings):

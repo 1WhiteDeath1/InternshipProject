@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Wallet } from 'lucide-react';
+import { Wallet, History } from 'lucide-react';
 import { BillPrintView } from '@/components/BillPrint';
 import { BillStatusBadge } from '@/components/BillStatusBadge';
 import { billTypeStyle } from '@/lib/billStyles';
 import { formatCurrency } from '@/lib/currency';
+import { OrderHistoryDialog } from '@/components/OrderHistoryDialog';
 import { useClerkDesk, type UnsettledInvoice } from './context';
 
 // The settle/collect queue: every generated-but-unpaid room/mess invoice.
@@ -18,6 +19,7 @@ export default function Checkout() {
   const { desk, refresh } = useClerkDesk();
   const [settleInvoiceIds, setSettleInvoiceIds] = useState<number[] | null>(null);
   const [settleBookingId, setSettleBookingId] = useState<number | null>(null);
+  const [historyBooking, setHistoryBooking] = useState<{ id: number; name: string } | null>(null);
 
   // One settle row per guest, so their room + mess bills collect in one Pay.
   const settleGroups = useMemo(() => {
@@ -68,6 +70,11 @@ export default function Checkout() {
                     })}
                   </div>
                   <p className="text-lg font-bold font-mono">{formatCurrency(balance)}</p>
+                  {first.booking_id && (
+                    <Button size="sm" variant="outline" onClick={() => setHistoryBooking({ id: first.booking_id as number, name: first.guest_name || 'Guest' })}>
+                      <History size={14} className="mr-1" /> Order History
+                    </Button>
+                  )}
                   <Button size="sm" onClick={() => { setSettleInvoiceIds(group.map(i => i.id)); setSettleBookingId(first.booking_id ?? null); }}>
                     <Wallet size={14} className="mr-1" /> Settle &amp; Print
                   </Button>
@@ -81,6 +88,11 @@ export default function Checkout() {
       <BillPrintView invoiceIds={settleInvoiceIds} bookingId={settleBookingId ?? undefined}
         onClose={() => { setSettleInvoiceIds(null); setSettleBookingId(null); }}
         allowPayments onPaymentsChanged={refresh} />
+
+      <OrderHistoryDialog
+        open={historyBooking !== null} onOpenChange={open => { if (!open) setHistoryBooking(null); }}
+        bookingId={historyBooking?.id} personName={historyBooking?.name}
+      />
     </div>
   );
 }

@@ -73,22 +73,22 @@ def _has_active_leave(db: Session, member_id: int, on_date: date) -> bool:
 
 def _attendance_out(record: MealAttendance) -> MealAttendanceOut:
     return MealAttendanceOut(
-        id=record.id, member_id=record.member_id, booking_id=record.booking_id, guest_id=record.guest_id, recipe_id=record.recipe_id,
+        id=record.id, member_id=record.member_id, booking_id=record.booking_id, guest_id=record.guest_id, menu_item_id=record.menu_item_id,
         date=record.date, meal_type=record.meal_type.value, method=record.method, status=record.status.value,
         booked_at=record.booked_at, marked_at=record.marked_at, marked_by=record.marked_by,
         member_name=record.member.full_name if record.member else None,
         guest_name=(record.booking.guest_name if record.booking else None) or (record.guest.full_name if record.guest else None),
-        recipe_name=record.recipe.name if record.recipe else None,
+        menu_item_name=record.menu_item.name if record.menu_item else None,
     )
 
 
-def _create_attendance(db: Session, member_id: int | None, booking_id: int | None, meal_date: date, meal_type: str, method: str, recipe_id: int | None = None, guest_id: int | None = None) -> MealAttendance:
+def _create_attendance(db: Session, member_id: int | None, booking_id: int | None, meal_date: date, meal_type: str, method: str, menu_item_id: int | None = None, guest_id: int | None = None) -> MealAttendance:
     # Only members have a MemberLeave concept - checked-in guests and
     # standalone walk-in guests (booking_id/guest_id) skip this check.
     status = AttendanceStatus.BOOKED
     if member_id and _has_active_leave(db, member_id, meal_date):
         status = AttendanceStatus.EXCLUDED
-    record = MealAttendance(member_id=member_id, booking_id=booking_id, guest_id=guest_id, recipe_id=recipe_id, date=meal_date, meal_type=meal_type, method=method, status=status)
+    record = MealAttendance(member_id=member_id, booking_id=booking_id, guest_id=guest_id, menu_item_id=menu_item_id, date=meal_date, meal_type=meal_type, method=method, status=status)
     db.add(record)
     db.commit()
     db.refresh(record)
@@ -125,7 +125,7 @@ async def list_attendance(
     return {"items": [
         {"id": r.id, "member_id": r.member_id, "member_name": r.member.full_name if r.member else None,
          "booking_id": r.booking_id, "guest_name": r.booking.guest_name if r.booking else None,
-         "recipe_id": r.recipe_id, "recipe_name": r.recipe.name if r.recipe else None,
+         "menu_item_id": r.menu_item_id, "menu_item_name": r.menu_item.name if r.menu_item else None,
          "date": r.date, "meal_type": r.meal_type.value, "status": r.status.value, "method": r.method,
          "booked_at": r.booked_at, "marked_at": r.marked_at, "marked_by": r.marked_by} for r in records], "total": total}
 
@@ -149,7 +149,7 @@ async def book_attendance(data: MealAttendanceCreate, request: Request, db: Sess
         raise HTTPException(status_code=400, detail=f"Attendance for {data.meal_type} on {data.date} is final - booking closed at {cutoff.strftime('%H:%M')}")
 
     try:
-        record = _create_attendance(db, data.member_id, data.booking_id, data.date, data.meal_type, data.method, data.recipe_id, data.guest_id)
+        record = _create_attendance(db, data.member_id, data.booking_id, data.date, data.meal_type, data.method, data.menu_item_id, data.guest_id)
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="This member/guest already has a booking for that meal/date")
@@ -226,7 +226,7 @@ async def lookup_attendance(
         rec = member_rows.get(m.id)
         results.append(AttendanceLookupResult(
             kind="member", id=m.id, name=m.full_name, sub_label=m.service_number,
-            recipe_id=rec.recipe_id if rec else None,
+            menu_item_id=rec.menu_item_id if rec else None,
             attendance_id=rec.id if rec else None,
             attendance_status=rec.status.value if rec else None,
         ))
@@ -246,7 +246,7 @@ async def lookup_attendance(
         rec = booking_rows.get(b.id)
         results.append(AttendanceLookupResult(
             kind="booking", id=b.id, name=b.guest_name, sub_label=b.room.room_number if b.room else None,
-            recipe_id=rec.recipe_id if rec else None,
+            menu_item_id=rec.menu_item_id if rec else None,
             attendance_id=rec.id if rec else None,
             attendance_status=rec.status.value if rec else None,
         ))
@@ -271,7 +271,7 @@ async def lookup_attendance(
         rec = guest_rows.get(g.id)
         results.append(AttendanceLookupResult(
             kind="guest", id=g.id, name=g.full_name, sub_label=g.phone or "Guest",
-            recipe_id=rec.recipe_id if rec else None,
+            menu_item_id=rec.menu_item_id if rec else None,
             attendance_id=rec.id if rec else None,
             attendance_status=rec.status.value if rec else None,
         ))
@@ -319,11 +319,11 @@ async def serve_meal(data: ServeAttendanceRequest, request: Request, db: Session
 
     before = serialize_model(record) if record else None
     if record is None:
-        record = MealAttendance(member_id=data.member_id, booking_id=data.booking_id, guest_id=data.guest_id, recipe_id=data.recipe_id,
+        record = MealAttendance(member_id=data.member_id, booking_id=data.booking_id, guest_id=data.guest_id, menu_item_id=data.menu_item_id,
                                  date=data.date, meal_type=data.meal_type, method="manual")
         db.add(record)
-    elif data.recipe_id is not None:
-        record.recipe_id = data.recipe_id
+    elif data.menu_item_id is not None:
+        record.menu_item_id = data.menu_item_id
     record.status = AttendanceStatus.ATTENDED
     record.marked_at = datetime.utcnow()
     record.marked_by = current_user.id
@@ -380,7 +380,7 @@ async def no_show_sweep(
             kind=kind,
             id=r.member_id or r.booking_id or r.guest_id,
             name=r.member.full_name if r.member else (r.booking.guest_name if r.booking else (r.guest.full_name if r.guest else "Unknown")),
-            sub_label=None, recipe_id=r.recipe_id, attendance_id=r.id, attendance_status=r.status.value,
+            sub_label=None, menu_item_id=r.menu_item_id, attendance_id=r.id, attendance_status=r.status.value,
         ))
         log_audit(db, current_user.id, current_user.full_name, AuditAction.OVERRIDE, "meal_attendance", r.id,
                   before_state=before, after_state=serialize_model(r), reason="no-show sweep", ip_address=request.client.host)
@@ -443,7 +443,7 @@ async def list_attendees(
             kind, name, sub_label = "guest", r.guest.full_name if r.guest else "Unknown", r.guest.phone if r.guest else None
         out.append({
             "attendance_id": r.id, "kind": kind, "name": name, "sub_label": sub_label,
-            "recipe_name": r.recipe.name if r.recipe else None, "status": r.status.value,
+            "menu_item_name": r.menu_item.name if r.menu_item else None, "status": r.status.value,
         })
     out.sort(key=lambda x: x["name"] or "")
     return out

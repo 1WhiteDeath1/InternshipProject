@@ -49,6 +49,10 @@ class BookingBase(BaseModel):
     reference_person: Optional[str] = Field(None, max_length=100)
     attendant_id: Optional[int] = None
     stay_type: Optional[str] = None
+    # Non-HRA open-ended stay - no known departure date yet. The submitted
+    # check_out is ignored server-side and replaced with a far-future
+    # placeholder (see create_booking); real checkout re-prices to actual nights.
+    is_indefinite: bool = False
 
     @model_validator(mode="after")
     def _check_dates(self):

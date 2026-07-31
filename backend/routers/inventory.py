@@ -8,8 +8,7 @@ from backend.database import get_db
 from backend.config import UPLOADS_DIR
 from backend.models import (
     InventoryCategory, InventoryItem, StockBatch, StockMovement,
-    WasteLog, CycleCount, Alert, AlertSeverity, AlertStatus,
-    PurchaseOrderItem, PurchaseOrder, Vendor,
+    WasteLog, CycleCount, Alert, AlertSeverity, AlertStatus, Vendor,
 )
 from backend.schemas import (
     InventoryCategoryCreate, InventoryItemCreate, InventoryItemUpdate,
@@ -76,36 +75,21 @@ async def list_items(
         for b in all_batches:
             batches_by_item.setdefault(b.item_id, []).append(b)
 
-    # Price Memory: most recent PurchaseOrderItem per item (one join query for the
-    # whole page, ordered newest-first so the first row per item_id wins), plus
-    # the vendors it references - avoids a per-item lookup on every list request.
-    last_po_by_item = {}
-    vendors_by_id = {}
-    if item_ids:
-        po_rows = (
-            db.query(PurchaseOrderItem, PurchaseOrder)
-            .join(PurchaseOrder, PurchaseOrderItem.po_id == PurchaseOrder.id)
-            .filter(PurchaseOrderItem.item_id.in_(item_ids))
-            .order_by(PurchaseOrder.created_at.desc())
-            .all()
-        )
-        for poi, po in po_rows:
-            last_po_by_item.setdefault(poi.item_id, (poi, po))
-        vendor_ids = {po.vendor_id for _, po in last_po_by_item.values()}
-        if vendor_ids:
-            vendors_by_id = {v.id: v for v in db.query(Vendor).filter(Vendor.id.in_(vendor_ids)).all()}
-
-    # Most recent StockBatch per item too - Daily Stock Intake and Smart
-    # Intake (receipt scan) write price history here, bypassing the
-    # PurchaseOrder flow entirely, so an item bought only through those
-    # paths would otherwise show no last price at all. Whichever source is
-    # more recent wins.
+    # Price Memory: most recent priced StockBatch per item - Daily Stock
+    # Intake and Smart Intake (receipt scan) are the only purchase-history
+    # source now that the mess buys directly (no PO flow). One query for
+    # the whole page's batches (already fetched above) plus the vendors
+    # they reference, instead of a per-item lookup.
     last_batch_by_item = {}
     if item_ids:
         for iid, batches in batches_by_item.items():
             priced = [b for b in batches if b.unit_cost]
             if priced:
                 last_batch_by_item[iid] = max(priced, key=lambda b: b.created_at)
+    vendors_by_id = {}
+    vendor_ids = {b.vendor_id for b in last_batch_by_item.values() if b.vendor_id}
+    if vendor_ids:
+        vendors_by_id = {v.id: v for v in db.query(Vendor).filter(Vendor.id.in_(vendor_ids)).all()}
 
     result = []
     for item in items:
@@ -116,18 +100,11 @@ async def list_items(
         if low_stock and not is_low:
             continue
 
-        last_po = last_po_by_item.get(item.id)
         last_batch = last_batch_by_item.get(item.id)
-
-        use_batch = last_batch is not None and (last_po is None or last_batch.created_at >= last_po[1].created_at)
-        if use_batch:
+        if last_batch:
             last_unit_cost = float(last_batch.unit_cost)
-            last_vendor = None
+            last_vendor = vendors_by_id.get(last_batch.vendor_id) if last_batch.vendor_id else None
             last_purchased_at = last_batch.created_at.strftime("%d-%m-%y") if last_batch.created_at else None
-        elif last_po:
-            last_unit_cost = float(last_po[0].unit_price)
-            last_vendor = vendors_by_id.get(last_po[1].vendor_id)
-            last_purchased_at = last_po[1].created_at.strftime("%d-%m-%y")
         else:
             last_unit_cost = None
             last_vendor = None
@@ -137,7 +114,6 @@ async def list_items(
             "id": item.id, "sku": item.sku, "name": item.name,
             "category_id": item.category_id, "category_name": item.category.name if item.category else None,
             "description": item.description, "unit": item.unit,
-            "ingredient_type": item.ingredient_type.value if item.ingredient_type else None,
             "reorder_level": item.reorder_level, "reorder_quantity": item.reorder_quantity,
             "is_active": item.is_active, "created_at": item.created_at,
             "total_stock": total_stock,
@@ -397,12 +373,19 @@ async def record_stock_intake(
     )
     prev_unit_price = float(prev_batch.unit_cost) if prev_batch and prev_batch.unit_cost else None
 
+    vendor = None
+    if data.vendor_id:
+        vendor = db.query(Vendor).filter(Vendor.id == data.vendor_id, Vendor.is_active == True).first()
+        if not vendor:
+            raise HTTPException(status_code=404, detail="Vendor not found")
+
     batch_number = f"SI-{item.id}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
     batch = StockBatch(
         item_id=data.item_id,
         batch_number=batch_number,
         quantity=data.quantity,
         unit_cost=unit_price,
+        vendor_id=data.vendor_id,
         received_date=date.today(),
     )
     db.add(batch)
@@ -425,7 +408,7 @@ async def record_stock_intake(
     log_audit(
         db, current_user.id, current_user.full_name,
         AuditAction.CREATE, "stock_intake", batch.id,
-        after_state={"item_id": data.item_id, "item_name": item.name, "quantity": data.quantity, "total_cost": data.total_cost, "unit_price": unit_price},
+        after_state={"item_id": data.item_id, "item_name": item.name, "quantity": data.quantity, "total_cost": data.total_cost, "unit_price": unit_price, "vendor_id": data.vendor_id},
         ip_address=request.client.host,
     )
 
@@ -446,6 +429,8 @@ async def record_stock_intake(
         "prev_unit_price": prev_unit_price,
         "price_diff": price_diff,
         "price_diff_pct": price_diff_pct,
+        "vendor_id": vendor.id if vendor else None,
+        "vendor_name": vendor.name if vendor else None,
     }
 
 
@@ -463,6 +448,8 @@ async def recent_stock_intakes(
         .limit(limit)
         .all()
     )
+    vendor_ids = {b.vendor_id for b, _ in batches if b.vendor_id}
+    vendors_by_id = {v.id: v.name for v in db.query(Vendor).filter(Vendor.id.in_(vendor_ids)).all()} if vendor_ids else {}
     return [
         {
             "id": b.id,
@@ -472,8 +459,44 @@ async def recent_stock_intakes(
             "unit": item.unit,
             "unit_cost": float(b.unit_cost) if b.unit_cost else 0,
             "total_cost": round(b.quantity * float(b.unit_cost), 2) if b.unit_cost else 0,
+            "vendor_id": b.vendor_id,
+            "vendor_name": vendors_by_id.get(b.vendor_id),
             "received_date": b.received_date.isoformat() if b.received_date else None,
             "created_at": b.created_at.isoformat() if b.created_at else None,
+        }
+        for b, item in batches
+    ]
+
+
+@router.get("/expiring")
+async def expiring_batches(
+    days: int = Query(3, ge=1, le=90),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Batches expiring within `days` - the same signal check_expiring_items()
+    (backend/alerts.py) generates as an Alert, surfaced here directly for the
+    Kitchen NCO dashboard (which has no alerts:view) without writing an
+    Alert row on every dashboard load."""
+    cutoff = date.today() + timedelta(days=days)
+    batches = (
+        db.query(StockBatch, InventoryItem)
+        .join(InventoryItem, StockBatch.item_id == InventoryItem.id)
+        .filter(
+            StockBatch.expiry_date.isnot(None),
+            StockBatch.expiry_date <= cutoff,
+            StockBatch.expiry_date >= date.today(),
+            StockBatch.is_active == True,
+            StockBatch.quantity > 0,
+        )
+        .order_by(StockBatch.expiry_date.asc())
+        .all()
+    )
+    return [
+        {
+            "batch_id": b.id, "item_id": b.item_id, "item_name": item.name,
+            "quantity": b.quantity, "unit": item.unit,
+            "expiry_date": b.expiry_date.isoformat(),
         }
         for b, item in batches
     ]

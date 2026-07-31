@@ -116,6 +116,7 @@ async def list_rooms(
             "current_check_out": current.check_out if current else None,
             "current_booking_id": current.id if current else None,
             "current_nature_of_duty": current.nature_of_duty if current else None,
+            "current_is_indefinite": bool(current and current.is_indefinite),
             # Guest's scheduled departure has arrived/passed - the desk must
             # extend the stay or check them out.
             "checkout_due": bool(current and current.nature_of_duty != "hra" and current.check_out <= date.today()),
@@ -310,7 +311,7 @@ async def room_calendar(
             "guest_name": current.guest_name, "guest_phone": current.guest_phone,
             "rank": current.rank, "check_in": current.check_in, "check_out": current.check_out,
             "total_amount": float(current.total_amount) if current.total_amount else 0,
-            "nature_of_duty": current.nature_of_duty,
+            "nature_of_duty": current.nature_of_duty, "is_indefinite": bool(current.is_indefinite),
             # Full profile for the occupied-room panel
             "client_category": current.client_category.value if current.client_category else None,
             "guest_id_type": current.guest_id_type, "guest_id_number": current.guest_id_number,
@@ -444,21 +445,36 @@ async def calendar_summary(
             d = start + timedelta(days=i)
             occupied = reserved = arrivals = departures = 0
             guests = []
+            # Same occupancy-kind split the grid views colour by, aggregated
+            # per day so a month cell can show its mix (how much of today's
+            # occupancy is long-term residency vs actual room turnover)
+            # rather than only a single occupied/total ratio.
+            kind_counts = {"hra": 0, "indefinite": 0, "guest": 0, "reserved": 0}
             for b in bookings:
                 occupying = b.check_in <= d < b.check_out
                 if occupying and b.status.value in ("checked_in", "checked_out"):
                     occupied += 1
+                    if b.nature_of_duty == "hra":
+                        kind_counts["hra"] += 1
+                    elif b.is_indefinite:
+                        kind_counts["indefinite"] += 1
+                    else:
+                        kind_counts["guest"] += 1
                 elif occupying and b.status.value == "confirmed":
                     reserved += 1
+                    kind_counts["reserved"] += 1
                 if occupying:
                     guests.append({"guest_name": b.guest_name, "rank": b.rank, "room_id": b.room_id,
-                                    "room_number": b.room.room_number if b.room else None, "status": b.status.value})
+                                    "room_number": b.room.room_number if b.room else None, "status": b.status.value,
+                                    "nature_of_duty": b.nature_of_duty or "visit",
+                                    "is_indefinite": bool(b.is_indefinite)})
                 if b.check_in == d:
                     arrivals += 1
                 if b.check_out == d and b.status.value in ("checked_in", "checked_out"):
                     departures += 1
             result.append({"date": d, "total_rooms": total_rooms, "occupied": occupied,
-                            "reserved": reserved, "arrivals": arrivals, "departures": departures, "guests": guests})
+                            "reserved": reserved, "arrivals": arrivals, "departures": departures,
+                            "kind_counts": kind_counts, "guests": guests})
         return {"granularity": "day", "start": start, "end": end, "days": result}
 
     months = []
@@ -491,6 +507,32 @@ async def calendar_summary(
             "bookings_count": bookings_count, "revenue": float(revenue),
         })
     return {"granularity": "month", "start": start, "end": end, "months": result}
+
+
+def _grid_cell(d: date, booking, in_maintenance: bool) -> dict:
+    """One room x day cell for the Calendar tab's grid views.
+
+    Carries the booking's KIND (nature_of_duty) and open-endedness alongside
+    the coarse status, so the UI can colour an HRA residency differently from
+    a night's guest stay, and can mark a stay whose stored check_out is a
+    far-future placeholder rather than a real departure date (is_indefinite -
+    see create_booking). booking_status is kept distinct from status because
+    'occupied' covers both checked_in and checked_out: only a still-open stay
+    should render as continuing past the window edge."""
+    if in_maintenance:
+        return {"date": d, "status": "maintenance", "guest_name": None, "booking_reference": None,
+                "nature_of_duty": None, "is_indefinite": False, "booking_status": None}
+    if booking:
+        return {
+            "date": d,
+            "status": "occupied" if booking.status.value in ("checked_in", "checked_out") else "reserved",
+            "guest_name": booking.guest_name, "booking_reference": booking.booking_reference,
+            "nature_of_duty": booking.nature_of_duty or "visit",
+            "is_indefinite": bool(booking.is_indefinite),
+            "booking_status": booking.status.value,
+        }
+    return {"date": d, "status": "vacant", "guest_name": None, "booking_reference": None,
+            "nature_of_duty": None, "is_indefinite": False, "booking_status": None}
 
 
 @router.get("/room-week")
@@ -527,16 +569,7 @@ async def room_week(
     result = []
     for r in rooms:
         in_maintenance = r.status == RoomStatus.MAINTENANCE
-        cells = []
-        for d in date_list:
-            booking = by_room_day.get((r.id, d))
-            if in_maintenance:
-                cells.append({"date": d, "status": "maintenance", "guest_name": None, "booking_reference": None})
-            elif booking:
-                status = "occupied" if booking.status.value in ("checked_in", "checked_out") else "reserved"
-                cells.append({"date": d, "status": status, "guest_name": booking.guest_name, "booking_reference": booking.booking_reference})
-            else:
-                cells.append({"date": d, "status": "vacant", "guest_name": None, "booking_reference": None})
+        cells = [_grid_cell(d, by_room_day.get((r.id, d)), in_maintenance) for d in date_list]
         result.append({
             "id": r.id, "room_number": r.room_number, "room_type": r.room_type.value,
             "floor": r.floor, "cells": cells,
@@ -582,16 +615,7 @@ async def room_month(
     result = []
     for r in rooms:
         in_maintenance = r.status == RoomStatus.MAINTENANCE
-        cells = []
-        for d in date_list:
-            booking = by_room_day.get((r.id, d))
-            if in_maintenance:
-                cells.append({"date": d, "status": "maintenance", "guest_name": None, "booking_reference": None})
-            elif booking:
-                status = "occupied" if booking.status.value in ("checked_in", "checked_out") else "reserved"
-                cells.append({"date": d, "status": status, "guest_name": booking.guest_name, "booking_reference": booking.booking_reference})
-            else:
-                cells.append({"date": d, "status": "vacant", "guest_name": None, "booking_reference": None})
+        cells = [_grid_cell(d, by_room_day.get((r.id, d)), in_maintenance) for d in date_list]
         result.append({
             "id": r.id, "room_number": r.room_number, "room_type": r.room_type.value,
             "floor": r.floor, "cells": cells,
@@ -789,7 +813,28 @@ async def create_booking(data: BookingCreate, request: Request, db: Session = De
     # pushed forward automatically each time mess_billing.generate_bills
     # bills this resident (see that function). This lets occupancy/overlap/
     # timeline logic keep treating every booking as date-bounded, unchanged.
-    check_out = data.check_in + timedelta(days=365) if data.nature_of_duty == "hra" else data.check_out
+    #
+    # A non-HRA "indefinite stay" (data.is_indefinite) gets the same
+    # placeholder-date treatment but WITHOUT a renewal job - HRA's rolling
+    # window only exists because HRA residents are billed monthly; regular
+    # guests are billed per-stay at actual checkout (never an open running
+    # tab, per policy), so a single long window is enough and real checkout
+    # always overwrites it via the normal early-departure re-pricing path.
+    # pricing_check_out drives compute_booking_price separately from the
+    # stored check_out for an indefinite stay: the pricing engine multiplies
+    # nightly rate x nights (unlike HRA's flat monthly_total), so pricing off
+    # the 3650-day placeholder would produce a nonsense total. Price it as a
+    # single night instead - real checkout always re-prices to actual nights
+    # via reprice_for_departure regardless of what total_amount started as.
+    if data.nature_of_duty == "hra":
+        check_out = data.check_in + timedelta(days=365)
+        pricing_check_out = check_out
+    elif data.is_indefinite:
+        check_out = data.check_in + timedelta(days=3650)
+        pricing_check_out = data.check_in + timedelta(days=1)
+    else:
+        check_out = data.check_out
+        pricing_check_out = check_out
 
     # Arrival deadline: the guest must be checked in by this time or staff may
     # void the booking. Defaults to the deadline hour on the check-in day; a
@@ -818,7 +863,7 @@ async def create_booking(data: BookingCreate, request: Request, db: Session = De
                             detail=f"Room {room.room_number} accommodates at most {room.capacity} guest(s); this booking has {guest_count} (adults + children)")
 
     pricing = compute_booking_price(
-        db, room, check_in=data.check_in, check_out=check_out,
+        db, room, check_in=data.check_in, check_out=pricing_check_out,
         client_category=data.client_category, nature_of_duty=data.nature_of_duty,
         rank=(member.rank if member else data.rank), da_multiplier=data.da_multiplier,
         mattress_count=data.mattress_count, member_id=data.member_id,
@@ -838,7 +883,7 @@ async def create_booking(data: BookingCreate, request: Request, db: Session = De
         rank=(member.rank if member else data.rank), pa_number=data.pa_number, unit_address=data.unit_address,
         reference_person=(data.reference_person or "").strip() or None,
         nature_of_duty=data.nature_of_duty, da_multiplier=data.da_multiplier,
-        mattress_count=data.mattress_count,
+        mattress_count=data.mattress_count, is_indefinite=data.is_indefinite,
         source=data.source, online_voucher_no=(data.online_voucher_no or "").strip() or None,
         advance_payment_amount=data.advance_payment_amount if data.source == "online" else 0,
         advance_paid_at=data.advance_paid_at if data.source == "online" else None,
@@ -1066,6 +1111,115 @@ async def end_residency(booking_id: int, request: Request, db: Session = Depends
     return {"message": f"Residency ended - Room {booking.room.room_number} sent to housekeeping. Final charges settle via the monthly Mess Bill."}
 
 
+@router.put("/{booking_id}/category")
+async def override_booking_category(booking_id: int, data: dict, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Manager-only override of a booking's client_category (e.g. a guest was
+    logged as civilian but is actually a retired officer) - re-prices the
+    stay with the pricing engine so the bill total stays consistent with the
+    corrected category. Narrow "approve" action, not general bookings:edit -
+    this is Manager's one specific lever into Bookings, not full access to
+    the module (see access.py's Manager "bookings": "A" comment)."""
+    if not check_permission(current_user, "bookings", "approve"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.status == BookingStatus.CHECKED_OUT:
+        raise HTTPException(status_code=400, detail="Booking is already checked out - use a bill line-item correction instead of a category override")
+    if booking.status in (BookingStatus.CANCELLED, BookingStatus.NO_SHOW):
+        raise HTTPException(status_code=400, detail=f"Cannot change category on a {booking.status.value} booking")
+
+    new_category = (data or {}).get("client_category")
+    if not new_category:
+        raise HTTPException(status_code=400, detail="client_category is required")
+
+    before = serialize_model(booking)
+    booking.client_category = new_category
+    pricing = compute_booking_price(
+        db, booking.room, check_in=booking.check_in, check_out=booking.check_out,
+        client_category=new_category, nature_of_duty=booking.nature_of_duty,
+        rank=booking.rank, da_multiplier=float(booking.da_multiplier) if booking.da_multiplier else None,
+        mattress_count=booking.mattress_count or 0, member_id=booking.member_id, stay_type=booking.stay_type,
+        discount_rate=float(booking.discount_rate) if booking.discount_rate else 0,
+    )
+    booking.total_amount = pricing["total"] + (float(booking.late_checkout_fee) if booking.late_checkout_fee else 0)
+    booking.rate_breakdown = json.dumps(pricing)
+    db.commit()
+    db.refresh(booking)
+
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.OVERRIDE, "bookings", booking.id,
+              before_state=before, after_state=serialize_model(booking),
+              reason=(data or {}).get("reason") or f"Category overridden to {new_category}", ip_address=request.client.host)
+    return {"message": f"Category updated to {new_category}", "total_amount": float(booking.total_amount)}
+
+
+@router.get("/current-guests")
+async def list_current_guests(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Every currently checked-in, non-HRA guest for the Guest Discounts page
+    - HRA residents settle through the monthly Mess Bill and are managed on
+    the separate Member Discounts page instead (see mess_billing.py's
+    custom_discount_rate). Same narrow "approve" gate as the category
+    override above - Manager's one specific lever into Bookings."""
+    if not check_permission(current_user, "bookings", "approve"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    bookings = db.query(Booking).options(joinedload(Booking.room)).filter(
+        Booking.status == "checked_in",
+        or_(Booking.nature_of_duty.is_(None), Booking.nature_of_duty != "hra"),
+    ).order_by(Booking.check_in.desc()).all()
+    return [{
+        "id": b.id, "guest_name": b.guest_name, "rank": b.rank,
+        "room_number": b.room.room_number if b.room else None,
+        "client_category": b.client_category.value if b.client_category else None,
+        "discount_rate": float(b.discount_rate) if b.discount_rate else 0,
+        "total_amount": float(b.total_amount) if b.total_amount else 0,
+        "check_in": b.check_in, "check_out": b.check_out,
+    } for b in bookings]
+
+
+@router.put("/{booking_id}/discount")
+async def override_booking_discount(booking_id: int, data: dict, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Manager-only standing discount on a currently in-house guest's stay
+    (Guest Discounts page). Stored on the booking and applied inside
+    compute_booking_price() - not a one-off edit to total_amount - so it
+    survives every re-price this stay goes through afterward (category
+    change, early/late actual checkout). No invoice exists yet for an
+    in-house guest (this app bills at checkout, not before), which is why
+    this can't reuse the Clerk Desk master-invoice discount action. Same
+    narrow "approve" gate as the category override above."""
+    if not check_permission(current_user, "bookings", "approve"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.status == BookingStatus.CHECKED_OUT:
+        raise HTTPException(status_code=400, detail="Booking is already checked out - use a bill line-item correction instead of a discount override")
+    if booking.status in (BookingStatus.CANCELLED, BookingStatus.NO_SHOW):
+        raise HTTPException(status_code=400, detail=f"Cannot change discount on a {booking.status.value} booking")
+
+    discount_rate = (data or {}).get("discount_rate")
+    if discount_rate is None or not (0 <= discount_rate <= 100):
+        raise HTTPException(status_code=400, detail="discount_rate is required and must be between 0 and 100")
+
+    before = serialize_model(booking)
+    booking.discount_rate = discount_rate
+    pricing = compute_booking_price(
+        db, booking.room, check_in=booking.check_in, check_out=booking.check_out,
+        client_category=booking.client_category, nature_of_duty=booking.nature_of_duty,
+        rank=booking.rank, da_multiplier=float(booking.da_multiplier) if booking.da_multiplier else None,
+        mattress_count=booking.mattress_count or 0, member_id=booking.member_id, stay_type=booking.stay_type,
+        discount_rate=discount_rate,
+    )
+    booking.total_amount = pricing["total"] + (float(booking.late_checkout_fee) if booking.late_checkout_fee else 0)
+    booking.rate_breakdown = json.dumps(pricing)
+    db.commit()
+    db.refresh(booking)
+
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.OVERRIDE, "bookings", booking.id,
+              before_state=before, after_state=serialize_model(booking),
+              reason=(data or {}).get("reason") or f"Discount set to {discount_rate}%", ip_address=request.client.host)
+    return {"message": f"Discount updated to {discount_rate}%", "total_amount": float(booking.total_amount)}
+
+
 @router.post("/{booking_id}/extend")
 async def extend_booking(booking_id: int, data: dict, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """Extend a checked-in guest's stay to a new checkout date.
@@ -1129,6 +1283,7 @@ async def extend_booking(booking_id: int, data: dict, request: Request, db: Sess
         client_category=booking.client_category, nature_of_duty=booking.nature_of_duty,
         rank=booking.rank, da_multiplier=float(booking.da_multiplier) if booking.da_multiplier else None,
         mattress_count=booking.mattress_count or 0, member_id=booking.member_id,
+        discount_rate=float(booking.discount_rate) if booking.discount_rate else 0,
     )
 
     transferred = target_room.id != booking.room_id
@@ -1320,6 +1475,10 @@ async def list_movements(booking_id: int = 0, page: int = Query(1, ge=1), page_s
 
 @router.get("/occupancy")
 async def get_occupancy(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    # Returns guest names/rooms/arrival-departure lists - PII, not just a
+    # room-count summary, so it needs the same gate as the rest of Bookings.
+    if not check_permission(current_user, "bookings", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     rooms = db.query(Room).filter(Room.is_active == True).all()
     states = _derived_states(db, rooms, date.today())
     counts = {"occupied": 0, "reserved": 0, "maintenance": 0, "vacant": 0}

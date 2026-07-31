@@ -25,7 +25,6 @@ class InventoryItemBase(BaseModel):
     unit: str = Field(..., min_length=1, max_length=50)
     reorder_level: float = 0
     reorder_quantity: float = 0
-    ingredient_type: Optional[str] = None  # "liquid" | "powder" | "granular" | "solid_pieces" | None
 
 class InventoryItemCreate(InventoryItemBase):
     pass
@@ -38,7 +37,6 @@ class InventoryItemUpdate(BaseModel):
     unit: Optional[str] = None
     reorder_level: Optional[float] = None
     reorder_quantity: Optional[float] = None
-    ingredient_type: Optional[str] = None
 
 class InventoryItemOut(InventoryItemBase):
     model_config = ConfigDict(from_attributes=True)
@@ -106,6 +104,7 @@ class StockIntakeCreate(BaseModel):
     item_id: int
     quantity: float = Field(..., gt=0)
     total_cost: float = Field(..., gt=0)
+    vendor_id: Optional[int] = None
 
 
 class ReceiptConfirmLine(BaseModel):

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import api, { getErrorMessage } from '@/lib/api';
+import { useAuth } from '@/contexts/useAuth';
+import { hasPermission } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -8,45 +10,61 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { ChefHat, Plus, Trash2, Flame, XCircle, Factory, AlertTriangle, UtensilsCrossed, Receipt } from 'lucide-react';
+import { ChefHat, Plus, Flame, XCircle, Factory, AlertTriangle, UtensilsCrossed, Receipt, ClipboardList } from 'lucide-react';
+import { formatCurrency } from '@/lib/currency';
 import { defaultMealForNow } from '@/lib/mealDefaults';
-import RecipeIngredientEditor, { type Ingredient, type InventoryItemOption } from '@/components/RecipeIngredientEditor';
-import { GuestChargePanel } from '@/components/GuestChargePanel';
+import { OrderHistoryDialog } from '@/components/OrderHistoryDialog';
 import { MealServiceTab } from '@/pages/kitchen/MealServiceTab';
 
-interface Recipe { id: number; name: string; description: string | null; menu_category: string | null; portions: number; is_active: boolean; ingredients: Ingredient[]; }
+interface MenuItem { id: number; name: string; meal_type: string; day_of_week: string | null; price: number; is_active: boolean; }
+interface MenuEditRequest {
+  id: number; menu_item_id: number | null; is_new_item: boolean;
+  original_name: string | null; original_price: number | null;
+  proposed_name: string; proposed_price: number; proposed_meal_type: string; proposed_day_of_week: string | null;
+  reason: string | null; status: string; requested_by_name: string | null; requested_at: string;
+}
 interface KitchenOrder {
-  id: number; recipe_id: number; recipe_name: string | null; quantity_ordered: number;
-  actual_portions: number | null; food_cost: number | null; status: string; notes: string | null; created_at: string;
+  id: number; menu_item_id: number; menu_item_name: string | null; quantity_ordered: number;
+  actual_portions: number | null; status: string; notes: string | null; created_at: string;
   is_ala_carte: boolean; consumer_type: string | null; member_id: number | null; booking_id: number | null;
   consumer_name: string | null; sla_minutes: number | null; due_at: string | null; cooking_started_at: string | null;
 }
-interface SuggestedOrder { recipe_id: number; recipe_name: string | null; suggested_quantity: number; }
+interface SuggestedOrder { menu_item_id: number; menu_item_name: string | null; suggested_quantity: number; }
 interface MemberOption { id: number; full_name: string; service_number: string; }
 interface BookingOption { id: number; guest_name: string; room_number: string; }
-interface LateOrder { id: number; recipe_name: string | null; consumer_name: string | null; due_at: string | null; }
+interface LateOrder { id: number; menu_item_name: string | null; consumer_name: string | null; due_at: string | null; }
+interface GasRate { percentage: number; updated_at: string | null; }
+interface MessChargeOverviewRow {
+  consumer_type: 'member' | 'guest'; consumer_id: number; name: string;
+  sub_label: string | null; unbilled_mess_total: number;
+}
 
 const MEAL_TYPES = ['breakfast', 'lunch', 'hitea', 'dinner'];
-const emptyRecipeForm = { name: '', description: '', menu_category: 'breakfast', portions: 1 };
-const emptyAlaCarteForm = { recipe_id: 0, consumer_kind: 'guest' as 'member' | 'guest', consumer_id: 0, quantity: 1, sla_minutes: 45 };
+const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+const emptyProposalForm = { name: '', price: 0, meal_type: 'lunch', day_of_week: '', reason: '' };
+const emptyAlaCarteForm = { menu_item_id: 0, consumer_kind: 'guest' as 'member' | 'guest', consumer_id: 0, quantity: 1, sla_minutes: 45 };
 
 export default function Kitchen() {
   const location = useLocation();
   const navigate = useNavigate();
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
-  const [items, setItems] = useState<InventoryItemOption[]>([]);
+  const { user } = useAuth();
+  const canProposeMenu = hasPermission(user, 'menu', 'create') || hasPermission(user, 'menu', 'edit');
+  const canEditRates = hasPermission(user, 'mess_rates', 'edit');
+
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [myRequests, setMyRequests] = useState<MenuEditRequest[]>([]);
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [recipeDialogOpen, setRecipeDialogOpen] = useState(false);
-  const [editingRecipeId, setEditingRecipeId] = useState<number | null>(null);
-  const [recipeForm, setRecipeForm] = useState(emptyRecipeForm);
-  const [recipeIngredients, setRecipeIngredients] = useState<Ingredient[]>([]);
+  const [proposalDialogOpen, setProposalDialogOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
+  const [proposalForm, setProposalForm] = useState(emptyProposalForm);
 
   const [showManual, setShowManual] = useState(false);
-  const [orderRecipeId, setOrderRecipeId] = useState(0);
+  const [orderMenuItemId, setOrderMenuItemId] = useState(0);
   const [orderQuantity, setOrderQuantity] = useState(1);
 
   const [prodDate, setProdDate] = useState(new Date().toISOString().slice(0, 10));
@@ -60,20 +78,25 @@ export default function Kitchen() {
   const [lateOrders, setLateOrders] = useState<LateOrder[]>([]);
   const [alaCarteDialogOpen, setAlaCarteDialogOpen] = useState(false);
   const [alaCarteForm, setAlaCarteForm] = useState(emptyAlaCarteForm);
-  const [showNewRecipeInline, setShowNewRecipeInline] = useState(false);
-  const [newRecipeForm, setNewRecipeForm] = useState(emptyRecipeForm);
-  const [newRecipeIngredients, setNewRecipeIngredients] = useState<Ingredient[]>([]);
   const [now, setNow] = useState(() => Date.now()); // ticks every second to redraw live countdowns
-  const [chargeBookingId, setChargeBookingId] = useState(0);
 
-  const fetchRecipes = async () => {
-    try { const res = await api.get('/recipes?page_size=100'); setRecipes(res.data.items); }
-    catch { toast.error('Failed to load recipes'); }
+  const [gasRate, setGasRate] = useState<GasRate>({ percentage: 0, updated_at: null });
+  const [gasRateInput, setGasRateInput] = useState('');
+
+  const [overviewRows, setOverviewRows] = useState<MessChargeOverviewRow[]>([]);
+  const [overviewFilter, setOverviewFilter] = useState<'all' | 'member' | 'guest'>('all');
+  const [overviewLoading, setOverviewLoading] = useState(true);
+  const [historyTarget, setHistoryTarget] = useState<MessChargeOverviewRow | null>(null);
+
+  const fetchMenu = async () => {
+    try { const res = await api.get('/kitchen/menu'); setMenuItems(res.data); }
+    catch { toast.error('Failed to load menu'); }
   };
 
-  const fetchItems = async () => {
-    try { const res = await api.get('/inventory/items?page_size=100'); setItems(res.data.items); }
-    catch { toast.error('Failed to load inventory items'); }
+  const fetchMyRequests = async () => {
+    if (!canProposeMenu) return;
+    try { const res = await api.get('/kitchen/menu/edit-requests?status=pending'); setMyRequests(res.data); }
+    catch { /* secondary */ }
   };
 
   const fetchOrders = async () => {
@@ -103,12 +126,31 @@ export default function Kitchen() {
     catch { /* banner is best-effort, not critical */ }
   };
 
+  const fetchGasRate = async () => {
+    try {
+      const res = await api.get('/kitchen/gas-rate');
+      setGasRate(res.data);
+      setGasRateInput(String(res.data.percentage));
+    } catch { /* view/edit both permission-gated - fine if this 403s for other roles */ }
+  };
+
+  const fetchOverview = async () => {
+    setOverviewLoading(true);
+    try {
+      const res = await api.get(`/kitchen/mess-charges-overview?consumer_type=${overviewFilter}`);
+      setOverviewRows(res.data);
+    } catch { /* permission-gated for some roles, fine to silently show nothing */ }
+    finally { setOverviewLoading(false); }
+  };
+
   useEffect(() => {
     queueMicrotask(() => {
       setLoading(true);
-      Promise.all([fetchRecipes(), fetchItems(), fetchOrders(), fetchMembers(), fetchBookings(), fetchLateSummary()]).finally(() => setLoading(false));
+      Promise.all([fetchMenu(), fetchOrders(), fetchMembers(), fetchBookings(), fetchLateSummary(), fetchMyRequests(), fetchGasRate()]).finally(() => setLoading(false));
     });
   }, []);
+
+  useEffect(() => { queueMicrotask(() => { fetchOverview(); }); }, [overviewFilter]);
 
   useEffect(() => {
     queueMicrotask(() => { fetchSuggested(); });
@@ -123,40 +165,32 @@ export default function Kitchen() {
     return () => { clearInterval(poll); clearInterval(tick); };
   }, []);
 
-  const openCreateRecipe = () => {
-    setEditingRecipeId(null);
-    setRecipeForm(emptyRecipeForm);
-    setRecipeIngredients([]);
-    setRecipeDialogOpen(true);
+  const openProposeNew = () => {
+    setEditingItem(null);
+    setProposalForm(emptyProposalForm);
+    setProposalDialogOpen(true);
   };
 
-  const openEditRecipe = (r: Recipe) => {
-    setEditingRecipeId(r.id);
-    setRecipeForm({ name: r.name, description: r.description || '', menu_category: r.menu_category || 'breakfast', portions: r.portions });
-    setRecipeIngredients(r.ingredients.map(i => ({ item_id: i.item_id, quantity: i.quantity, unit: i.unit })));
-    setRecipeDialogOpen(true);
+  const openProposeEdit = (item: MenuItem) => {
+    setEditingItem(item);
+    setProposalForm({ name: item.name, price: item.price, meal_type: item.meal_type, day_of_week: item.day_of_week || '', reason: '' });
+    setProposalDialogOpen(true);
   };
 
-  const handleSaveRecipe = async () => {
-    if (!recipeForm.name.trim()) { toast.error('Recipe name is required'); return; }
-    const ingredients = recipeIngredients.filter(i => i.item_id && i.quantity > 0);
+  const handleSubmitProposal = async () => {
+    if (!proposalForm.name.trim()) { toast.error('Item name is required'); return; }
+    const body = { name: proposalForm.name, price: proposalForm.price, meal_type: proposalForm.meal_type, day_of_week: proposalForm.day_of_week || null, reason: proposalForm.reason || null };
     try {
-      if (editingRecipeId) {
-        await api.put(`/recipes/${editingRecipeId}`, { ...recipeForm, ingredients });
-        toast.success('Recipe updated');
+      if (editingItem) {
+        await api.put(`/kitchen/menu/${editingItem.id}`, body);
+        toast.success('Change submitted for Manager approval');
       } else {
-        await api.post('/recipes', { ...recipeForm, ingredients });
-        toast.success('Recipe created');
+        await api.post('/kitchen/menu', body);
+        toast.success('New item submitted for Manager approval');
       }
-      setRecipeDialogOpen(false);
-      fetchRecipes();
-    } catch (err) { toast.error(getErrorMessage(err, 'Failed to save recipe')); }
-  };
-
-  const handleDeactivateRecipe = async (id: number) => {
-    if (!confirm('Deactivate this recipe?')) return;
-    try { await api.delete(`/recipes/${id}`); toast.success('Recipe deactivated'); fetchRecipes(); }
-    catch (err) { toast.error(getErrorMessage(err, 'Failed')); }
+      setProposalDialogOpen(false);
+      fetchMyRequests();
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to submit proposal')); }
   };
 
   const handleGenerateOrders = async () => {
@@ -173,11 +207,11 @@ export default function Kitchen() {
   };
 
   const handleCreateOrder = async () => {
-    if (!orderRecipeId) { toast.error('Select a recipe to order'); return; }
+    if (!orderMenuItemId) { toast.error('Select a menu item to order'); return; }
     try {
-      await api.post('/kitchen/orders', { recipe_id: orderRecipeId, quantity_ordered: orderQuantity });
+      await api.post('/kitchen/orders', { menu_item_id: orderMenuItemId, quantity_ordered: orderQuantity });
       toast.success('Order added');
-      setOrderRecipeId(0);
+      setOrderMenuItemId(0);
       setOrderQuantity(1);
       setShowManual(false);
       fetchOrders();
@@ -185,13 +219,10 @@ export default function Kitchen() {
   };
 
   const handleCook = async (id: number) => {
-    try { await api.post(`/kitchen/orders/${id}/cook`, {}); toast.success('Cooked — inventory deducted'); fetchOrders(); }
+    try { await api.post(`/kitchen/orders/${id}/cook`, {}); toast.success('Cooked'); fetchOrders(); }
     catch (err) { toast.error(getErrorMessage(err, 'Failed to cook order')); }
   };
 
-  // Legacy "prepared" orders (created before one-tap cooking) already had their
-  // inventory deducted at prepare time, so finishing them just flips to served -
-  // never re-run the deduction via /cook, which would double-count stock.
   const handleFinishPrepared = async (id: number) => {
     try { await api.post(`/kitchen/orders/${id}/serve`); toast.success('Order finished'); fetchOrders(); }
     catch (err) { toast.error(getErrorMessage(err, 'Failed to finish order')); }
@@ -206,7 +237,7 @@ export default function Kitchen() {
       try { await api.post(`/kitchen/orders/${o.id}/cook`, {}); ok++; }
       catch { fail++; }
     }
-    toast[fail ? 'warning' : 'success'](`Cooked ${ok} order(s)${fail ? `, ${fail} failed (check stock)` : ''}`);
+    toast[fail ? 'warning' : 'success'](`Cooked ${ok} order(s)${fail ? `, ${fail} failed` : ''}`);
     setBusy(false);
     fetchOrders();
   };
@@ -218,9 +249,6 @@ export default function Kitchen() {
 
   const openAlaCarteDialog = (preset?: { consumer_kind: 'member' | 'guest'; consumer_id: number }) => {
     setAlaCarteForm({ ...emptyAlaCarteForm, ...preset });
-    setShowNewRecipeInline(false);
-    setNewRecipeForm(emptyRecipeForm);
-    setNewRecipeIngredients([]);
     setAlaCarteDialogOpen(true);
   };
 
@@ -243,24 +271,12 @@ export default function Kitchen() {
   }); // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state]);
 
-  const handleCreateRecipeInline = async () => {
-    if (!newRecipeForm.name.trim()) { toast.error('Recipe name is required'); return; }
-    const ingredients = newRecipeIngredients.filter(i => i.item_id && i.quantity > 0);
-    try {
-      const res = await api.post('/recipes', { ...newRecipeForm, ingredients });
-      toast.success('Recipe created');
-      await fetchRecipes();
-      setAlaCarteForm({ ...alaCarteForm, recipe_id: res.data.id });
-      setShowNewRecipeInline(false);
-    } catch (err) { toast.error(getErrorMessage(err, 'Failed to create recipe')); }
-  };
-
   const handleCreateAlaCarteOrder = async () => {
-    if (!alaCarteForm.recipe_id) { toast.error('Select or create a recipe'); return; }
+    if (!alaCarteForm.menu_item_id) { toast.error('Select a menu item'); return; }
     if (!alaCarteForm.consumer_id) { toast.error(`Select a ${alaCarteForm.consumer_kind}`); return; }
     try {
       await api.post('/kitchen/orders', {
-        recipe_id: alaCarteForm.recipe_id, quantity_ordered: alaCarteForm.quantity, is_ala_carte: true,
+        menu_item_id: alaCarteForm.menu_item_id, quantity_ordered: alaCarteForm.quantity, is_ala_carte: true,
         member_id: alaCarteForm.consumer_kind === 'member' ? alaCarteForm.consumer_id : undefined,
         booking_id: alaCarteForm.consumer_kind === 'guest' ? alaCarteForm.consumer_id : undefined,
         sla_minutes: alaCarteForm.sla_minutes,
@@ -272,13 +288,23 @@ export default function Kitchen() {
   };
 
   const handleStartCooking = async (id: number) => {
-    try { await api.post(`/kitchen/orders/${id}/start-cooking`); toast.success('Cooking started — inventory deducted'); fetchOrders(); }
+    try { await api.post(`/kitchen/orders/${id}/start-cooking`); toast.success('Cooking started'); fetchOrders(); }
     catch (err) { toast.error(getErrorMessage(err, 'Failed to start cooking')); }
   };
 
   const handleCompleteAlaCarte = async (id: number) => {
     try { await api.post(`/kitchen/orders/${id}/complete`); toast.success('Order completed'); fetchOrders(); fetchLateSummary(); }
     catch (err) { toast.error(getErrorMessage(err, 'Failed to complete order')); }
+  };
+
+  const handleSaveGasRate = async () => {
+    const percentage = Number(gasRateInput);
+    if (!Number.isFinite(percentage) || percentage < 0 || percentage > 100) { toast.error('Enter a percentage between 0 and 100'); return; }
+    try {
+      await api.put('/kitchen/gas-rate', { percentage });
+      toast.success('Gas charge percentage updated');
+      fetchGasRate();
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to update rate')); }
   };
 
   const countdownLabel = (dueAt: string | null): { label: string; overdue: boolean } => {
@@ -314,6 +340,11 @@ export default function Kitchen() {
     return <Badge className={s.cls}>{s.label}</Badge>;
   };
 
+  const requestStatusBadge = (status: string) => {
+    const map: Record<string, string> = { pending: 'bg-amber-100 text-amber-800', approved: 'bg-green-100 text-green-800', rejected: 'bg-red-100 text-red-800' };
+    return <Badge className={map[status] || ''}>{status}</Badge>;
+  };
+
   const routineOrders = orders.filter(o => !o.is_ala_carte);
   const pendingCount = routineOrders.filter(o => o.status === 'pending').length;
 
@@ -325,8 +356,8 @@ export default function Kitchen() {
         <TabsList className="grid grid-cols-4 max-w-2xl">
           <TabsTrigger value="service">Meal Service</TabsTrigger>
           <TabsTrigger value="production">Production</TabsTrigger>
-          <TabsTrigger value="charges">Guest Mess Charges</TabsTrigger>
-          <TabsTrigger value="recipes">Recipes</TabsTrigger>
+          <TabsTrigger value="charges">Mess Charges Overview</TabsTrigger>
+          <TabsTrigger value="menu">Menu</TabsTrigger>
         </TabsList>
 
         <TabsContent value="service" className="space-y-4">
@@ -352,7 +383,7 @@ export default function Kitchen() {
               </div>
               <p className="text-xs text-gray-500">
                 {suggested.length > 0
-                  ? `Booked for this meal: ${suggested.map(s => `${s.recipe_name || `#${s.recipe_id}`} ×${s.suggested_quantity}`).join(', ')}. "Generate" turns these into production orders (skips ones already ordered).`
+                  ? `Booked for this meal: ${suggested.map(s => `${s.menu_item_name || `#${s.menu_item_id}`} ×${s.suggested_quantity}`).join(', ')}. "Generate" turns these into production orders (skips ones already ordered).`
                   : 'No meals booked with a menu item for this date/meal yet. You can still add a manual order below.'}
               </p>
             </CardContent>
@@ -362,12 +393,12 @@ export default function Kitchen() {
           <Card>
             <CardContent className="p-0">
               <Table>
-                <TableHeader><TableRow><TableHead>Recipe</TableHead><TableHead>Qty</TableHead><TableHead>Status</TableHead><TableHead className="w-48">Action</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Qty</TableHead><TableHead>Status</TableHead><TableHead className="w-48">Action</TableHead></TableRow></TableHeader>
                 <TableBody>
                   {loading && <TableRow><TableCell colSpan={4} className="text-center py-8 text-gray-500">Loading…</TableCell></TableRow>}
                   {!loading && routineOrders.map(o => (
                     <TableRow key={o.id}>
-                      <TableCell className="font-medium">{o.recipe_name || `Recipe #${o.recipe_id}`}</TableCell>
+                      <TableCell className="font-medium">{o.menu_item_name || `Item #${o.menu_item_id}`}</TableCell>
                       <TableCell>{o.quantity_ordered}</TableCell>
                       <TableCell>{orderStatusBadge(o.status)}</TableCell>
                       <TableCell>
@@ -395,9 +426,9 @@ export default function Kitchen() {
           ) : (
             <Card>
               <CardContent className="p-4 flex items-center gap-2 flex-wrap">
-                <select className="h-10 rounded-md border border-input bg-background px-3 text-sm flex-1 max-w-xs" value={orderRecipeId} onChange={e => setOrderRecipeId(Number(e.target.value))}>
-                  <option value="0">Select recipe to produce</option>
-                  {recipes.filter(r => r.is_active).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                <select className="h-10 rounded-md border border-input bg-background px-3 text-sm flex-1 max-w-xs" value={orderMenuItemId} onChange={e => setOrderMenuItemId(Number(e.target.value))}>
+                  <option value="0">Select item to produce</option>
+                  {menuItems.filter(m => m.is_active).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                 </select>
                 <Input type="number" min={1} value={orderQuantity} onChange={e => setOrderQuantity(Number(e.target.value))} className="w-24" placeholder="Qty" />
                 <Button onClick={handleCreateOrder}><Plus size={16} className="mr-1" /> Add</Button>
@@ -416,7 +447,7 @@ export default function Kitchen() {
             {lateOrders.length > 0 && (
               <div className="flex items-center gap-2 rounded-md border border-red-300 bg-red-50 dark:bg-red-950/20 px-3 py-2 text-sm text-red-800 dark:text-red-300">
                 <AlertTriangle size={16} className="animate-pulse" />
-                {lateOrders.length} order(s) critically overdue: {lateOrders.map(o => `${o.recipe_name || 'item'} for ${o.consumer_name || 'guest'}`).join(', ')}
+                {lateOrders.length} order(s) critically overdue: {lateOrders.map(o => `${o.menu_item_name || 'item'} for ${o.consumer_name || 'guest'}`).join(', ')}
               </div>
             )}
 
@@ -430,7 +461,7 @@ export default function Kitchen() {
                       const isLate = col.key === 'late';
                       return (
                         <div key={o.id} className={`rounded-md border p-2 space-y-1 ${isLate ? 'border-red-400 bg-red-50 dark:bg-red-950/20 animate-pulse' : 'border-gray-200 dark:border-gray-700'}`}>
-                          <p className="font-medium text-sm">{o.recipe_name || `Recipe #${o.recipe_id}`}</p>
+                          <p className="font-medium text-sm">{o.menu_item_name || `Item #${o.menu_item_id}`}</p>
                           <p className="text-xs text-gray-500">{o.consumer_name || 'Unknown'} · qty {o.quantity_ordered}</p>
                           {col.key !== 'completed' && (
                             <p className={`text-xs font-mono ${overdue ? 'text-red-600' : 'text-gray-500'}`}>{label}</p>
@@ -459,70 +490,140 @@ export default function Kitchen() {
         </TabsContent>
 
         <TabsContent value="charges" className="space-y-4">
+          {(canEditRates || gasRate.updated_at) && (
+            <Card>
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Flame size={18} className="text-orange-600" />
+                  <p className="text-sm font-medium">Gas Charge Rate</p>
+                </div>
+                <p className="text-xs text-gray-500">
+                  Extra Messing is always computed from what a member/guest actually ordered - there's nothing to set for it.
+                  Sui Gas Charges on Messing is this percentage of that computed total (still overridable per checkout).
+                </p>
+                <div className="max-w-xs">
+                  <Label>Gas Charge (%)</Label>
+                  <div className="flex gap-1.5">
+                    <Input type="number" min={0} max={100} disabled={!canEditRates} value={gasRateInput} onChange={e => setGasRateInput(e.target.value)} />
+                    {canEditRates && <Button size="sm" onClick={handleSaveGasRate}>Save</Button>}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">Current: {gasRate.percentage}%</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardContent className="p-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <Receipt size={18} className="text-orange-600" />
-                <p className="text-sm font-medium">Log mess charges as a guest incurs them (Extra Messing, Sui Gas...). The Clerk turns this into a bill at checkout.</p>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <Receipt size={18} className="text-orange-600" />
+                  <p className="text-sm font-medium">Every member and checked-in guest's unbilled mess charge, computed from what they've actually ordered.</p>
+                </div>
+                <div className="flex rounded-md border overflow-hidden text-xs">
+                  {([['all', 'All'], ['member', 'Members'], ['guest', 'Guests']] as const).map(([val, label]) => (
+                    <button key={val} type="button"
+                      className={`px-3 py-1.5 ${overviewFilter === val ? 'bg-primary text-primary-foreground font-medium' : 'bg-transparent text-gray-500 hover:text-gray-700'}`}
+                      onClick={() => setOverviewFilter(val)}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <select className="h-10 w-full max-w-sm rounded-md border border-input bg-background px-3 text-sm"
-                value={chargeBookingId} onChange={e => setChargeBookingId(Number(e.target.value))}>
-                <option value="0">Select a checked-in guest</option>
-                {bookings.map(b => <option key={b.id} value={b.id}>{b.guest_name} (Room {b.room_number})</option>)}
-              </select>
             </CardContent>
           </Card>
 
-          {chargeBookingId > 0 && (
-            <GuestChargePanel bookingId={chargeBookingId} isMess title="Mess Charges" />
-          )}
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader><TableRow><TableHead>Type</TableHead><TableHead>Name</TableHead><TableHead>Room/Unit</TableHead><TableHead className="text-right">Unbilled Mess Charge</TableHead><TableHead className="w-32">Action</TableHead></TableRow></TableHeader>
+                <TableBody>
+                  {overviewLoading && <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500">Loading…</TableCell></TableRow>}
+                  {!overviewLoading && overviewRows.map(r => (
+                    <TableRow key={`${r.consumer_type}-${r.consumer_id}`}>
+                      <TableCell className="capitalize">{r.consumer_type}</TableCell>
+                      <TableCell className="font-medium">{r.name}</TableCell>
+                      <TableCell className="text-sm text-gray-500">{r.sub_label || '-'}</TableCell>
+                      <TableCell className="text-right font-mono">{formatCurrency(r.unbilled_mess_total)}</TableCell>
+                      <TableCell>
+                        <Button size="sm" variant="ghost" onClick={() => setHistoryTarget(r)}>View History</Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {!overviewLoading && overviewRows.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500">Nothing to show</TableCell></TableRow>}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+
+          <OrderHistoryDialog
+            open={historyTarget !== null} onOpenChange={open => { if (!open) setHistoryTarget(null); }}
+            memberId={historyTarget?.consumer_type === 'member' ? historyTarget.consumer_id : undefined}
+            bookingId={historyTarget?.consumer_type === 'guest' ? historyTarget.consumer_id : undefined}
+            personName={historyTarget?.name}
+          />
         </TabsContent>
 
-        <TabsContent value="recipes" className="space-y-4">
+        <TabsContent value="menu" className="space-y-4">
           <div className="flex justify-end">
-            <Dialog open={recipeDialogOpen} onOpenChange={setRecipeDialogOpen}>
-              <DialogTrigger asChild><Button onClick={openCreateRecipe}><Plus size={16} className="mr-1" /> Add Recipe</Button></DialogTrigger>
-              <DialogContent className="max-w-2xl">
-                <DialogHeader><DialogTitle>{editingRecipeId ? 'Edit Recipe' : 'Add Recipe'}</DialogTitle></DialogHeader>
+            <Dialog open={proposalDialogOpen} onOpenChange={setProposalDialogOpen}>
+              {canProposeMenu && (
+                <DialogTrigger asChild><Button onClick={openProposeNew}><Plus size={16} className="mr-1" /> Propose New Item</Button></DialogTrigger>
+              )}
+              <DialogContent className="max-w-lg">
+                <DialogHeader><DialogTitle>{editingItem ? 'Propose Change' : 'Propose New Item'}</DialogTitle></DialogHeader>
                 <div className="space-y-3">
+                  <Input placeholder="Dish name" value={proposalForm.name} onChange={e => setProposalForm({ ...proposalForm, name: e.target.value })} />
                   <div className="grid grid-cols-2 gap-3">
-                    <Input placeholder="Recipe Name" value={recipeForm.name} onChange={e => setRecipeForm({...recipeForm, name: e.target.value})} />
-                    <select className="h-10 rounded-md border border-input bg-background px-3 text-sm capitalize" value={recipeForm.menu_category} onChange={e => setRecipeForm({...recipeForm, menu_category: e.target.value})}>
+                    <select className="h-10 rounded-md border border-input bg-background px-3 text-sm capitalize" value={proposalForm.meal_type} onChange={e => setProposalForm({ ...proposalForm, meal_type: e.target.value })}>
                       {MEAL_TYPES.map(mt => <option key={mt} value={mt} className="capitalize">{mt}</option>)}
                     </select>
+                    <select className="h-10 rounded-md border border-input bg-background px-3 text-sm capitalize" value={proposalForm.day_of_week} onChange={e => setProposalForm({ ...proposalForm, day_of_week: e.target.value })}>
+                      <option value="">Not day-specific</option>
+                      {DAYS.map(d => <option key={d} value={d} className="capitalize">{d}</option>)}
+                    </select>
                   </div>
-                  <Input placeholder="Description" value={recipeForm.description} onChange={e => setRecipeForm({...recipeForm, description: e.target.value})} />
                   <div>
-                    <Label>Portions per Batch</Label>
-                    <Input type="number" min={1} value={recipeForm.portions} onChange={e => setRecipeForm({...recipeForm, portions: Number(e.target.value)})} />
+                    <Label>Estimated Price (Rs)</Label>
+                    <Input type="number" min={0} value={proposalForm.price} onChange={e => setProposalForm({ ...proposalForm, price: Number(e.target.value) })} />
                   </div>
-
-                  <RecipeIngredientEditor items={items} ingredients={recipeIngredients} onChange={setRecipeIngredients} />
-
-                  <Button onClick={handleSaveRecipe} className="w-full">{editingRecipeId ? 'Save Changes' : 'Create Recipe'}</Button>
+                  <Textarea placeholder="Reason (optional)" value={proposalForm.reason} onChange={e => setProposalForm({ ...proposalForm, reason: e.target.value })} />
+                  <Button onClick={handleSubmitProposal} className="w-full">Submit for Manager Approval</Button>
                 </div>
               </DialogContent>
             </Dialog>
           </div>
 
+          {myRequests.length > 0 && (
+            <Card>
+              <CardContent className="p-4 space-y-2">
+                <p className="text-sm font-semibold flex items-center gap-2"><ClipboardList size={16} /> Pending Requests</p>
+                {myRequests.map(r => (
+                  <div key={r.id} className="flex items-center justify-between text-sm border-b last:border-0 py-1.5">
+                    <span>{r.is_new_item ? 'New: ' : 'Edit: '}{r.proposed_name} — {formatCurrency(r.proposed_price)}</span>
+                    {requestStatusBadge(r.status)}
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardContent className="p-0">
               <Table>
-                <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Category</TableHead><TableHead>Portions</TableHead><TableHead>Ingredients</TableHead><TableHead className="w-24">Actions</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead>Day</TableHead><TableHead>Meal</TableHead><TableHead>Name</TableHead><TableHead>Price</TableHead>{canProposeMenu && <TableHead className="w-24">Actions</TableHead>}</TableRow></TableHeader>
                 <TableBody>
                   {loading && <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500">Loading...</TableCell></TableRow>}
-                  {!loading && recipes.map(r => (
-                    <TableRow key={r.id} className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900" onClick={() => openEditRecipe(r)}>
-                      <TableCell className="font-medium">{r.name}</TableCell>
-                      <TableCell className="capitalize">{r.menu_category || '-'}</TableCell>
-                      <TableCell>{r.portions}</TableCell>
-                      <TableCell className="text-sm text-gray-500">{r.ingredients.length} item(s)</TableCell>
-                      <TableCell>
-                        <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); handleDeactivateRecipe(r.id); }}><Trash2 size={16} className="text-red-500" /></Button>
-                      </TableCell>
+                  {!loading && menuItems.map(m => (
+                    <TableRow key={m.id} className={canProposeMenu ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900' : ''} onClick={() => canProposeMenu && openProposeEdit(m)}>
+                      <TableCell className="capitalize">{m.day_of_week || '-'}</TableCell>
+                      <TableCell className="capitalize">{m.meal_type}</TableCell>
+                      <TableCell className="font-medium">{m.name}</TableCell>
+                      <TableCell className="font-mono">{formatCurrency(m.price)}</TableCell>
+                      {canProposeMenu && <TableCell><Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); openProposeEdit(m); }}>Edit</Button></TableCell>}
                     </TableRow>
                   ))}
-                  {!loading && recipes.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500">No recipes yet</TableCell></TableRow>}
+                  {!loading && menuItems.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500">No menu items yet</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </CardContent>
@@ -537,35 +638,14 @@ export default function Kitchen() {
         <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>New A La Carte Order</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            {!showNewRecipeInline ? (
-              <div className="flex items-end gap-2">
-                <div className="flex-1">
-                  <Label>Recipe</Label>
-                  <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={alaCarteForm.recipe_id} onChange={e => setAlaCarteForm({ ...alaCarteForm, recipe_id: Number(e.target.value) })}>
-                    <option value="0">Select recipe</option>
-                    {recipes.filter(r => r.is_active).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                  </select>
-                </div>
-                <Button variant="outline" type="button" onClick={() => setShowNewRecipeInline(true)}>+ Create new recipe</Button>
-              </div>
-            ) : (
-              <Card>
-                <CardContent className="p-3 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label>New Recipe</Label>
-                    <Button size="sm" variant="ghost" type="button" onClick={() => setShowNewRecipeInline(false)}>Cancel</Button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Input placeholder="Recipe Name" value={newRecipeForm.name} onChange={e => setNewRecipeForm({ ...newRecipeForm, name: e.target.value })} />
-                    <select className="h-10 rounded-md border border-input bg-background px-3 text-sm capitalize" value={newRecipeForm.menu_category} onChange={e => setNewRecipeForm({ ...newRecipeForm, menu_category: e.target.value })}>
-                      {MEAL_TYPES.map(mt => <option key={mt} value={mt} className="capitalize">{mt}</option>)}
-                    </select>
-                  </div>
-                  <RecipeIngredientEditor items={items} ingredients={newRecipeIngredients} onChange={setNewRecipeIngredients} />
-                  <Button size="sm" type="button" onClick={handleCreateRecipeInline}>Save Recipe & Use It</Button>
-                </CardContent>
-              </Card>
-            )}
+            <div>
+              <Label>Menu Item</Label>
+              <select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm" value={alaCarteForm.menu_item_id} onChange={e => setAlaCarteForm({ ...alaCarteForm, menu_item_id: Number(e.target.value) })}>
+                <option value="0">Select item</option>
+                {menuItems.filter(m => m.is_active).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+              {canProposeMenu && <p className="text-xs text-gray-400 mt-1">Don't see the dish? Propose it in the Menu tab - once a Manager approves it, it'll appear here.</p>}
+            </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>

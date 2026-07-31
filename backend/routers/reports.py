@@ -6,12 +6,11 @@ from sqlalchemy import func, and_
 from backend.database import get_db
 from backend.models import (
     Invoice, Booking, Room, InventoryItem, StockBatch, WasteLog,
-    PurchaseOrder, Vendor, AuditLog, Alert, KitchenOrder,
+    Vendor, AuditLog, Alert, KitchenOrder,
     IncidentReport, MealAttendance, AttendanceStatus, MessBill, MessBillStatus,
-    Member, MemberStatus, MenuPrice, Recipe,
+    Member, MemberStatus,
 )
 from backend.auth import PermissionChecker
-from backend.services.recipe_costing import compute_theoretical_recipe_cost
 
 router = APIRouter()
 
@@ -40,9 +39,6 @@ async def supervisor_dashboard(db: Session = Depends(get_db), current_user=Depen
 
     # Open alerts
     open_alerts = db.query(Alert).filter(Alert.status.in_(["new", "acknowledged"])).count()
-
-    # Pending approvals (draft POs awaiting sign-off)
-    pending_pos = db.query(PurchaseOrder).filter(PurchaseOrder.status == "draft").count()
 
     # Outstanding balance across all live, unsettled invoices - an aggregate the
     # Manager sees without reaching the (Clerk-owned) desk. No names, just the total.
@@ -80,20 +76,8 @@ async def supervisor_dashboard(db: Session = Depends(get_db), current_user=Depen
     attendance_present = sum(1 for a in today_attendance if a.status == AttendanceStatus.ATTENDED)
     attendance_absent = sum(1 for a in today_attendance if a.status == AttendanceStatus.NO_SHOW)
 
-    # Procurement - vendor performance at a glance
-    active_vendors = db.query(Vendor).filter(Vendor.is_active == True).all()
-    active_vendor_count = len(active_vendors)
-    avg_vendor_accuracy = round(sum(v.delivery_accuracy or 0 for v in active_vendors) / active_vendor_count, 1) if active_vendor_count else 0
-
-    # Recipes - theoretical cost at or above the guest-facing menu price (no margin left)
-    recipes_below_margin = 0
-    for mp in db.query(MenuPrice).filter(MenuPrice.is_active == True).all():
-        recipe = db.query(Recipe).filter(Recipe.id == mp.recipe_id).first()
-        if not recipe:
-            continue
-        cost = compute_theoretical_recipe_cost(db, recipe)
-        if cost is not None and cost >= float(mp.price):
-            recipes_below_margin += 1
+    # Procurement - active vendor count (self-purchase, no delivery accuracy to track)
+    active_vendor_count = db.query(Vendor).filter(Vendor.is_active == True).count()
 
     # Mess billing - current period
     month_bills = db.query(MessBill).filter(MessBill.month == today.month, MessBill.year == today.year).all()
@@ -114,15 +98,12 @@ async def supervisor_dashboard(db: Session = Depends(get_db), current_user=Depen
         "total_stock_value": round(stock_value, 2),
         "waste_cost_month": round(waste_cost, 2),
         "open_alerts": open_alerts,
-        "pending_approvals": pending_pos,
         "total_guests_today": today_guests,
         "low_stock_count": low_stock_result or 0,
         "open_incidents": open_incidents,
         "attendance_present_today": attendance_present,
         "attendance_absent_today": attendance_absent,
         "active_vendor_count": active_vendor_count,
-        "avg_vendor_accuracy": avg_vendor_accuracy,
-        "recipes_below_margin": recipes_below_margin,
         "mess_revenue_month": round(mess_revenue_month, 2),
         "unpaid_mess_bills": unpaid_mess_bills,
         "active_member_count": active_member_count,
@@ -178,12 +159,11 @@ def _invoice_revenue(db: Session, start_dt: datetime, end_dt: datetime, bill_typ
 
 
 def _period_cost(db: Session, start_dt: datetime, end_dt: datetime):
-    """Real, trackable operating cost for the period: procurement spend
-    (raw materials - anything past draft/cancelled, i.e. actually committed)
+    """Real, trackable operating cost for the period: self-purchase stock
+    spend (raw materials, logged via Daily Stock Intake / Smart Intake)
     plus logged waste. No payroll/utilities module exists to draw from."""
-    procurement = float(db.query(func.sum(PurchaseOrder.total_amount)).filter(
-        PurchaseOrder.created_at >= start_dt, PurchaseOrder.created_at < end_dt,
-        PurchaseOrder.status.notin_(["draft", "cancelled"]),
+    procurement = float(db.query(func.sum(StockBatch.quantity * StockBatch.unit_cost)).filter(
+        StockBatch.created_at >= start_dt, StockBatch.created_at < end_dt,
     ).scalar() or 0)
     waste = float(db.query(func.sum(WasteLog.cost)).filter(
         WasteLog.created_at >= start_dt, WasteLog.created_at < end_dt,
@@ -375,5 +355,18 @@ async def waste_by_category(db: Session = Depends(get_db), current_user=Depends(
 
 @router.get("/vendor-performance")
 async def vendor_performance(db: Session = Depends(get_db), current_user=Depends(PermissionChecker("reports", "view"))):
-    vendors = db.query(Vendor).filter(Vendor.is_active == True).order_by(Vendor.delivery_accuracy.desc()).limit(10).all()
-    return [{"name": v.name, "accuracy": v.delivery_accuracy} for v in vendors]
+    """Top vendors by total self-purchase spend in the last 30 days (Daily
+    Stock Intake / Smart Intake batches tagged with that vendor) - the only
+    real per-vendor signal now that the mess buys directly rather than
+    through a PO a vendor could be scored for fulfilling."""
+    since = datetime.utcnow() - timedelta(days=30)
+    rows = (
+        db.query(Vendor.name, func.sum(StockBatch.quantity * StockBatch.unit_cost).label("spend"))
+        .join(StockBatch, StockBatch.vendor_id == Vendor.id)
+        .filter(Vendor.is_active == True, StockBatch.created_at >= since)
+        .group_by(Vendor.id)
+        .order_by(func.sum(StockBatch.quantity * StockBatch.unit_cost).desc())
+        .limit(10)
+        .all()
+    )
+    return [{"name": name, "spend_30d": round(float(spend or 0), 2)} for name, spend in rows]
