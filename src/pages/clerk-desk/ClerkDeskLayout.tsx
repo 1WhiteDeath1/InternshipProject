@@ -63,11 +63,11 @@ export default function ClerkDeskLayout() {
 
   return (
     <div className="space-y-5">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+      <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
         <LayoutGrid size={24} /> Clerk Desk
       </h1>
 
-      <div className="flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-gray-800 -mx-1 px-1">
+      <div className="flex gap-1 overflow-x-auto border-b border-border -mx-1 px-1">
         {TABS.map(tab => {
           const Icon = tab.icon;
           const count = counts[tab.to];
@@ -75,9 +75,9 @@ export default function ClerkDeskLayout() {
             <NavLink key={tab.to} to={tab.to} end={tab.end}
               className={({ isActive }) => `flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${isActive
                 ? 'border-blue-600 text-blue-600 dark:text-blue-400'
-                : 'border-transparent text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}>
+                : 'border-transparent text-muted-foreground hover:text-foreground dark:hover:text-gray-200'}`}>
               <Icon size={16} /> {tab.label}
-              {count ? <span className="ml-0.5 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[11px] font-semibold px-1.5 min-w-5 text-center">{count}</span> : null}
+              {count ? <span className="ml-0.5 rounded-full bg-muted text-foreground text-[11px] font-semibold px-1.5 min-w-5 text-center">{count}</span> : null}
             </NavLink>
           );
         })}

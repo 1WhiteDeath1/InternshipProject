@@ -90,12 +90,12 @@ export default function Settings() {
   }, {});
 
   if (!hasPermission(user, 'settings', 'view')) {
-    return <div className="text-center py-20 text-gray-500"><Shield size={48} className="mx-auto mb-4 opacity-50" />You don't have access to Settings</div>;
+    return <div className="text-center py-20 text-muted-foreground"><Shield size={48} className="mx-auto mb-4 opacity-50" />You don't have access to Settings</div>;
   }
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><SettingsIcon size={24} /> Settings</h1>
+      <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><SettingsIcon size={24} /> Settings</h1>
 
       {/* System Settings */}
       <Card>
@@ -105,7 +105,7 @@ export default function Settings() {
             <div key={s.id} className="flex items-center gap-4">
               <div className="flex-1">
                 <p className="text-sm font-medium">{s.key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</p>
-                <p className="text-xs text-gray-500">{s.description}</p>
+                <p className="text-xs text-muted-foreground">{s.description}</p>
               </div>
               <Input
                 value={editing[s.key] ?? s.value ?? ''}
@@ -124,13 +124,13 @@ export default function Settings() {
         <CardContent className="space-y-6">
           {Object.entries(groupedFeatures).map(([dept, flags]) => (
             <div key={dept}>
-              <h3 className="text-sm font-semibold text-gray-600 capitalize mb-3">{dept}</h3>
+              <h3 className="text-sm font-semibold text-muted-foreground capitalize mb-3">{dept}</h3>
               <div className="space-y-3">
                 {flags.map(f => (
                   <div key={f.id} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
                     <div>
                       <p className="text-sm font-medium">{f.name}</p>
-                      <p className="text-xs text-gray-500">{f.description}</p>
+                      <p className="text-xs text-muted-foreground">{f.description}</p>
                     </div>
                     <Switch checked={f.enabled} onCheckedChange={(v) => handleToggleFeature(f.id, v)} />
                   </div>
@@ -154,7 +154,7 @@ export default function Settings() {
               {backups.slice(0, 5).map((b, i) => (
                 <div key={i} className="flex items-center justify-between py-2 border-b border-gray-100 text-sm">
                   <span>{b.filename}</span>
-                  <span className="text-gray-500">{new Date(b.created).toLocaleString()}</span>
+                  <span className="text-muted-foreground">{new Date(b.created).toLocaleString()}</span>
                 </div>
               ))}
             </div>

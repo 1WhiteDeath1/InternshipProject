@@ -7,7 +7,6 @@ import { toast } from 'sonner';
 import { LogIn, LogOut, Sparkles, MessageSquare, Copy, Check, RefreshCw, TimerOff, ChevronLeft, ChevronRight } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { formatCurrency } from '@/lib/currency';
-import { useTheme } from '@/contexts/useTheme';
 import { ConfirmDialog, type ConfirmRequest } from '@/components/ConfirmDialog';
 import { RoomStatusDonut } from '@/components/RoomStatusDonut';
 import { type OccupancyData, type SmsOutboxItem, type CalendarMonthSummary } from './shared';
@@ -20,7 +19,6 @@ interface DashboardTabProps {
 // Same monthly-bars pattern the Calendar tab's Year view used, now living here
 // instead - informational only, no drill-down into another tab.
 function YearlyAnalytics() {
-  const { darkMode } = useTheme();
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [months, setMonths] = useState<CalendarMonthSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,12 +39,12 @@ function YearlyAnalytics() {
     label: new Date(Number(m.month.split('-')[0]), Number(m.month.split('-')[1]) - 1, 1).toLocaleDateString('en-GB', { month: 'short' }),
   })), [months]);
 
-  const gridStroke = darkMode ? '#374151' : '#E5E7EB';
-  const tickFill = darkMode ? '#9CA3AF' : '#6B7280';
+  const gridStroke = 'hsl(var(--border))';
+  const tickFill = 'hsl(var(--muted-foreground))';
   const tooltipStyle = {
-    backgroundColor: darkMode ? '#111827' : '#FFFFFF',
+    backgroundColor: 'hsl(var(--popover))',
     border: `1px solid ${gridStroke}`, borderRadius: 8,
-    color: darkMode ? '#F9FAFB' : '#111827', fontSize: 15,
+    color: 'hsl(var(--popover-foreground))', fontSize: 15,
   };
 
   const chart = (title: string, dataKey: 'occupancy_rate' | 'bookings_count' | 'revenue', color: string, formatter?: (v: number) => string) => (
@@ -59,7 +57,7 @@ function YearlyAnalytics() {
           <YAxis tick={{ fontSize: 14, fill: tickFill }} width={48} axisLine={false} tickLine={false}
             tickFormatter={(v: number) => v >= 1000 ? `${Math.round(v / 1000)}k` : String(v)} />
           <Tooltip contentStyle={tooltipStyle} formatter={formatter ? ((v: number) => formatter(v)) : undefined}
-            cursor={{ fill: darkMode ? '#1F2937' : '#F3F4F6' }} />
+            cursor={{ fill: 'hsl(var(--muted))' }} />
           <Bar dataKey={dataKey} name={title} fill={color} radius={[4, 4, 0, 0]} maxBarSize={40} />
         </BarChart>
       </ResponsiveContainer>
@@ -76,11 +74,11 @@ function YearlyAnalytics() {
           <Button size="sm" variant="outline" onClick={() => setYear(y => y + 1)}><ChevronRight size={14} /></Button>
         </div>
       </div>
-      {loading ? <p className="text-base text-gray-500">Loading…</p> : (
+      {loading ? <p className="text-base text-muted-foreground">Loading…</p> : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-          {chart('Occupancy Rate (%)', 'occupancy_rate', '#0D7377', v => `${v}%`)}
-          {chart('Bookings', 'bookings_count', '#6366F1')}
-          {chart('Revenue', 'revenue', '#2563EB', v => formatCurrency(v))}
+          {chart('Occupancy Rate (%)', 'occupancy_rate', 'hsl(var(--chart-2))', v => `${v}%`)}
+          {chart('Bookings', 'bookings_count', 'hsl(var(--chart-4))')}
+          {chart('Revenue', 'revenue', 'hsl(var(--chart-1))', v => formatCurrency(v))}
         </div>
       )}
     </div>
@@ -159,16 +157,16 @@ export default function DashboardTab({ onOpenRoom, onChanged }: DashboardTabProp
         <Card className="border-l-4 border-l-emerald-500">
           <CardContent className="p-5">
             <div className="flex items-baseline gap-2 mb-2">
-              <span className="text-4xl font-bold text-gray-900 dark:text-white">{occupancy?.arrivals.length ?? 0}</span>
-              <span className="text-base text-gray-500">Today's arrivals</span>
+              <span className="text-4xl font-bold text-foreground">{occupancy?.arrivals.length ?? 0}</span>
+              <span className="text-base text-muted-foreground">Today's arrivals</span>
             </div>
-            {(occupancy?.arrivals.length ?? 0) === 0 && <p className="text-base text-gray-400">No arrivals expected today</p>}
+            {(occupancy?.arrivals.length ?? 0) === 0 && <p className="text-base text-muted-foreground">No arrivals expected today</p>}
             {occupancy?.arrivals.map(a => (
               <div key={a.booking_id} className="flex items-center justify-between text-base py-1.5 border-b last:border-0">
                 <button type="button" className="text-left hover:underline" onClick={() => onOpenRoom(a.room_id)}>
-                  {a.guest_name} <span className="text-gray-400 text-sm">Room {a.room_number}</span>
+                  {a.guest_name} <span className="text-muted-foreground text-sm">Room {a.room_number}</span>
                   {a.arrival_deadline && (
-                    <span className={`block text-sm ${a.arrival_overdue ? 'text-red-600 font-medium' : 'text-gray-400'}`}>
+                    <span className={`block text-sm ${a.arrival_overdue ? 'text-red-600 font-medium' : 'text-muted-foreground'}`}>
                       {a.arrival_overdue ? 'Overdue — did not arrive by ' : 'Arrive by '}
                       {new Date(a.arrival_deadline).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
                     </span>
@@ -190,15 +188,15 @@ export default function DashboardTab({ onOpenRoom, onChanged }: DashboardTabProp
         <Card className={`border-l-4 ${overdueCount > 0 ? 'border-l-red-500' : 'border-l-blue-500'}`}>
           <CardContent className="p-5">
             <div className="flex items-baseline gap-2 mb-2">
-              <span className="text-4xl font-bold text-gray-900 dark:text-white">{occupancy?.departures.length ?? 0}</span>
-              <span className="text-base text-gray-500">Today's departures</span>
+              <span className="text-4xl font-bold text-foreground">{occupancy?.departures.length ?? 0}</span>
+              <span className="text-base text-muted-foreground">Today's departures</span>
               {overdueCount > 0 && <span className="text-sm font-semibold text-red-600">{overdueCount} overdue</span>}
             </div>
-            {(occupancy?.departures.length ?? 0) === 0 && <p className="text-base text-gray-400">No departures expected today</p>}
+            {(occupancy?.departures.length ?? 0) === 0 && <p className="text-base text-muted-foreground">No departures expected today</p>}
             {occupancy?.departures.map(d => (
               <div key={d.booking_id} className="flex items-center justify-between text-base py-1.5 border-b last:border-0">
                 <button type="button" className="text-left hover:underline" onClick={() => onOpenRoom(d.room_id)}>
-                  {d.guest_name} <span className="text-gray-400 text-sm">Room {d.room_number}</span>
+                  {d.guest_name} <span className="text-muted-foreground text-sm">Room {d.room_number}</span>
                   {d.overdue && (
                     <span className="block text-sm text-red-600 font-medium">
                       Overdue — should have left {d.days_overdue === 1 ? 'yesterday' : `${d.days_overdue} days ago`}
@@ -220,8 +218,8 @@ export default function DashboardTab({ onOpenRoom, onChanged }: DashboardTabProp
         <Card className="border-l-4 border-l-amber-500">
           <CardContent className="p-5">
             <div className="flex items-baseline gap-2 mb-2">
-              <span className="text-4xl font-bold text-gray-900 dark:text-white">{occupancy?.housekeeping_queue.length}</span>
-              <span className="text-base text-gray-500">Rooms waiting for housekeeping</span>
+              <span className="text-4xl font-bold text-foreground">{occupancy?.housekeeping_queue.length}</span>
+              <span className="text-base text-muted-foreground">Rooms waiting for housekeeping</span>
             </div>
             <div className="flex flex-wrap gap-2">
               {occupancy?.housekeeping_queue.map(h => (
@@ -243,15 +241,15 @@ export default function DashboardTab({ onOpenRoom, onChanged }: DashboardTabProp
             <p className="text-base font-semibold mb-2 flex items-center gap-1.5">
               <MessageSquare size={17} className="text-blue-600" /> SMS outbox — {smsOutbox.length} unsent guest message{smsOutbox.length > 1 ? 's' : ''}
             </p>
-            <p className="text-sm text-gray-400 mb-2">No SMS gateway on this network? Copy the text, send it from any phone, then mark it sent.</p>
+            <p className="text-sm text-muted-foreground mb-2">No SMS gateway on this network? Copy the text, send it from any phone, then mark it sent.</p>
             {smsOutbox.map(m => (
               <div key={m.id} className="flex items-start justify-between gap-3 text-base py-2 border-b last:border-0">
                 <div className="min-w-0">
                   <p className="font-medium">
-                    {m.guest_name || 'Guest'} <span className="text-gray-400 text-sm">{m.phone}{m.booking_reference ? ` · ${m.booking_reference}` : ''}</span>
+                    {m.guest_name || 'Guest'} <span className="text-muted-foreground text-sm">{m.phone}{m.booking_reference ? ` · ${m.booking_reference}` : ''}</span>
                     {m.status === 'failed' && <span className="text-red-500 text-sm ml-1.5" title={m.error || ''}>gateway failed</span>}
                   </p>
-                  <p className="text-sm text-gray-500 line-clamp-2">{m.body}</p>
+                  <p className="text-sm text-muted-foreground line-clamp-2">{m.body}</p>
                 </div>
                 <span className="flex shrink-0">
                   <Button size="sm" variant="ghost" title="Copy message text" onClick={() => handleCopySms(m)}>

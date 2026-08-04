@@ -61,13 +61,13 @@ export default function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-100 to-gray-200 dark:from-slate-950 dark:to-gray-900 px-4">
       <div className="w-full max-w-md">
-        <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-800 p-8">
+        <div className="bg-card rounded-2xl shadow-xl border border-border p-8">
           <div className="text-center mb-8">
             <div className="w-16 h-16 mx-auto mb-4 rounded-xl bg-blue-600 flex items-center justify-center">
               <Hotel className="text-white" size={32} />
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Welcome Back</h1>
-            <p className="text-gray-500 dark:text-gray-400 mt-1">Sign in to EME MESS Management</p>
+            <h1 className="text-2xl font-bold text-foreground">Welcome Back</h1>
+            <p className="text-muted-foreground mt-1">Sign in to EME MESS Management</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
@@ -103,7 +103,7 @@ export default function Login() {
                 checked={rememberMe}
                 onCheckedChange={(checked) => setRememberMe(checked === true)}
               />
-              <Label htmlFor="remember-me" className="text-sm font-normal text-gray-600 dark:text-gray-400 cursor-pointer">
+              <Label htmlFor="remember-me" className="text-sm font-normal text-muted-foreground cursor-pointer">
                 Remember me on this device
               </Label>
             </div>
@@ -114,8 +114,8 @@ export default function Login() {
             </Button>
           </form>
 
-          <div className="mt-6 pt-5 border-t border-gray-200 dark:border-gray-800">
-            <p className="text-center text-xs font-medium text-gray-400 uppercase tracking-wide mb-3">
+          <div className="mt-6 pt-5 border-t border-border">
+            <p className="text-center text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">
               Quick Demo Login
             </p>
             <div className="grid grid-cols-2 gap-2">
@@ -128,14 +128,14 @@ export default function Login() {
                   disabled={loading || !!quickLoading}
                   onClick={() => handleQuickLogin(u)}
                 >
-                  {quickLoading === u ? <Loader2 className="animate-spin shrink-0" size={16} /> : <Icon size={16} className="shrink-0 text-gray-400" />}
+                  {quickLoading === u ? <Loader2 className="animate-spin shrink-0" size={16} /> : <Icon size={16} className="shrink-0 text-muted-foreground" />}
                   {label}
                 </Button>
               ))}
             </div>
           </div>
 
-          <p className="text-center text-xs text-gray-400 mt-4">
+          <p className="text-center text-xs text-muted-foreground mt-4">
             Default supervisor: admin / admin123
           </p>
         </div>

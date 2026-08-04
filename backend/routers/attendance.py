@@ -2,6 +2,7 @@
 from typing import List
 from datetime import datetime, date, time, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from backend.database import get_db
@@ -128,6 +129,45 @@ async def list_attendance(
          "menu_item_id": r.menu_item_id, "menu_item_name": r.menu_item.name if r.menu_item else None,
          "date": r.date, "meal_type": r.meal_type.value, "status": r.status.value, "method": r.method,
          "booked_at": r.booked_at, "marked_at": r.marked_at, "marked_by": r.marked_by} for r in records], "total": total}
+
+
+@router.get("/daily-counts")
+async def attendance_daily_counts(
+    date_from: str = Query(...), date_to: str = Query(...), meal_type: str = "",
+    db: Session = Depends(get_db), current_user=Depends(get_current_user),
+):
+    """Per-day, per-meal booked/attended/no-show counts, computed server-side
+    via GROUP BY - never truncated by list_attendance()'s page_size cap above.
+    Feeds the Kitchen dashboard's meal-volume figures, which previously paged
+    through /attendance one day at a time at page_size=100 and silently
+    under-counted once a single day's rows crossed that cap."""
+    try:
+        start = date.fromisoformat(date_from)
+        end = date.fromisoformat(date_to)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date_from/date_to must be ISO dates (YYYY-MM-DD)")
+    if end < start:
+        raise HTTPException(status_code=400, detail="date_to must not be before date_from")
+    if (end - start).days > 90:
+        raise HTTPException(status_code=400, detail="Range cannot exceed 90 days")
+
+    query = db.query(
+        MealAttendance.date, MealAttendance.meal_type, MealAttendance.status, func.count(MealAttendance.id),
+    ).filter(MealAttendance.date >= start, MealAttendance.date <= end)
+    if meal_type:
+        query = query.filter(MealAttendance.meal_type == meal_type)
+    rows = query.group_by(MealAttendance.date, MealAttendance.meal_type, MealAttendance.status).all()
+
+    by_key: dict[tuple, dict] = {}
+    for d, mt, status_, count in rows:
+        key = (d, mt.value)
+        entry = by_key.setdefault(key, {
+            "date": d.isoformat(), "meal_type": mt.value,
+            "booked": 0, "attended": 0, "cancelled": 0, "excluded": 0, "no_show": 0,
+        })
+        entry[status_.value] = count
+
+    return sorted(by_key.values(), key=lambda e: (e["date"], e["meal_type"]))
 
 
 @router.post("")

@@ -59,7 +59,7 @@ export default function AuditLogPage() {
     const colors: Record<string, string> = {
       create: 'bg-green-100 text-green-800', update: 'bg-blue-100 text-blue-800', delete: 'bg-red-100 text-red-800',
       soft_delete: 'bg-orange-100 text-orange-800', approve: 'bg-purple-100 text-purple-800', transfer: 'bg-cyan-100 text-cyan-800',
-      login: 'bg-emerald-100 text-emerald-800', logout: 'bg-gray-100 text-gray-800', override: 'bg-red-100 text-red-800',
+      login: 'bg-emerald-100 text-emerald-800', logout: 'bg-muted text-muted-foreground', override: 'bg-red-100 text-red-800',
     };
     return <Badge className={colors[action] || 'bg-gray-100'}>{action}</Badge>;
   };
@@ -67,7 +67,7 @@ export default function AuditLogPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><ClipboardList size={24} /> Audit Log</h1>
+        <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><ClipboardList size={24} /> Audit Log</h1>
         <div className="flex gap-2">
           <Button variant="outline" onClick={fetchLogs}><RefreshCw size={16} className="mr-1" /> Refresh</Button>
           <Button variant="outline" onClick={handleExport}><Download size={16} className="mr-1" /> Export</Button>
@@ -95,22 +95,22 @@ export default function AuditLogPage() {
             <TableBody>
               {logs.map(log => (
                 <TableRow key={log.id}>
-                  <TableCell className="text-gray-500">#{log.id}</TableCell>
+                  <TableCell className="text-muted-foreground">#{log.id}</TableCell>
                   <TableCell className="font-medium">{log.user_name || 'System'}</TableCell>
                   <TableCell>{actionBadge(log.action)}</TableCell>
                   <TableCell>{log.entity_type} #{log.entity_id}</TableCell>
                   <TableCell className="max-w-[200px] truncate">{log.reason || '-'}</TableCell>
                   <TableCell>{log.department || '-'}</TableCell>
-                  <TableCell className="text-sm text-gray-500">{new Date(log.timestamp).toLocaleString()}</TableCell>
-                  <TableCell className="text-sm text-gray-500">{log.ip_address || '-'}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{new Date(log.timestamp).toLocaleString()}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{log.ip_address || '-'}</TableCell>
                 </TableRow>
               ))}
-              {logs.length === 0 && <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">No audit entries found</TableCell></TableRow>}
+              {logs.length === 0 && <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">No audit entries found</TableCell></TableRow>}
             </TableBody>
           </Table>
           {total > 25 && (
             <div className="flex items-center justify-between p-4 border-t">
-              <p className="text-sm text-gray-500">Showing {logs.length} of {total} entries</p>
+              <p className="text-sm text-muted-foreground">Showing {logs.length} of {total} entries</p>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Previous</Button>
                 <Button variant="outline" size="sm" onClick={() => setPage(p => p + 1)}>Next</Button>

@@ -173,7 +173,7 @@ export function MealAttendanceOmnibar({
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-xs text-gray-500">Add to:</span>
+        <span className="text-xs text-muted-foreground">Add to:</span>
         {mealTypes.map(mt => {
           const locked = lockedMeals[mt];
           const checked = selectedMeals.includes(mt);
@@ -184,9 +184,9 @@ export function MealAttendanceOmnibar({
               disabled={locked}
               onClick={() => toggleMeal(mt)}
               className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium border transition-colors
-                ${locked ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed dark:bg-gray-800 dark:border-gray-700'
+                ${locked ? 'bg-gray-100 text-muted-foreground border-gray-200 cursor-not-allowed dark:bg-gray-800 dark:border-gray-700'
                 : checked ? 'bg-primary text-primary-foreground border-primary'
-                : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400 dark:bg-gray-900 dark:text-gray-300 dark:border-gray-700'}`}
+                : 'bg-white text-muted-foreground border-gray-300 hover:border-gray-400 dark:bg-gray-900 dark:text-muted-foreground dark:border-gray-700'}`}
             >
               {locked && <Lock size={11} />} {mealLabels[mt] || mt}
             </button>
@@ -199,7 +199,7 @@ export function MealAttendanceOmnibar({
       ) : (
         <>
           <div className="relative max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
             <Input
               ref={inputRef}
               placeholder="Add anyone — type a name, or click to browse…"
@@ -217,18 +217,18 @@ export function MealAttendanceOmnibar({
           )}
           {panelOpen && selectedMeals.length > 0 && (
             <div className="space-y-1.5 max-h-72 overflow-y-auto">
-              {searching && <p className="text-sm text-gray-400 px-1">{q.trim() ? 'Searching…' : 'Loading…'}</p>}
+              {searching && <p className="text-sm text-muted-foreground px-1">{q.trim() ? 'Searching…' : 'Loading…'}</p>}
               {!searching && !q.trim() && results.length > 0 && (
-                <p className="text-xs text-gray-400 px-1">All members &amp; guests — start typing to narrow down</p>
+                <p className="text-xs text-muted-foreground px-1">All members &amp; guests — start typing to narrow down</p>
               )}
               {results.map(r => {
                 const key = `${r.kind}-${r.id}`;
                 const already = selectedMeals.length === 1 && (r.attendance_status === 'attended' || r.attendance_status === 'booked');
                 return (
-                  <div key={key} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 bg-white dark:bg-gray-900">
+                  <div key={key} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 bg-card">
                     <div>
                       <p className="text-sm font-medium">{r.name}</p>
-                      <p className="text-xs text-gray-500">{r.sub_label || KIND_LABEL[r.kind]}</p>
+                      <p className="text-xs text-muted-foreground">{r.sub_label || KIND_LABEL[r.kind]}</p>
                     </div>
                     <Button
                       size="sm"
@@ -252,7 +252,7 @@ export function MealAttendanceOmnibar({
                 </button>
               )}
               {!searching && results.length === 0 && !q.trim() && (
-                <p className="text-sm text-gray-400 px-1">No members or guests yet</p>
+                <p className="text-sm text-muted-foreground px-1">No members or guests yet</p>
               )}
             </div>
           )}

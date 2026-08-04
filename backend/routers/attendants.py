@@ -5,9 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.config import UPLOADS_DIR
-from backend.models import Attendant, Room
-from datetime import datetime
-from backend.schemas import AttendantCreate, AttendantUpdate, AttendantOut, AttendantDuty
+from backend.models import Attendant, Room, AttendantDutyLog
+from datetime import datetime, timedelta
+from backend.schemas import (
+    AttendantCreate, AttendantUpdate, AttendantOut, AttendantDuty,
+    AttendantActivitySummaryOut, AttendantActivityTrendOut,
+)
 from backend.auth import get_current_user, check_permission
 from backend.audit import log_audit, serialize_model, AuditAction
 
@@ -77,14 +80,94 @@ async def set_attendant_duty(attendant_id: int, data: AttendantDuty, request: Re
         raise HTTPException(status_code=404, detail="Attendant not found")
 
     before = serialize_model(attendant)
+    now = datetime.utcnow()
     attendant.on_duty = data.on_duty
-    attendant.on_duty_since = datetime.utcnow() if data.on_duty else None
+    attendant.on_duty_since = now if data.on_duty else None
+
+    if data.on_duty:
+        db.add(AttendantDutyLog(attendant_id=attendant.id, clock_in=now))
+    else:
+        open_log = (db.query(AttendantDutyLog)
+                    .filter(AttendantDutyLog.attendant_id == attendant.id, AttendantDutyLog.clock_out.is_(None))
+                    .order_by(AttendantDutyLog.clock_in.desc()).first())
+        if open_log:
+            open_log.clock_out = now
+            open_log.duration_minutes = max(0, round((now - open_log.clock_in).total_seconds() / 60))
+
     db.commit()
     db.refresh(attendant)
 
     log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "attendants", attendant.id,
               before_state=before, after_state=serialize_model(attendant), reason="Clock in/out", ip_address=request.client.host)
     return _to_out(db, attendant)
+
+
+def _open_session_minutes(log: AttendantDutyLog, now: datetime) -> int:
+    return max(0, round((now - log.clock_in).total_seconds() / 60))
+
+
+@router.get("/activity/summary", response_model=list[AttendantActivitySummaryOut])
+async def attendant_activity_summary(days: int = 30, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "attendants", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=days)
+    attendants = db.query(Attendant).order_by(Attendant.full_name).all()
+    logs = db.query(AttendantDutyLog).filter(AttendantDutyLog.clock_in >= cutoff).all()
+    by_attendant: dict[int, list[AttendantDutyLog]] = {}
+    for log in logs:
+        by_attendant.setdefault(log.attendant_id, []).append(log)
+
+    result = []
+    for a in attendants:
+        a_logs = by_attendant.get(a.id, [])
+        total_minutes = sum(
+            log.duration_minutes if log.duration_minutes is not None else _open_session_minutes(log, now)
+            for log in a_logs
+        )
+        session_count = len(a_logs)
+        last_clock_in = max((log.clock_in for log in a_logs), default=None)
+        closed = [log for log in a_logs if log.clock_out is not None]
+        last_clock_out = max((log.clock_out for log in closed), default=None)
+        photo_url = f"/uploads/attendants/{a.photo_file_name}" if a.photo_file_name else None
+        result.append(AttendantActivitySummaryOut(
+            attendant_id=a.id, full_name=a.full_name, photo_url=photo_url,
+            is_active=a.is_active, on_duty=a.on_duty or False,
+            total_hours=round(total_minutes / 60, 2), session_count=session_count,
+            avg_session_hours=round((total_minutes / 60) / session_count, 2) if session_count else 0.0,
+            last_clock_in=last_clock_in, last_clock_out=last_clock_out,
+        ))
+    result.sort(key=lambda r: r.total_hours, reverse=True)
+    return result
+
+
+@router.get("/activity/trend", response_model=AttendantActivityTrendOut)
+async def attendant_activity_trend(days: int = 14, attendant_id: int | None = None, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "attendants", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    now = datetime.utcnow()
+    query = db.query(AttendantDutyLog)
+    if attendant_id is not None:
+        query = query.filter(AttendantDutyLog.attendant_id == attendant_id)
+    window_start = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+    logs = query.filter(
+        (AttendantDutyLog.clock_out >= window_start) | (AttendantDutyLog.clock_out.is_(None))
+    ).all()
+
+    labels, values = [], []
+    for i in range(days - 1, -1, -1):
+        day_start = (now - timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = day_start + timedelta(days=1)
+        minutes = 0
+        for log in logs:
+            session_end = log.clock_out or now
+            overlap_start = max(log.clock_in, day_start)
+            overlap_end = min(session_end, day_end)
+            if overlap_end > overlap_start:
+                minutes += (overlap_end - overlap_start).total_seconds() / 60
+        labels.append(day_start.strftime("%b %d"))
+        values.append(round(minutes / 60, 2))
+    return AttendantActivityTrendOut(labels=labels, values=values)
 
 
 @router.post("/{attendant_id}/photo", response_model=AttendantOut)

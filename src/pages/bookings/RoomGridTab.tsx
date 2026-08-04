@@ -226,7 +226,7 @@ export default function RoomGridTab({ rooms, onOpenRoom, onChanged }: RoomGridTa
           <div className="flex items-start justify-between gap-1">
             <div className="min-w-0">
               <p className="font-bold text-lg leading-tight">{card.room_number}</p>
-              <p className="text-xs text-gray-500 capitalize truncate">{ROOM_TYPE_LABELS[card.room_type] || card.room_type} · {card.capacity} guests</p>
+              <p className="text-xs text-muted-foreground capitalize truncate">{ROOM_TYPE_LABELS[card.room_type] || card.room_type} · {card.capacity} guests</p>
             </div>
             <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
               {mode === 'instant' && card.housekeeping_status !== 'clean' && (
@@ -237,15 +237,15 @@ export default function RoomGridTab({ rooms, onOpenRoom, onChanged }: RoomGridTa
                   <PopoverTrigger asChild>
                     <button type="button"
                       title={card.attendantName || 'Assign attendant'}
-                      className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${card.attendantName ? 'bg-blue-600 text-white' : 'border border-dashed border-gray-400 text-gray-400 hover:border-blue-400 hover:text-blue-500'}`}>
+                      className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${card.attendantName ? 'bg-blue-600 text-white' : 'border border-dashed border-gray-400 text-muted-foreground hover:border-blue-400 hover:text-blue-500'}`}>
                       {card.attendantName ? card.attendantName.charAt(0).toUpperCase() : <Plus size={12} />}
                     </button>
                   </PopoverTrigger>
                   <PopoverContent className="w-56 p-2" onClick={e => e.stopPropagation()}>
-                    <p className="text-xs font-medium text-gray-400 px-1 pb-1.5">Assign attendant</p>
+                    <p className="text-xs font-medium text-muted-foreground px-1 pb-1.5">Assign attendant</p>
                     <div className="space-y-0.5 max-h-56 overflow-y-auto">
                       <button type="button"
-                        className={`w-full text-left text-sm rounded px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 ${!card.attendantId ? 'font-semibold text-blue-600' : ''}`}
+                        className={`w-full text-left text-sm rounded px-2 py-1.5 hover:bg-accent ${!card.attendantId ? 'font-semibold text-blue-600' : ''}`}
                         onClick={() => reassignAttendant(card.id, '')}>
                         No attendant
                       </button>
@@ -254,14 +254,14 @@ export default function RoomGridTab({ rooms, onOpenRoom, onChanged }: RoomGridTa
                         const list = showAllAttendants || onDuty.length === 0 ? attendants : onDuty;
                         return list.map(a => (
                           <button key={a.id} type="button"
-                            className={`w-full text-left text-sm rounded px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-1.5 ${card.attendantId === a.id ? 'font-semibold text-blue-600' : ''}`}
+                            className={`w-full text-left text-sm rounded px-2 py-1.5 hover:bg-accent flex items-center gap-1.5 ${card.attendantId === a.id ? 'font-semibold text-blue-600' : ''}`}
                             onClick={() => reassignAttendant(card.id, String(a.id))}>
                             {a.on_duty && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" title="On duty" />}
                             {a.full_name}
                           </button>
                         ));
                       })()}
-                      {attendants.length === 0 && <p className="text-xs text-gray-400 px-2 py-1">No active attendants</p>}
+                      {attendants.length === 0 && <p className="text-xs text-muted-foreground px-2 py-1">No active attendants</p>}
                     </div>
                     {attendants.some(a => a.on_duty) && attendants.some(a => !a.on_duty) && (
                       <button type="button" className="text-xs text-blue-600 hover:underline mt-1.5 px-1"
@@ -278,7 +278,7 @@ export default function RoomGridTab({ rooms, onOpenRoom, onChanged }: RoomGridTa
             <RoomStatusPill status={card.statusLabel} />
             {card.isHra && <HraBadge />}
           </div>
-          {card.guestLine && <p className="text-xs mt-2 truncate text-gray-600 dark:text-gray-300">{card.guestLine}</p>}
+          {card.guestLine && <p className="text-xs mt-2 truncate text-muted-foreground">{card.guestLine}</p>}
         </CardContent>
       </Card>
     );
@@ -293,30 +293,30 @@ export default function RoomGridTab({ rooms, onOpenRoom, onChanged }: RoomGridTa
           <div className="flex flex-wrap items-center gap-3">
             <div className="inline-flex rounded-md border overflow-hidden">
               <button type="button" onClick={() => setMode('instant')}
-                className={`px-4 py-2 text-sm flex items-center gap-1.5 ${mode === 'instant' ? 'bg-blue-100 text-blue-800 font-medium dark:bg-blue-900 dark:text-blue-100' : 'text-gray-500'}`}>
+                className={`px-4 py-2 text-sm flex items-center gap-1.5 ${mode === 'instant' ? 'bg-blue-100 text-blue-800 font-medium dark:bg-blue-900 dark:text-blue-100' : 'text-muted-foreground'}`}>
                 <Zap size={14} /> Instant Check-In
               </button>
               <button type="button" onClick={() => setMode('future')}
-                className={`px-4 py-2 text-sm flex items-center gap-1.5 border-l ${mode === 'future' ? 'bg-blue-100 text-blue-800 font-medium dark:bg-blue-900 dark:text-blue-100' : 'text-gray-500'}`}>
+                className={`px-4 py-2 text-sm flex items-center gap-1.5 border-l ${mode === 'future' ? 'bg-blue-100 text-blue-800 font-medium dark:bg-blue-900 dark:text-blue-100' : 'text-muted-foreground'}`}>
                 <CalendarDays size={14} /> Future Booking
               </button>
             </div>
             {mode === 'future' && (
               <div className="flex items-center gap-2">
                 <Input type="date" className="w-36" value={futureIn} min={todayISO()} onChange={e => { setFutureIn(e.target.value); if (futureOut <= e.target.value) setFutureOut(addDays(e.target.value, 1)); }} />
-                <span className="text-gray-400 text-sm">→</span>
+                <span className="text-muted-foreground text-sm">→</span>
                 <Input type="date" className="w-36" value={futureOut} min={addDays(futureIn, 1)} onChange={e => setFutureOut(e.target.value)} />
-                {futureLoading && <span className="text-xs text-gray-400">Checking…</span>}
+                {futureLoading && <span className="text-xs text-muted-foreground">Checking…</span>}
               </div>
             )}
             <div className="relative ml-auto w-52">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" size={15} />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" size={15} />
               <Input placeholder="Search room, type, guest…" className="pl-8 h-9" value={search} onChange={e => setSearch(e.target.value)} />
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button type="button" title={`Sort: ${SORT_LABELS[sortBy]}`}
-                  className="h-9 w-9 shrink-0 rounded-md border border-input bg-background flex items-center justify-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+                  className="h-9 w-9 shrink-0 rounded-md border border-input bg-background flex items-center justify-center text-muted-foreground hover:text-foreground dark:hover:text-muted-foreground">
                   <ArrowUpDown size={15} />
                 </button>
               </DropdownMenuTrigger>
@@ -337,18 +337,18 @@ export default function RoomGridTab({ rooms, onOpenRoom, onChanged }: RoomGridTa
               <button key={chip.value} type="button" onClick={() => setStatusFilter(chip.value)}
                 className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === chip.value
                   ? 'bg-blue-600 text-white border-blue-600'
-                  : 'bg-transparent text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-blue-400'}`}>
+                  : 'bg-transparent text-muted-foreground border-border hover:border-blue-400'}`}>
                 {chip.label}
               </button>
             ))}
             {availableTypes.length > 1 && (
               <>
-                <span className="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1" />
+                <span className="w-px h-5 bg-muted mx-1" />
                 {availableTypes.map(t => (
                   <button key={t} type="button" onClick={() => toggleRoomType(t)}
                     className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${roomTypeFilter.has(t)
                       ? 'bg-slate-700 text-white border-slate-700 dark:bg-slate-600 dark:border-slate-600'
-                      : 'bg-transparent text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-slate-400'}`}>
+                      : 'bg-transparent text-muted-foreground border-border hover:border-slate-400'}`}>
                     {ROOM_TYPE_LABELS[t] || t}
                   </button>
                 ))}
@@ -363,7 +363,7 @@ export default function RoomGridTab({ rooms, onOpenRoom, onChanged }: RoomGridTa
 
       {sortBy === 'smart' ? (
         <div>
-          <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1">
             <Sparkles size={12} /> Sorted by what needs attention
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-4">
@@ -373,14 +373,14 @@ export default function RoomGridTab({ rooms, onOpenRoom, onChanged }: RoomGridTa
       ) : (
         floorGroups.map(([floor, list]) => (
           <div key={floor}>
-            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Floor {floor}</p>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Floor {floor}</p>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-4">
               {list.map(renderCard)}
             </div>
           </div>
         ))
       )}
-      {filtered.length === 0 && <p className="text-sm text-gray-500 text-center py-8">No rooms match the current filters.</p>}
+      {filtered.length === 0 && <p className="text-sm text-muted-foreground text-center py-8">No rooms match the current filters.</p>}
     </div>
   );
 }

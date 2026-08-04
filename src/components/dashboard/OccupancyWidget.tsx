@@ -2,11 +2,14 @@ import { useEffect, useState } from 'react';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
 import { ResizableDialog } from '@/components/dashboard/ResizableDialog';
-import { BedDouble } from 'lucide-react';
+import { BedDouble, ChevronDown, ChevronUp } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
-import { useTheme } from '@/contexts/useTheme';
 import { ROOM_STATE_COLORS } from '@/components/RoomStatusDonut';
+import { RoomStatusPill, HousekeepingBadge } from '@/pages/bookings/badges';
+import { ROOM_STATUS_META } from '@/pages/bookings/shared';
 
 interface OccupancyDetail {
   total_rooms: number;
@@ -17,6 +20,20 @@ interface OccupancyDetail {
   occupied_by_duty: Record<string, number>;
   last_week_occupancy_rate: number;
 }
+
+interface RoomRow {
+  id: number;
+  room_number: string;
+  room_type: string;
+  status: string;
+  housekeeping_status: string;
+  current_guest: string | null;
+  current_check_out: string | null;
+  checkout_due: boolean;
+}
+interface WeekCell { date: string; status: string; guest_name: string | null; }
+interface WeekRoom { id: number; room_number: string; cells: WeekCell[]; }
+interface WeekData { dates: string[]; rooms: WeekRoom[]; }
 
 // Shared with RoomStatusDonut so occupied/vacant/reserved/maintenance mean
 // the same color everywhere in the app, not just within this widget.
@@ -40,13 +57,19 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 function OccupancyDetailDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { darkMode } = useTheme();
   const [detail, setDetail] = useState<OccupancyDetail | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showRooms, setShowRooms] = useState(false);
+  const [rooms, setRooms] = useState<RoomRow[] | null>(null);
+  const [week, setWeek] = useState<WeekData | null>(null);
+  const [roomsLoading, setRoomsLoading] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     queueMicrotask(async () => {
+      setShowRooms(false);
+      setRooms(null);
+      setWeek(null);
       setLoading(true);
       try { const res = await api.get('/reports/occupancy-detail'); setDetail(res.data); }
       catch { toast.error('Failed to load occupancy detail'); }
@@ -54,10 +77,26 @@ function OccupancyDetailDialog({ open, onClose }: { open: boolean; onClose: () =
     });
   }, [open]);
 
+  useEffect(() => {
+    if (!showRooms || rooms) return;
+    queueMicrotask(async () => {
+      setRoomsLoading(true);
+      try {
+        const [roomsRes, weekRes] = await Promise.all([
+          api.get('/bookings/rooms?page_size=200'),
+          api.get('/bookings/room-week'),
+        ]);
+        setRooms(roomsRes.data.items ?? roomsRes.data);
+        setWeek(weekRes.data);
+      } catch { toast.error('Failed to load room details'); }
+      finally { setRoomsLoading(false); }
+    });
+  }, [showRooms, rooms]);
+
   const tooltipStyle = {
-    backgroundColor: darkMode ? '#111827' : '#FFFFFF',
-    border: `1px solid ${darkMode ? '#374151' : '#E5E7EB'}`, borderRadius: 8,
-    color: darkMode ? '#F9FAFB' : '#111827', fontSize: 13,
+    backgroundColor: 'hsl(var(--popover))',
+    border: '1px solid hsl(var(--border))', borderRadius: 8,
+    color: 'hsl(var(--popover-foreground))', fontSize: 13,
   };
 
   const outerData = detail ? [
@@ -71,7 +110,7 @@ function OccupancyDetailDialog({ open, onClose }: { open: boolean; onClose: () =
   ] : [];
 
   return (
-    <ResizableDialog open={open} onClose={onClose} storageKey="occupancy" defaultWidth={560} defaultHeight={620}
+    <ResizableDialog open={open} onClose={onClose} storageKey="occupancy" defaultWidth={640} defaultHeight={680}
       title={<><BedDouble size={20} /> Occupancy Breakdown</>}>
       {({ bucket, chartHeight }) => {
         // Ring radii track the box: a donut scaled for a 560px dialog looks
@@ -98,21 +137,21 @@ function OccupancyDetailDialog({ open, onClose }: { open: boolean; onClose: () =
                 </Pie>
                 {/* Outer ring: this week's detailed breakdown by duty type / non-occupancy status. */}
                 <Pie data={outerData} dataKey="value" nameKey="name" innerRadius={r * 0.65} outerRadius={r}
-                  paddingAngle={2} stroke={darkMode ? '#0a0a0a' : '#FFFFFF'} strokeWidth={2}>
+                  paddingAngle={2} stroke="hsl(var(--card))" strokeWidth={2}>
                   {outerData.map((d, i) => <Cell key={i} fill={d.color} />)}
                 </Pie>
                 <Tooltip contentStyle={tooltipStyle} formatter={(v: number, name: string) => [name.includes('last week') ? `${v}%` : `${v} rooms`, name]} />
               </PieChart>
             </ResponsiveContainer>
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <p className="text-xs text-gray-400">Inner ring: last week</p>
+              <p className="text-xs text-muted-foreground">Inner ring: last week</p>
             </div>
           </div>
         );
 
         return (
           <>
-            {loading && <p className="text-sm text-gray-500 py-8 text-center">Loading…</p>}
+            {loading && <p className="text-sm text-muted-foreground py-8 text-center">Loading…</p>}
 
             {!loading && detail && (
               <>
@@ -129,17 +168,99 @@ function OccupancyDetailDialog({ open, onClose }: { open: boolean; onClose: () =
 
                 <div className={`grid gap-3 text-center ${bucket === 'sm' ? 'grid-cols-1' : 'grid-cols-2'}`}>
                   <div className="rounded-lg border p-3">
-                    <p className="text-xs text-gray-500">Occupied</p>
+                    <p className="text-xs text-muted-foreground">Occupied</p>
                     <p className="text-xl font-bold" style={{ color: OCCUPIED_COLOR }}>{detail.occupied_count} / {detail.total_rooms}</p>
                   </div>
                   <div className="rounded-lg border p-3">
-                    <p className="text-xs text-gray-500">Not Occupied</p>
+                    <p className="text-xs text-muted-foreground">Not Occupied</p>
                     <p className="text-xl font-bold" style={{ color: NOT_OCCUPIED_COLOR }}>{detail.not_occupied_count} / {detail.total_rooms}</p>
                   </div>
                 </div>
-                <p className="text-xs text-gray-400 text-center">
+                <p className="text-xs text-muted-foreground text-center">
                   Last week this time: {detail.last_week_occupancy_rate}% occupied
                 </p>
+
+                <Button variant="outline" size="sm" className="w-full" onClick={() => setShowRooms(v => !v)}>
+                  {showRooms ? <ChevronUp size={15} className="mr-1" /> : <ChevronDown size={15} className="mr-1" />}
+                  {showRooms ? 'Hide room details' : 'More details — who\'s in which room'}
+                </Button>
+
+                {showRooms && (
+                  <div className="space-y-4">
+                    {roomsLoading && <p className="text-sm text-muted-foreground py-4 text-center">Loading room details…</p>}
+
+                    {!roomsLoading && week && (
+                      <div>
+                        <p className="text-sm font-semibold mb-2">This Week</p>
+                        <div className="overflow-x-auto rounded-lg border">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="border-b bg-muted/50">
+                                <th className="text-left font-medium px-2 py-1.5 sticky left-0 bg-muted/50">Room</th>
+                                {week.dates.map(d => (
+                                  <th key={d} className="text-center font-medium px-2 py-1.5 whitespace-nowrap">
+                                    {new Date(d).toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit' })}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {week.rooms.map(r => (
+                                <tr key={r.id} className="border-b last:border-0">
+                                  <td className="px-2 py-1.5 font-medium whitespace-nowrap sticky left-0 bg-card">{r.room_number}</td>
+                                  {r.cells.map((c, i) => {
+                                    const meta = ROOM_STATUS_META[c.status] || ROOM_STATUS_META.maintenance;
+                                    return (
+                                      <td key={i} className="px-1 py-1 text-center" title={c.guest_name || meta.label}>
+                                        <div className={`rounded px-1 py-1 truncate max-w-[6rem] ${meta.bg}`}>
+                                          {c.guest_name ? c.guest_name.split(' ')[0] : ''}
+                                        </div>
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {!roomsLoading && rooms && (
+                      <div>
+                        <p className="text-sm font-semibold mb-2">All Rooms</p>
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Room</TableHead>
+                              {bucket !== 'sm' && <TableHead>Type</TableHead>}
+                              <TableHead>Status</TableHead>
+                              <TableHead>Guest</TableHead>
+                              {bucket === 'lg' && <TableHead>Checkout</TableHead>}
+                              <TableHead>Housekeeping</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {rooms.map(r => (
+                              <TableRow key={r.id}>
+                                <TableCell className="font-medium">{r.room_number}</TableCell>
+                                {bucket !== 'sm' && <TableCell className="capitalize">{r.room_type.replace(/_/g, ' ')}</TableCell>}
+                                <TableCell><RoomStatusPill status={r.status} /></TableCell>
+                                <TableCell>{r.current_guest || '—'}</TableCell>
+                                {bucket === 'lg' && (
+                                  <TableCell className={r.checkout_due ? 'text-red-600 font-medium' : ''}>
+                                    {r.current_check_out || '—'}
+                                  </TableCell>
+                                )}
+                                <TableCell><HousekeepingBadge status={r.housekeeping_status} /></TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </>
@@ -180,7 +301,7 @@ export default function OccupancyWidget() {
           widget's only vertical padding. */}
       <Card className="cursor-pointer hover:shadow-lg transition-all py-0" onClick={() => setDetailOpen(true)}>
         <CardContent className="p-4">
-          <p className="text-base text-gray-500 dark:text-gray-400 flex items-center gap-1.5 mb-1"><BedDouble size={16} /> Occupancy</p>
+          <p className="text-base text-muted-foreground flex items-center gap-1.5 mb-1"><BedDouble size={16} /> Occupancy</p>
           <div className="flex items-center gap-4">
             <div className="relative w-24 h-24 shrink-0">
               {!loading && detail && (

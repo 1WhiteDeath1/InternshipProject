@@ -55,14 +55,14 @@ export default function UsersPage() {
   };
 
   const statusBadge = (status: string) => {
-    const colors: Record<string, string> = { active: 'bg-green-100 text-green-800', inactive: 'bg-gray-100 text-gray-800', suspended: 'bg-amber-100 text-amber-800', locked: 'bg-red-100 text-red-800' };
+    const colors: Record<string, string> = { active: 'bg-green-100 text-green-800', inactive: 'bg-muted text-muted-foreground', suspended: 'bg-amber-100 text-amber-800', locked: 'bg-red-100 text-red-800' };
     return <Badge className={colors[status] || ''}>{status}</Badge>;
   };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">User Management</h1>
+        <h1 className="text-2xl font-bold text-foreground">User Management</h1>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild><Button><Plus size={16} className="mr-1" /> Add User</Button></DialogTrigger>
           <DialogContent>
@@ -82,7 +82,7 @@ export default function UsersPage() {
         </Dialog>
       </div>
 
-      <div className="relative max-w-sm"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><Input placeholder="Search users..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" /></div>
+      <div className="relative max-w-sm"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} /><Input placeholder="Search users..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" /></div>
 
       <Card>
         <CardContent className="p-0">
@@ -96,13 +96,13 @@ export default function UsersPage() {
                   <TableCell>{u.email}</TableCell>
                   <TableCell><Badge variant={u.is_supervisor ? 'default' : 'secondary'}>{u.role_name}</Badge></TableCell>
                   <TableCell>{statusBadge(u.status)}</TableCell>
-                  <TableCell className="text-sm text-gray-500">{u.last_login ? new Date(u.last_login).toLocaleDateString() : 'Never'}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{u.last_login ? new Date(u.last_login).toLocaleDateString() : 'Never'}</TableCell>
                   <TableCell>
                     {u.status === 'locked' && <Button size="sm" variant="ghost" onClick={() => handleUnlock(u.id)}><Unlock size={16} className="text-green-600" /></Button>}
                   </TableCell>
                 </TableRow>
               ))}
-              {users.length === 0 && <TableRow><TableCell colSpan={7} className="text-center py-8 text-gray-500">No users found</TableCell></TableRow>}
+              {users.length === 0 && <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No users found</TableCell></TableRow>}
             </TableBody>
           </Table>
         </CardContent>

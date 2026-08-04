@@ -3,6 +3,8 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { FeaturesProvider } from '@/contexts/FeaturesContext';
 import { Toaster } from '@/components/ui/sonner';
+import { RequirePermission } from '@/components/RequirePermission';
+import { navItemByPath } from '@/lib/navConfig';
 import SplashScreen from '@/pages/SplashScreen';
 import Login from '@/pages/Login';
 import Layout from '@/components/Layout';
@@ -50,38 +52,38 @@ function App() {
               <Route path="/login" element={<Login />} />
               <Route element={<Layout />}>
                 <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/stock" element={<StockManagement />} />
-                <Route path="/bookings" element={<Bookings />} />
-                <Route path="/billing" element={<Billing />} />
-                <Route path="/clerk-desk" element={<ClerkDeskLayout />}>
+                <Route path="/stock" element={<RequirePermission item={navItemByPath('/stock')}><StockManagement /></RequirePermission>} />
+                <Route path="/bookings" element={<RequirePermission item={navItemByPath('/bookings')}><Bookings /></RequirePermission>} />
+                <Route path="/billing" element={<RequirePermission item={navItemByPath('/billing')}><Billing /></RequirePermission>} />
+                <Route path="/clerk-desk" element={<RequirePermission item={navItemByPath('/clerk-desk')}><ClerkDeskLayout /></RequirePermission>}>
                   <Route index element={<Navigate to="live" replace />} />
                   <Route path="live" element={<ClerkLiveGuests />} />
                   <Route path="checkout" element={<ClerkCheckout />} />
                   <Route path="mess-only" element={<ClerkMessOnly />} />
                   <Route path="members" element={<ClerkMembers />} />
                 </Route>
-                <Route path="/billing-reports" element={<BillingReports />} />
-                <Route path="/guests" element={<Guests />} />
-                <Route path="/attendants" element={<Attendants />} />
-                <Route path="/tariffs" element={<Tariffs />} />
-                <Route path="/members" element={<Members />} />
-                <Route path="/members/:id" element={<MemberLedger />} />
-                <Route path="/attendance" element={<Attendance />} />
-                <Route path="/mess-billing" element={<MessBilling />} />
-                <Route path="/kitchen" element={<Kitchen />} />
-                <Route path="/security" element={<Security />} />
-                <Route path="/users" element={<Users />} />
-                <Route path="/roles" element={<Roles />} />
-                <Route path="/audit-log" element={<AuditLog />} />
-                <Route path="/alerts" element={<Alerts />} />
-                <Route path="/directives" element={<Directives />} />
-                <Route path="/approvals" element={<Approvals />} />
-                <Route path="/reports" element={<Reports />} />
-                <Route path="/settings" element={<Settings />} />
-                <Route path="/import-export" element={<ImportExport />} />
-                <Route path="/events" element={<Events />} />
-                <Route path="/guest-discounts" element={<GuestDiscounts />} />
-                <Route path="/member-discounts" element={<MemberDiscounts />} />
+                <Route path="/billing-reports" element={<RequirePermission item={navItemByPath('/billing-reports')}><BillingReports /></RequirePermission>} />
+                <Route path="/guests" element={<RequirePermission item={navItemByPath('/guests')}><Guests /></RequirePermission>} />
+                <Route path="/attendants" element={<RequirePermission item={navItemByPath('/attendants')}><Attendants /></RequirePermission>} />
+                <Route path="/tariffs" element={<RequirePermission item={navItemByPath('/tariffs')}><Tariffs /></RequirePermission>} />
+                <Route path="/members" element={<RequirePermission item={navItemByPath('/members')}><Members /></RequirePermission>} />
+                <Route path="/members/:id" element={<RequirePermission item={navItemByPath('/members')}><MemberLedger /></RequirePermission>} />
+                <Route path="/attendance" element={<RequirePermission item={navItemByPath('/attendance')}><Attendance /></RequirePermission>} />
+                <Route path="/mess-billing" element={<RequirePermission item={navItemByPath('/mess-billing')}><MessBilling /></RequirePermission>} />
+                <Route path="/kitchen" element={<RequirePermission item={navItemByPath('/kitchen')}><Kitchen /></RequirePermission>} />
+                <Route path="/security" element={<RequirePermission item={navItemByPath('/security')}><Security /></RequirePermission>} />
+                <Route path="/users" element={<RequirePermission item={navItemByPath('/users')}><Users /></RequirePermission>} />
+                <Route path="/roles" element={<RequirePermission item={navItemByPath('/roles')}><Roles /></RequirePermission>} />
+                <Route path="/audit-log" element={<RequirePermission item={navItemByPath('/audit-log')}><AuditLog /></RequirePermission>} />
+                <Route path="/alerts" element={<RequirePermission item={navItemByPath('/alerts')}><Alerts /></RequirePermission>} />
+                <Route path="/directives" element={<RequirePermission item={navItemByPath('/directives')}><Directives /></RequirePermission>} />
+                <Route path="/approvals" element={<RequirePermission item={navItemByPath('/approvals')}><Approvals /></RequirePermission>} />
+                <Route path="/reports" element={<RequirePermission item={navItemByPath('/reports')}><Reports /></RequirePermission>} />
+                <Route path="/settings" element={<RequirePermission item={navItemByPath('/settings')}><Settings /></RequirePermission>} />
+                <Route path="/import-export" element={<RequirePermission item={navItemByPath('/import-export')}><ImportExport /></RequirePermission>} />
+                <Route path="/events" element={<RequirePermission item={navItemByPath('/events')}><Events /></RequirePermission>} />
+                <Route path="/guest-discounts" element={<RequirePermission item={navItemByPath('/guest-discounts')}><GuestDiscounts /></RequirePermission>} />
+                <Route path="/member-discounts" element={<RequirePermission item={navItemByPath('/member-discounts')}><MemberDiscounts /></RequirePermission>} />
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>

@@ -371,8 +371,8 @@ export default function RoomSection({ roomId, open, onClose, onChanged, members,
 
             {/* Prominent, hard-to-miss blockers - a guest cannot be checked in until these are cleared */}
             {room.status === 'maintenance' && (
-              <div className="rounded-lg border-2 border-gray-400 dark:border-gray-600 bg-gray-100 dark:bg-gray-800 p-3 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-gray-700 dark:text-gray-200 min-w-0">
+              <div className="rounded-lg border-2 border-border bg-muted p-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-foreground min-w-0">
                   <Wrench size={20} className="shrink-0" />
                   <div className="min-w-0">
                     <p className="text-sm font-semibold">Room under maintenance</p>

@@ -22,6 +22,11 @@ _ROLE_PERMISSIONS = {
         # don't operate Billing itself). Procurement is view-only: the mess
         # buys and restocks itself (Kitchen NCO logs it via Daily Stock
         # Intake), there's no PO to sign off on - Manager just sees spend.
+        # Deliberately NOT "inventory": Manager's stock visibility is a
+        # Dashboard widget (StockOverviewWidget, reports:view-gated) rather
+        # than the full Inventory & Procurement operational page - putting
+        # inventory:view here would surface that whole page/nav item, which
+        # is more than an "overview" and was explicitly walked back.
         "procurement": "V", "billing": "A",
         # Discount/complimentary authority for guests lives on the dedicated
         # Guest Discounts page (bookings:approve, below) - no clerk_desk
@@ -29,9 +34,17 @@ _ROLE_PERMISSIONS = {
         # Read-only access to the Customer Directory (guest identity/history) so
         # Manager can look a guest up without needing Booking NCO's full module.
         "guests": "V",
+        # View-only - lets Manager see the attendant directory and the
+        # activity-history leaderboard (who's carrying more/less duty time)
+        # without granting roster CRUD or clock in/out, which stay Booking
+        # NCO's job (attendants: "VCE" below).
+        "attendants": "V",
         # "A" only: lets Manager override a booking's client_category (and the
         # bill total that flows from it) via a dedicated endpoint, without
-        # granting general bookings:view/edit - that stays Booking NCO's module.
+        # granting general bookings:view/edit - that stays Booking NCO's
+        # module. Manager's room/occupancy visibility is a Dashboard widget
+        # (RoomOverviewWidget, reports:view-gated) instead - deliberately not
+        # the full Bookings nav item, which was explicitly walked back.
         "bookings": "A",
         # Policy: rate cards are a management decision; menu changes are
         # Kitchen NCO-proposed but Manager approves ("A" only, same narrow-
@@ -82,7 +95,11 @@ _ROLE_PERMISSIONS = {
         "events": "V", "directives": "V",
     },
     "Kitchen NCO": {
-        "inventory": "VCE", "kitchen": "VCE", "menu": "CE", "mess_rates": "VE", "procurement": "VC",
+        "inventory": "VCE", "kitchen": "VCE", "menu": "CE", "mess_rates": "VE",
+        # "E" so a mistyped/renamed vendor can actually be fixed - vendors are
+        # created inline during Daily Stock Intake and there's no other admin
+        # surface for them (Import/Export only bulk-imports, it can't edit one).
+        "procurement": "VCE",
         "attendance": "VCE",
         # Dining/non-dining member classification (incl. marking an HRA
         # resident who isn't actually eating there as non-dining) is a mess

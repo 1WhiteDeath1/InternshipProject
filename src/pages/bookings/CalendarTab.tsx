@@ -58,7 +58,7 @@ function startOfMonth(iso: string): string {
 
 // occupied/total -> a read-at-a-glance intensity bucket, shared by every month day cell
 function intensity(occupied: number, total: number): string {
-  if (!total || occupied === 0) return 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800';
+  if (!total || occupied === 0) return 'bg-muted border-border';
   const pct = occupied / total;
   if (pct < 0.5) return 'bg-emerald-50 dark:bg-emerald-950 border-emerald-200 dark:border-emerald-900';
   if (pct < 0.85) return 'bg-amber-50 dark:bg-amber-950 border-amber-200 dark:border-amber-900';
@@ -86,9 +86,9 @@ function RoomWeekGrid({ data, onOpenRoom }: { data: RoomGridData; onOpenRoom: (r
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="border-b">
-              <th className="text-left font-medium text-gray-500 text-xs py-2 px-3 sticky left-0 bg-white dark:bg-gray-950">Room</th>
+              <th className="text-left font-medium text-muted-foreground text-xs py-2 px-3 sticky left-0 bg-card">Room</th>
               {data.dates.map(d => (
-                <th key={d} className={`text-center font-medium text-xs py-2 px-2 min-w-20 ${d === today ? 'text-gray-900 dark:text-white' : 'text-gray-500'}`}>{fmtDay(d)}</th>
+                <th key={d} className={`text-center font-medium text-xs py-2 px-2 min-w-20 ${d === today ? 'text-foreground' : 'text-muted-foreground'}`}>{fmtDay(d)}</th>
               ))}
             </tr>
           </thead>
@@ -96,11 +96,11 @@ function RoomWeekGrid({ data, onOpenRoom }: { data: RoomGridData; onOpenRoom: (r
             {floorGroups.map(([floor, rooms]) => (
               <Fragment key={floor}>
                 <tr>
-                  <td colSpan={data.dates.length + 1} className="bg-gray-50 dark:bg-gray-900 text-xs font-medium text-gray-400 uppercase tracking-wide py-1 px-3">Floor {floor}</td>
+                  <td colSpan={data.dates.length + 1} className="bg-muted text-xs font-medium text-muted-foreground uppercase tracking-wide py-1 px-3">Floor {floor}</td>
                 </tr>
                 {rooms.map(r => (
                   <tr key={r.id} className="border-b last:border-0">
-                    <td className="py-1.5 px-3 font-medium sticky left-0 bg-white dark:bg-gray-950 cursor-pointer hover:underline" onClick={() => onOpenRoom(r.id)}>
+                    <td className="py-1.5 px-3 font-medium sticky left-0 bg-card cursor-pointer hover:underline" onClick={() => onOpenRoom(r.id)}>
                       {r.room_number}
                     </td>
                     {r.cells.map((c, i) => {
@@ -126,7 +126,7 @@ function RoomWeekGrid({ data, onOpenRoom }: { data: RoomGridData; onOpenRoom: (r
                             className={`text-center text-[11px] py-1.5 px-1 truncate ${fadeEdge ? '' : meta.cell}`}
                             style={fadeEdge ? { background: `linear-gradient(to right, ${meta.hex}, transparent)` } : undefined}>
                             {c.guest_name ? c.guest_name.split(' ')[0] : ''}
-                            {fadeEdge && <span className="text-gray-500 dark:text-gray-300"> ›</span>}
+                            {fadeEdge && <span className="text-muted-foreground"> ›</span>}
                           </div>
                         </td>
                       );
@@ -183,20 +183,20 @@ function DayCell({ day, isToday, onOpenRoom }: { day: CalendarDaySummary; isToda
           className={`min-h-24 rounded-md border p-1.5 text-left flex flex-col gap-0.5 transition-colors hover:opacity-80 ${intensity(day.occupied, day.total_rooms)} ${isToday ? 'ring-2 ring-primary' : ''}`}>
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium">{dayNum}</span>
-            {day.total_rooms > 0 && <span className="text-[10px] text-gray-600 dark:text-gray-300">{day.occupied}/{day.total_rooms}</span>}
+            {day.total_rooms > 0 && <span className="text-[10px] text-muted-foreground">{day.occupied}/{day.total_rooms}</span>}
           </div>
           <MixBar counts={day.kind_counts} total={day.total_rooms} />
           <div className="flex-1 space-y-0.5 overflow-hidden">
             {shown.map((g, i) => (
-              <p key={i} className="text-[10px] leading-tight truncate flex items-center gap-1 text-gray-700 dark:text-gray-300">
+              <p key={i} className="text-[10px] leading-tight truncate flex items-center gap-1 text-muted-foreground">
                 <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: OCCUPANCY_META[guestKind(g)].hex }} />
                 {g.guest_name}
               </p>
             ))}
-            {overflow > 0 && <p className="text-[10px] leading-tight text-gray-400">+{overflow} more</p>}
+            {overflow > 0 && <p className="text-[10px] leading-tight text-muted-foreground">+{overflow} more</p>}
           </div>
           {(day.arrivals > 0 || day.departures > 0) && (
-            <span className="text-[10px] text-gray-400">
+            <span className="text-[10px] text-muted-foreground">
               {day.arrivals > 0 && <>A{day.arrivals} </>}
               {day.departures > 0 && <>D{day.departures}</>}
             </span>
@@ -206,7 +206,7 @@ function DayCell({ day, isToday, onOpenRoom }: { day: CalendarDaySummary; isToda
       <PopoverContent className="w-80">
         <p className="text-sm font-medium mb-1">{fmtDay(day.date)}</p>
         {day.kind_counts && day.occupied + day.reserved > 0 && (
-          <p className="text-xs text-gray-500 mb-2 flex flex-wrap gap-x-2 gap-y-0.5">
+          <p className="text-xs text-muted-foreground mb-2 flex flex-wrap gap-x-2 gap-y-0.5">
             {MONTH_MIX.filter(k => day.kind_counts[k as keyof typeof day.kind_counts] > 0).map(k => (
               <span key={k} className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full" style={{ background: OCCUPANCY_META[k].hex }} />
@@ -215,19 +215,19 @@ function DayCell({ day, isToday, onOpenRoom }: { day: CalendarDaySummary; isToda
             ))}
           </p>
         )}
-        {day.guests.length === 0 && <p className="text-xs text-gray-400">No bookings this day</p>}
+        {day.guests.length === 0 && <p className="text-xs text-muted-foreground">No bookings this day</p>}
         <div className="space-y-1 max-h-64 overflow-y-auto">
           {day.guests.map((g, i) => {
             const k = guestKind(g);
             return (
               <button key={i} type="button" onClick={() => onOpenRoom(g.room_id)}
-                className="w-full flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-left">
+                className="w-full flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded hover:bg-accent text-left">
                 <span className="truncate flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ background: OCCUPANCY_META[k].hex }} />
                   {g.rank ? `${g.rank} ` : ''}{g.guest_name}
-                  {(k === 'hra' || k === 'indefinite') && <span className="text-gray-400 shrink-0">›</span>}
+                  {(k === 'hra' || k === 'indefinite') && <span className="text-muted-foreground shrink-0">›</span>}
                 </span>
-                <span className="text-gray-400 shrink-0">Rm {g.room_number} · {OCCUPANCY_META[k].label}</span>
+                <span className="text-muted-foreground shrink-0">Rm {g.room_number} · {OCCUPANCY_META[k].label}</span>
               </button>
             );
           })}
@@ -246,7 +246,7 @@ function MonthGrid({ days, onOpenRoom }: { days: CalendarDaySummary[]; onOpenRoo
   return (
     <div>
       <div className="grid grid-cols-7 gap-1 mb-1">
-        {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(d => <div key={d} className="text-center text-xs text-gray-400 font-medium">{d}</div>)}
+        {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(d => <div key={d} className="text-center text-xs text-muted-foreground font-medium">{d}</div>)}
       </div>
       <div className="grid grid-cols-7 gap-1">
         {Array.from({ length: leadingBlanks }).map((_, i) => <div key={`b${i}`} />)}
@@ -312,36 +312,36 @@ export default function CalendarTab({ onOpenRoom }: CalendarTabProps) {
         <div className="flex rounded-md border overflow-hidden">
           {(['week', 'month', 'room-month'] as ViewMode[]).map(m => (
             <button key={m} type="button" onClick={() => setViewMode(m)}
-              className={`px-3 py-1.5 text-xs font-medium whitespace-nowrap ${viewMode === m ? 'bg-black text-white dark:bg-white dark:text-black' : 'bg-transparent hover:bg-gray-100 dark:hover:bg-gray-800'}`}>
+              className={`px-3 py-1.5 text-xs font-medium whitespace-nowrap ${viewMode === m ? 'bg-black text-white dark:bg-white dark:text-black' : 'bg-transparent hover:bg-accent'}`}>
               {viewLabels[m]}
             </button>
           ))}
         </div>
       </div>
 
-      {loading && <p className="text-sm text-gray-500">Loading…</p>}
+      {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
       {!loading && viewMode === 'week' && weekData && <RoomWeekGrid data={weekData} onOpenRoom={onOpenRoom} />}
       {!loading && viewMode === 'month' && <MonthGrid days={monthDays} onOpenRoom={onOpenRoom} />}
       {!loading && viewMode === 'room-month' && roomMonthData && <RoomWeekGrid data={roomMonthData} onOpenRoom={onOpenRoom} />}
 
       {!loading && viewMode === 'month' && (
         <div className="space-y-1.5">
-          <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
-            <span className="text-gray-400">Cell shade = how full:</span>
-            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 inline-block" /> Empty</span>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+            <span className="text-muted-foreground">Cell shade = how full:</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-muted border border-border inline-block" /> Empty</span>
             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-emerald-50 dark:bg-emerald-950 border border-emerald-200 dark:border-emerald-900 inline-block" /> Low occupancy</span>
             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-900 inline-block" /> Busy</span>
             <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-900 inline-block" /> Full</span>
             <span>A = arrivals, D = departures</span>
           </div>
-          <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
-            <span className="text-gray-400">Bar &amp; dots = what of:</span>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+            <span className="text-muted-foreground">Bar &amp; dots = what of:</span>
             {MONTH_MIX.map(k => <LegendSwatch key={k} kind={k} />)}
           </div>
         </div>
       )}
       {!loading && (viewMode === 'week' || viewMode === 'room-month') && (
-        <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
+        <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
           {GRID_LEGEND.map(k => <LegendSwatch key={k} kind={k} />)}
           <LegendSwatch kind="indefinite" faded />
         </div>

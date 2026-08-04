@@ -18,6 +18,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { Combobox } from '@/components/ui/combobox';
 import { toast } from 'sonner';
 import {
   Search, Plus, AlertTriangle,
@@ -115,7 +116,7 @@ export default function StockManagement() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+        <h1 className="text-2xl font-bold text-foreground">
           Inventory & Procurement
         </h1>
       </div>
@@ -192,7 +193,7 @@ function DashboardTab() {
   }, [selectedItemId]);
 
   if (loading) {
-    return <div className="text-center py-12 text-gray-500">Loading dashboard...</div>;
+    return <div className="text-center py-12 text-muted-foreground">Loading dashboard...</div>;
   }
   if (!data) return null;
 
@@ -207,8 +208,8 @@ function DashboardTab() {
                 <ShoppingCart className="h-5 w-5 text-blue-600 dark:text-blue-400" />
               </div>
               <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Procurement (Month)</p>
-                <p className="text-xl font-bold text-gray-900 dark:text-white">{formatCurrency(data.month_total)}</p>
+                <p className="text-sm text-muted-foreground">Procurement (Month)</p>
+                <p className="text-xl font-bold text-foreground">{formatCurrency(data.month_total)}</p>
               </div>
             </div>
           </CardContent>
@@ -221,8 +222,8 @@ function DashboardTab() {
                 <Package className="h-5 w-5 text-green-600 dark:text-green-400" />
               </div>
               <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Inventory Value</p>
-                <p className="text-xl font-bold text-gray-900 dark:text-white">{formatCurrency(data.inventory_value)}</p>
+                <p className="text-sm text-muted-foreground">Inventory Value</p>
+                <p className="text-xl font-bold text-foreground">{formatCurrency(data.inventory_value)}</p>
               </div>
             </div>
           </CardContent>
@@ -235,8 +236,8 @@ function DashboardTab() {
                 <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400" />
               </div>
               <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Low Stock Alerts</p>
-                <p className="text-xl font-bold text-gray-900 dark:text-white">{data.low_stock_count}</p>
+                <p className="text-sm text-muted-foreground">Low Stock Alerts</p>
+                <p className="text-xl font-bold text-foreground">{data.low_stock_count}</p>
               </div>
             </div>
           </CardContent>
@@ -249,12 +250,12 @@ function DashboardTab() {
                 <DollarSign className="h-5 w-5 text-purple-600 dark:text-purple-400" />
               </div>
               <div>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Top Cost Driver</p>
-                <p className="text-xl font-bold text-gray-900 dark:text-white truncate">
+                <p className="text-sm text-muted-foreground">Top Cost Driver</p>
+                <p className="text-xl font-bold text-foreground truncate">
                   {data.top_cost_driver?.item_name ?? '—'}
                 </p>
                 {data.top_cost_driver && (
-                  <p className="text-xs text-gray-400">{formatCurrency(data.top_cost_driver.total_spend)} / 30 days</p>
+                  <p className="text-xs text-muted-foreground">{formatCurrency(data.top_cost_driver.total_spend)} / 30 days</p>
                 )}
               </div>
             </div>
@@ -284,7 +285,7 @@ function DashboardTab() {
               </Select>
             </div>
             {priceHistory?.volatility_pct != null && (
-              <p className="text-sm text-gray-500 mt-1">
+              <p className="text-sm text-muted-foreground mt-1">
                 {priceHistory.item_name}: <span className={priceHistory.volatility_pct > 10 ? 'text-red-500 font-medium' : 'text-green-600'}>
                   {priceHistory.volatility_pct > 0 ? '+' : ''}{priceHistory.volatility_pct}% volatility (90d)
                 </span>
@@ -293,23 +294,23 @@ function DashboardTab() {
           </CardHeader>
           <CardContent>
             {priceLoading ? (
-              <div className="h-[250px] flex items-center justify-center text-gray-400">Loading chart...</div>
+              <div className="h-[250px] flex items-center justify-center text-muted-foreground">Loading chart...</div>
             ) : priceHistory && priceHistory.history.length > 0 ? (
               <ResponsiveContainer width="100%" height={250}>
                 <LineChart data={priceHistory.history}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border, #e5e7eb)" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="var(--muted-foreground, #9ca3af)" />
-                  <YAxis tick={{ fontSize: 11 }} stroke="var(--muted-foreground, #9ca3af)" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
+                  <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
                   <RechartsTooltip
-                    contentStyle={{ background: 'var(--popover, #fff)', border: '1px solid var(--border, #e5e7eb)', borderRadius: 8, fontSize: 13 }}
+                    contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 13 }}
                     formatter={(value: number) => [`Rs ${value.toFixed(2)}`, 'Unit Price']}
                     labelFormatter={(label) => `Date: ${label}`}
                   />
-                  <Line type="monotone" dataKey="unit_price" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                  <Line type="monotone" dataKey="unit_price" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
                 </LineChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-[250px] flex items-center justify-center text-gray-400">
+              <div className="h-[250px] flex items-center justify-center text-muted-foreground">
                 No price data available for this item
               </div>
             )}
@@ -326,24 +327,24 @@ function DashboardTab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Procurement Frequency (30 Days)</CardTitle>
-            <p className="text-sm text-gray-500">Items ranked by number of intake entries</p>
+            <p className="text-sm text-muted-foreground">Items ranked by number of intake entries</p>
           </CardHeader>
           <CardContent>
             {data.procurement_frequency.length > 0 ? (
               <ResponsiveContainer width="100%" height={250}>
                 <BarChart data={data.procurement_frequency} layout="vertical" margin={{ left: 80 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border, #e5e7eb)" />
-                  <XAxis type="number" tick={{ fontSize: 11 }} stroke="var(--muted-foreground, #9ca3af)" />
-                  <YAxis dataKey="item_name" type="category" tick={{ fontSize: 11 }} width={75} stroke="var(--muted-foreground, #9ca3af)" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis type="number" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
+                  <YAxis dataKey="item_name" type="category" tick={{ fontSize: 11 }} width={75} stroke="hsl(var(--muted-foreground))" />
                   <RechartsTooltip
-                    contentStyle={{ background: 'var(--popover, #fff)', border: '1px solid var(--border, #e5e7eb)', borderRadius: 8, fontSize: 13 }}
+                    contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 13 }}
                     formatter={(value: number) => [`${value} times`, 'Procured']}
                   />
-                  <Bar dataKey="intake_count" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="intake_count" fill="hsl(var(--chart-4))" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-[250px] flex items-center justify-center text-gray-400">
+              <div className="h-[250px] flex items-center justify-center text-muted-foreground">
                 No procurement data in the last 30 days
               </div>
             )}
@@ -354,25 +355,25 @@ function DashboardTab() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Top Costing Products (30 Days)</CardTitle>
-            <p className="text-sm text-gray-500">Items ranked by total spend</p>
+            <p className="text-sm text-muted-foreground">Items ranked by total spend</p>
           </CardHeader>
           <CardContent>
             {data.top_costing_products.length > 0 ? (
               <ResponsiveContainer width="100%" height={250}>
                 <BarChart data={data.top_costing_products} layout="vertical" margin={{ left: 80 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border, #e5e7eb)" />
-                  <XAxis type="number" tick={{ fontSize: 11 }} stroke="var(--muted-foreground, #9ca3af)"
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis type="number" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))"
                     tickFormatter={(v: number) => v >= 1000 ? `${Math.round(v / 1000)}k` : String(v)} />
-                  <YAxis dataKey="item_name" type="category" tick={{ fontSize: 11 }} width={75} stroke="var(--muted-foreground, #9ca3af)" />
+                  <YAxis dataKey="item_name" type="category" tick={{ fontSize: 11 }} width={75} stroke="hsl(var(--muted-foreground))" />
                   <RechartsTooltip
-                    contentStyle={{ background: 'var(--popover, #fff)', border: '1px solid var(--border, #e5e7eb)', borderRadius: 8, fontSize: 13 }}
+                    contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 13 }}
                     formatter={(value: number) => [formatCurrency(value), 'Spend']}
                   />
-                  <Bar dataKey="total_spend" fill="#dc2626" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="total_spend" fill="hsl(var(--chart-5))" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-[250px] flex items-center justify-center text-gray-400">
+              <div className="h-[250px] flex items-center justify-center text-muted-foreground">
                 No procurement data in the last 30 days
               </div>
             )}
@@ -394,6 +395,8 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [vendorsLoading, setVendorsLoading] = useState(false);
+  const vendorSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedItemId, setSelectedItemId] = useState('');
   const [vendorId, setVendorId] = useState('');
   const [quantity, setQuantity] = useState('');
@@ -401,6 +404,8 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
   const [saving, setSaving] = useState(false);
   const [newVendorOpen, setNewVendorOpen] = useState(false);
   const [newVendorName, setNewVendorName] = useState('');
+  const [editVendorOpen, setEditVendorOpen] = useState(false);
+  const [editVendorName, setEditVendorName] = useState('');
   const [lastResult, setLastResult] = useState<{
     item_name: string; quantity: number; unit: string;
     unit_price: number; prev_unit_price: number | null;
@@ -434,12 +439,23 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
     } catch { /* silent */ }
   }, []);
 
-  const fetchVendors = useCallback(async () => {
+  const fetchVendors = useCallback(async (search = '') => {
+    setVendorsLoading(true);
     try {
-      const res = await api.get('/procurement/vendors?page_size=100');
+      // Server-side search (not a fixed page_size fetch) so a vendor list
+      // that grows past one page is still fully reachable - see the
+      // page_size=100 truncation class of bug documented in CLAUDE.md.
+      const res = await api.get('/procurement/vendors', { params: { search, page_size: 50 } });
       setVendors(res.data.items || []);
-    } catch { /* silent */ }
+    } catch { /* silent */ } finally {
+      setVendorsLoading(false);
+    }
   }, []);
+
+  const handleVendorSearch = useCallback((search: string) => {
+    if (vendorSearchTimer.current) clearTimeout(vendorSearchTimer.current);
+    vendorSearchTimer.current = setTimeout(() => fetchVendors(search), 250);
+  }, [fetchVendors]);
 
   useEffect(() => {
     fetchItems();
@@ -529,6 +545,21 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
     }
   };
 
+  const handleUpdateVendor = async () => {
+    if (!vendorId || !editVendorName.trim()) {
+      toast.error('Vendor name is required');
+      return;
+    }
+    try {
+      await api.put(`/procurement/vendors/${vendorId}`, { name: editVendorName.trim() });
+      toast.success('Vendor updated');
+      setEditVendorOpen(false);
+      await fetchVendors();
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Failed to update vendor'));
+    }
+  };
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       {/* Input Form */}
@@ -538,7 +569,7 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
             <div className="flex items-start justify-between gap-3 flex-wrap">
               <div>
                 <CardTitle className="text-lg">Record Incoming Stock</CardTitle>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                <p className="text-sm text-muted-foreground mt-1">
                   Log daily inventory purchases to update stock counts and track pricing.
                 </p>
               </div>
@@ -575,23 +606,37 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
             {/* Optional: who this was bought from */}
             <div className="space-y-2">
               <Label className="text-sm font-medium">Bought From (optional)</Label>
-              <Select value={vendorId} onValueChange={setVendorId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select vendor..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {vendors.map(v => (
-                    <SelectItem key={v.id} value={String(v.id)}>{v.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <button
-                type="button"
-                className="text-sm text-blue-600 hover:underline"
-                onClick={() => setNewVendorOpen(true)}
-              >
-                + Add New Vendor
-              </button>
+              <Combobox
+                options={vendors.map(v => ({ value: String(v.id), label: v.name }))}
+                value={vendorId}
+                onValueChange={setVendorId}
+                onSearchChange={handleVendorSearch}
+                loading={vendorsLoading}
+                placeholder="Select vendor..."
+                searchPlaceholder="Search vendors..."
+                emptyText="No vendors found."
+              />
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  className="text-sm text-blue-600 hover:underline"
+                  onClick={() => setNewVendorOpen(true)}
+                >
+                  + Add New Vendor
+                </button>
+                {vendorId && (
+                  <button
+                    type="button"
+                    className="text-sm text-blue-600 hover:underline"
+                    onClick={() => {
+                      setEditVendorName(vendors.find(v => String(v.id) === vendorId)?.name || '');
+                      setEditVendorOpen(true);
+                    }}
+                  >
+                    Rename selected vendor
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Step 2 & 3: Quantity and Cost */}
@@ -608,7 +653,7 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
                     min={0}
                     step="any"
                   />
-                  <span className="text-sm text-gray-500 whitespace-nowrap min-w-[40px]">
+                  <span className="text-sm text-muted-foreground whitespace-nowrap min-w-[40px]">
                     {selectedItem?.unit || 'unit'}
                   </span>
                 </div>
@@ -616,7 +661,7 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
               <div className="space-y-2">
                 <Label className="text-sm font-medium">3. Total Cost Paid</Label>
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-500">Rs</span>
+                  <span className="text-sm text-muted-foreground">Rs</span>
                   <Input
                     ref={costRef}
                     type="number"
@@ -686,24 +731,24 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
       <div>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-gray-500">Recent Intakes</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Recent Intakes</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 p-3">
             {recentIntakes.length === 0 && (
-              <p className="text-sm text-gray-400 text-center py-4">No recent intakes</p>
+              <p className="text-sm text-muted-foreground text-center py-4">No recent intakes</p>
             )}
             {recentIntakes.map(r => (
-              <div key={r.id} className="flex items-center justify-between text-sm border-b border-gray-100 dark:border-gray-800 pb-2 last:border-0">
+              <div key={r.id} className="flex items-center justify-between text-sm border-b border-border pb-2 last:border-0">
                 <div>
-                  <p className="font-medium text-gray-900 dark:text-white">{r.item_name}</p>
-                  <p className="text-xs text-gray-500">
+                  <p className="font-medium text-foreground">{r.item_name}</p>
+                  <p className="text-xs text-muted-foreground">
                     {r.quantity} {r.unit} @ Rs {r.unit_cost.toFixed(2)}/{r.unit}
                     {r.vendor_name && ` · ${r.vendor_name}`}
                   </p>
                 </div>
                 <div className="text-right">
                   <p className="font-medium">{formatCurrency(r.total_cost)}</p>
-                  <p className="text-xs text-gray-400">{r.received_date}</p>
+                  <p className="text-xs text-muted-foreground">{r.received_date}</p>
                 </div>
               </div>
             ))}
@@ -792,6 +837,26 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
         </DialogContent>
       </Dialog>
 
+      {/* Edit Vendor Dialog */}
+      <Dialog open={editVendorOpen} onOpenChange={setEditVendorOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Rename Vendor</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Name</Label>
+              <Input
+                value={editVendorName}
+                onChange={e => setEditVendorName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleUpdateVendor(); }}
+              />
+            </div>
+            <Button onClick={handleUpdateVendor} className="w-full">Save</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <ReceiptScanDialog
         open={scanOpen}
         onOpenChange={setScanOpen}
@@ -847,7 +912,7 @@ function StockTab({ onLogIntake }: { onLogIntake: (itemId: number) => void }) {
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
           <Input
             placeholder="Search ingredient or SKU..."
             value={search}
@@ -892,7 +957,7 @@ function StockTab({ onLogIntake }: { onLogIntake: (itemId: number) => void }) {
               <TableBody>
                 {loading && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-gray-500">Loading inventory...</TableCell>
+                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">Loading inventory...</TableCell>
                   </TableRow>
                 )}
                 {!loading && sortedItems.map(item => {
@@ -901,11 +966,11 @@ function StockTab({ onLogIntake }: { onLogIntake: (itemId: number) => void }) {
                     <TableRow key={item.id} className={isLow ? 'bg-amber-50 dark:bg-amber-950/20' : ''}>
                       <TableCell className="font-medium">{item.name}</TableCell>
                       <TableCell className="font-semibold">{item.total_stock}</TableCell>
-                      <TableCell className="text-gray-500">{item.unit}</TableCell>
+                      <TableCell className="text-muted-foreground">{item.unit}</TableCell>
                       <TableCell>
                         {item.last_unit_cost != null
                           ? `Rs ${item.last_unit_cost.toFixed(2)} / ${item.unit}`
-                          : <span className="text-gray-400">—</span>
+                          : <span className="text-muted-foreground">—</span>
                         }
                       </TableCell>
                       <TableCell>
@@ -932,7 +997,7 @@ function StockTab({ onLogIntake }: { onLogIntake: (itemId: number) => void }) {
                 })}
                 {!loading && sortedItems.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-gray-500">
+                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                       {filter === 'low' ? 'No low stock items' : 'No inventory items found'}
                     </TableCell>
                   </TableRow>

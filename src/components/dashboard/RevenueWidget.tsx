@@ -8,7 +8,6 @@ import { TrendingUp, TrendingDown, DollarSign } from 'lucide-react';
 import {
   AreaChart, Area, ComposedChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
-import { useTheme } from '@/contexts/useTheme';
 import { formatCurrency } from '@/lib/currency';
 
 interface RevenueSummary {
@@ -34,9 +33,9 @@ const RANGES = [
 ];
 
 const SERIES = [
-  { key: 'revenue', label: 'Revenue', color: '#2563EB' },
-  { key: 'cost', label: 'Cost', color: '#DC2626' },
-  { key: 'profit', label: 'Profit', color: '#059669' },
+  { key: 'revenue', label: 'Revenue', color: 'hsl(var(--chart-1))' },
+  { key: 'cost', label: 'Cost', color: 'hsl(var(--chart-5))' },
+  { key: 'profit', label: 'Profit', color: 'hsl(var(--chart-2))' },
 ] as const;
 
 function bigMoney(n: number | undefined) {
@@ -57,7 +56,7 @@ function PctBadge({ pct, size = 'base' }: { pct: number; size?: 'base' | 'sm' })
 function StatCard({ label, value, pct }: { label: string; value: number; pct?: number }) {
   return (
     <div className="rounded-lg border p-3">
-      <p className="text-xs text-gray-500">{label}</p>
+      <p className="text-xs text-muted-foreground">{label}</p>
       <p className="text-lg font-bold font-mono">{bigMoney(value)}</p>
       {pct !== undefined && <PctBadge pct={pct} size="sm" />}
     </div>
@@ -65,7 +64,6 @@ function StatCard({ label, value, pct }: { label: string; value: number; pct?: n
 }
 
 function RevenueDetailDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { darkMode } = useTheme();
   const [range, setRange] = useState('30');
   const [detail, setDetail] = useState<RevenueDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -87,11 +85,11 @@ function RevenueDetailDialog({ open, onClose }: { open: boolean; onClose: () => 
     });
   }, [open, range]);
 
-  const gridStroke = darkMode ? '#374151' : '#E5E7EB';
-  const tickFill = darkMode ? '#9CA3AF' : '#6B7280';
+  const gridStroke = 'hsl(var(--border))';
+  const tickFill = 'hsl(var(--muted-foreground))';
   const tooltipStyle = {
-    backgroundColor: darkMode ? '#111827' : '#FFFFFF',
-    border: `1px solid ${gridStroke}`, borderRadius: 8, color: darkMode ? '#F9FAFB' : '#111827', fontSize: 13,
+    backgroundColor: 'hsl(var(--popover))',
+    border: `1px solid ${gridStroke}`, borderRadius: 8, color: 'hsl(var(--popover-foreground))', fontSize: 13,
   };
   const chartData = detail?.labels.map((l, i) => ({
     date: range === '365' ? l.slice(0, 7) : l.slice(5),
@@ -147,7 +145,7 @@ function RevenueDetailDialog({ open, onClose }: { open: boolean; onClose: () => 
             </div>
           </div>
 
-          {loading && <p className="text-sm text-gray-500 py-8 text-center">Loading…</p>}
+          {loading && <p className="text-sm text-muted-foreground py-8 text-center">Loading…</p>}
 
           {!loading && detail && (
             <>
@@ -162,9 +160,9 @@ function RevenueDetailDialog({ open, onClose }: { open: boolean; onClose: () => 
                     domain={domainMax ? [0, domainMax] : ['auto', 'auto']} allowDataOverflow={!!domainMax}
                     tickFormatter={(v: number) => Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}k` : String(v)} />
                   <Tooltip contentStyle={tooltipStyle} formatter={(v: number, name: string) => [formatCurrency(v), name]} />
-                  {visibleSeries.includes('revenue') && <Line type="monotone" dataKey="revenue" name="Revenue" stroke="#2563EB" strokeWidth={2.5} dot={false} />}
-                  {visibleSeries.includes('cost') && <Line type="monotone" dataKey="cost" name="Cost" stroke="#DC2626" strokeWidth={2.5} dot={false} />}
-                  {visibleSeries.includes('profit') && <Line type="monotone" dataKey="profit" name="Profit" stroke="#059669" strokeWidth={2.5} dot={false} />}
+                  {visibleSeries.includes('revenue') && <Line type="monotone" dataKey="revenue" name="Revenue" stroke={SERIES[0].color} strokeWidth={2.5} dot={false} />}
+                  {visibleSeries.includes('cost') && <Line type="monotone" dataKey="cost" name="Cost" stroke={SERIES[1].color} strokeWidth={2.5} dot={false} />}
+                  {visibleSeries.includes('profit') && <Line type="monotone" dataKey="profit" name="Profit" stroke={SERIES[2].color} strokeWidth={2.5} dot={false} />}
                 </ComposedChart>
               </ResponsiveContainer>
               {domainMax && spike && (
@@ -184,7 +182,7 @@ function RevenueDetailDialog({ open, onClose }: { open: boolean; onClose: () => 
                     <StatCard label="Cost" value={detail.cost_total} pct={detail.cost_pct_change} />
                     <StatCard label="Profit" value={detail.profit_total} pct={detail.profit_pct_change} />
                   </div>
-                  <p className="text-xs text-gray-400 mt-2">vs the previous equal-length period ({RANGES.find(r => r.key === range)?.label} before that)</p>
+                  <p className="text-xs text-muted-foreground mt-2">vs the previous equal-length period ({RANGES.find(r => r.key === range)?.label} before that)</p>
                 </div>
 
                 <div>
@@ -228,7 +226,7 @@ export default function RevenueWidget() {
       <Card className="cursor-pointer hover:shadow-lg transition-all py-0" onClick={() => setDetailOpen(true)}>
         <CardContent className="p-4">
           <div className="flex items-center justify-between mb-1">
-            <p className="text-base text-gray-500 dark:text-gray-400 flex items-center gap-1.5"><DollarSign size={16} /> Revenue</p>
+            <p className="text-base text-muted-foreground flex items-center gap-1.5"><DollarSign size={16} /> Revenue</p>
             {!loading && summary && <PctBadge pct={summary.pct_change} />}
           </div>
           <div className="h-16 -mx-2">
@@ -237,19 +235,19 @@ export default function RevenueWidget() {
                 <AreaChart data={sparkData} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
                   <defs>
                     <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={up ? '#059669' : '#DC2626'} stopOpacity={0.3} />
-                      <stop offset="100%" stopColor={up ? '#059669' : '#DC2626'} stopOpacity={0.02} />
+                      <stop offset="0%" stopColor={up ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-5))'} stopOpacity={0.3} />
+                      <stop offset="100%" stopColor={up ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-5))'} stopOpacity={0.02} />
                     </linearGradient>
                   </defs>
-                  <Area type="monotone" dataKey="v" stroke={up ? '#059669' : '#DC2626'} strokeWidth={2} fill="url(#sparkFill)" dot={false} isAnimationActive={false} />
+                  <Area type="monotone" dataKey="v" stroke={up ? 'hsl(var(--chart-2))' : 'hsl(var(--chart-5))'} strokeWidth={2} fill="url(#sparkFill)" dot={false} isAnimationActive={false} />
                 </AreaChart>
               </ResponsiveContainer>
             )}
           </div>
-          <p className="text-3xl font-bold tracking-tight text-gray-900 dark:text-white mt-1">
-            {loading ? <span className="inline-block h-8 w-32 bg-gray-200 dark:bg-gray-700 rounded animate-pulse" /> : bigMoney(summary?.current_week_total)}
+          <p className="text-3xl font-bold tracking-tight text-foreground mt-1">
+            {loading ? <span className="inline-block h-8 w-32 bg-muted rounded animate-pulse" /> : bigMoney(summary?.current_week_total)}
           </p>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">This week's revenue vs the same days last week</p>
+          <p className="text-sm text-muted-foreground mt-0.5">This week's revenue vs the same days last week</p>
         </CardContent>
       </Card>
       <RevenueDetailDialog open={detailOpen} onClose={() => setDetailOpen(false)} />

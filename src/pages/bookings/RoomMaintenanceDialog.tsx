@@ -24,7 +24,7 @@ export function RoomMaintenanceDialog({ room, saving, onSave, onCancel, issueFie
     <div className="rounded-lg border-2 border-primary/20 shadow-sm p-4 space-y-3.5">
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold">Send to Maintenance</p>
-        <button type="button" className="text-gray-400 hover:text-gray-600" onClick={onCancel}><X size={16} /></button>
+        <button type="button" className="text-muted-foreground hover:text-muted-foreground" onClick={onCancel}><X size={16} /></button>
       </div>
       <div>
         <Label className="text-xs">Issue Description</Label>

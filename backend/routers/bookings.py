@@ -271,7 +271,10 @@ async def room_calendar(
     room_id: int, year: int = 0, month: int = 0,
     db: Session = Depends(get_db), current_user=Depends(get_current_user),
 ):
-    """A month of stays for one room - feeds the room detail panel."""
+    """A month of stays for one room - feeds the room detail panel. Returns
+    guest name/phone/rank - PII, gated the same as the rest of Bookings."""
+    if not check_permission(current_user, "bookings", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     room = db.query(Room).filter(Room.id == room_id).first()
     if not room:
         raise HTTPException(status_code=404, detail="Room not found")
@@ -351,7 +354,12 @@ async def availability(
     Pass room_id to scope this to one room - used as a single-room price
     quote (e.g. the in-panel booking form) instead of a duplicate endpoint;
     include_booked is implied true in that case so a conflicting room still
-    returns its pricing/conflict details rather than an empty result."""
+    returns its pricing/conflict details rather than an empty result.
+
+    unavailable_reason embeds the conflicting guest's name - PII, gated the
+    same as the rest of Bookings."""
+    if not check_permission(current_user, "bookings", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     if check_out <= check_in:
         raise HTTPException(status_code=400, detail="check_out must be after check_in")
 
@@ -426,7 +434,12 @@ async def calendar_summary(
     the Bookings Calendar tab: Week/Month views (granularity=day) and Year
     view (granularity=month). Unlike a current-status snapshot, 'occupied'
     counts checked_in AND checked_out bookings overlapping a date, so past
-    dates stay accurate after a guest has since checked out."""
+    dates stay accurate after a guest has since checked out.
+
+    Day cells embed guest names/ranks - PII, gated the same as the rest of
+    Bookings."""
+    if not check_permission(current_user, "bookings", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     if end <= start:
         raise HTTPException(status_code=400, detail="end must be after start")
 

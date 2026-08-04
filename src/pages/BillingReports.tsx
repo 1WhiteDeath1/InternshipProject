@@ -64,25 +64,25 @@ function IncomeCostCard({ label, icon: Icon, income, cost, accentClass }: {
               {margin >= 0 ? '+' : ''}{formatCurrency(margin)} margin
             </span>
           ) : (
-            <span className="text-xs text-gray-400">Margin not calculable</span>
+            <span className="text-xs text-muted-foreground">Margin not calculable</span>
           )}
         </div>
 
         <div className="space-y-1">
-          <div className="flex justify-between text-xs text-gray-500"><span>Income</span><span className="font-mono font-semibold text-emerald-600">{formatCurrency(income)}</span></div>
-          <div className="h-3 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
+          <div className="flex justify-between text-xs text-muted-foreground"><span>Income</span><span className="font-mono font-semibold text-emerald-600">{formatCurrency(income)}</span></div>
+          <div className="h-3 rounded-full bg-muted overflow-hidden">
             <div className="h-3 rounded-full bg-emerald-500" style={{ width: `${Math.min((income / scale) * 100, 100)}%` }} />
           </div>
         </div>
 
         <div className="space-y-1">
-          <div className="flex justify-between text-xs text-gray-500">
+          <div className="flex justify-between text-xs text-muted-foreground">
             <span>Cost</span>
-            <span className={`font-mono font-semibold ${cost !== null ? 'text-red-500' : 'text-gray-400'}`}>
+            <span className={`font-mono font-semibold ${cost !== null ? 'text-red-500' : 'text-muted-foreground'}`}>
               {cost !== null ? formatCurrency(cost) : 'Not tracked'}
             </span>
           </div>
-          <div className="h-3 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
+          <div className="h-3 rounded-full bg-muted overflow-hidden">
             {cost !== null && <div className="h-3 rounded-full bg-red-500" style={{ width: `${Math.min((cost / scale) * 100, 100)}%` }} />}
           </div>
         </div>
@@ -144,10 +144,10 @@ export default function BillingReports() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+        <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
           <Scale size={24} /> Income &amp; Cost
         </h1>
-        <p className="text-xs text-gray-500">Room vs. mess income compared against known cost, by month or year.</p>
+        <p className="text-xs text-muted-foreground">Room vs. mess income compared against known cost, by month or year.</p>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -175,7 +175,7 @@ export default function BillingReports() {
         </div>
       </div>
 
-      {loading && <p className="text-sm text-gray-500">Loading report…</p>}
+      {loading && <p className="text-sm text-muted-foreground">Loading report…</p>}
 
       {!loading && summary && (
         <>
@@ -186,7 +186,7 @@ export default function BillingReports() {
               income={summary.mess.income} cost={summary.mess.cost} />
           </div>
           {summary.mess.cost !== null && summary.mess.cost > 0 && (
-            <p className="text-xs text-gray-500 -mt-2">
+            <p className="text-xs text-muted-foreground -mt-2">
               Mess cost = {formatCurrency(summary.mess_cost_breakdown.procurement)} procurement + {formatCurrency(summary.mess_cost_breakdown.waste)} waste.
               Room cost isn't tracked anywhere in this system (no housekeeping/utility/maintenance cost model) - only income is shown for Room.
             </p>
@@ -194,9 +194,9 @@ export default function BillingReports() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <Card><CardContent className="p-4 space-y-1">
-              <div className="flex items-center gap-2 text-xs text-gray-500"><Wallet size={14} className="text-emerald-600" /> Cash In</div>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground"><Wallet size={14} className="text-emerald-600" /> Cash In</div>
               <p className="text-xl font-bold text-emerald-600">{formatCurrency(summary.cash_in_total)}</p>
-              <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-gray-500">
+              <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
                 {summary.cash_in_by_method.length === 0 && <span>No payments recorded</span>}
                 {summary.cash_in_by_method.map(m => (
                   <span key={m.method}>{m.method}: <span className="font-mono font-medium">{formatCurrency(m.amount)}</span></span>
@@ -205,15 +205,15 @@ export default function BillingReports() {
             </CardContent></Card>
             <Card><CardContent className="p-4 flex items-center gap-3">
               <div className="w-9 h-9 rounded-lg bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center"><Percent size={18} className="text-amber-600" /></div>
-              <div><p className="text-xs text-gray-500">Discounts Given</p><p className="text-lg font-bold">{formatCurrency(summary.discounts_total)}</p></div>
+              <div><p className="text-xs text-muted-foreground">Discounts Given</p><p className="text-lg font-bold">{formatCurrency(summary.discounts_total)}</p></div>
             </CardContent></Card>
             <Card><CardContent className="p-4 flex items-center gap-3">
               <div className="w-9 h-9 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center"><Ban size={18} className="text-red-600" /></div>
-              <div><p className="text-xs text-gray-500">Voided</p><p className="text-lg font-bold">{summary.void_count} · {formatCurrency(summary.void_amount)}</p></div>
+              <div><p className="text-xs text-muted-foreground">Voided</p><p className="text-lg font-bold">{summary.void_count} · {formatCurrency(summary.void_amount)}</p></div>
             </CardContent></Card>
             <Card><CardContent className="p-4 flex items-center gap-3">
               <div className="w-9 h-9 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center"><Clock size={18} className="text-orange-600" /></div>
-              <div><p className="text-xs text-gray-500">Overdue Balance</p><p className="text-lg font-bold">{formatCurrency(summary.overdue_amount)}</p></div>
+              <div><p className="text-xs text-muted-foreground">Overdue Balance</p><p className="text-lg font-bold">{formatCurrency(summary.overdue_amount)}</p></div>
             </CardContent></Card>
           </div>
 
@@ -222,8 +222,8 @@ export default function BillingReports() {
               <CardContent className="p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-sm font-medium"><Boxes size={16} /> Stock Valuation</div>
-                  <div className="text-sm text-gray-500">
-                    Total: <span className="font-bold text-gray-900 dark:text-white">{formatCurrency(stock.total_stock_value)}</span>
+                  <div className="text-sm text-muted-foreground">
+                    Total: <span className="font-bold text-foreground">{formatCurrency(stock.total_stock_value)}</span>
                     {stock.low_stock_count > 0 && <span className="ml-3 text-amber-600">{stock.low_stock_count} item(s) low stock</span>}
                   </div>
                 </div>
@@ -232,12 +232,12 @@ export default function BillingReports() {
                     {stock.top_items.map(it => (
                       <div key={it.id} className="rounded-md border p-2.5 text-sm">
                         <p className="font-medium truncate" title={it.name}>{it.name}</p>
-                        <p className="text-xs text-gray-500">{it.quantity} {it.unit}</p>
+                        <p className="text-xs text-muted-foreground">{it.quantity} {it.unit}</p>
                         <p className="font-mono text-xs font-semibold">{formatCurrency(it.value)}</p>
                       </div>
                     ))}
                   </div>
-                ) : <p className="text-sm text-gray-500">No stock on hand.</p>}
+                ) : <p className="text-sm text-muted-foreground">No stock on hand.</p>}
               </CardContent>
             </Card>
           )}

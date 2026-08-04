@@ -25,7 +25,7 @@ run_startup_migrations(engine)
 app = FastAPI(
     title="EME MESS Management",
     description="Production-grade Hotel & Mess Management System",
-    version="1.3.0",
+    version="1.3.1",
 )
 
 app.add_middleware(
@@ -72,7 +72,7 @@ app.include_router(routers.directives_router, prefix="/api/directives", tags=["D
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok", "version": "1.3.0"}
+    return {"status": "ok", "version": "1.3.1"}
 
 
 # Serve static files (React build). Registered LAST so the "/{full_path:path}"

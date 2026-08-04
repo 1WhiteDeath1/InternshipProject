@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { Search, Plus, IdCard, ArrowRightLeft, Settings2, Receipt } from 'lucide-react';
+import { ConfirmDialog, type ConfirmRequest } from '@/components/ConfirmDialog';
 
 interface Member {
   id: number;
@@ -44,6 +45,7 @@ export default function Members() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [members, setMembers] = useState<Member[]>([]);
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -124,18 +126,27 @@ export default function Members() {
     } catch (err) { toast.error(getErrorMessage(err, 'Failed to save rate')); }
   };
 
-  const handleStatusChange = async (id: number, status: string) => {
-    const reason = prompt(`Enter reason for marking this member as "${status}":`);
-    if (!reason) return;
-    try {
-      await api.post(`/members/${id}/status`, { status, reason });
-      toast.success('Member status updated');
-      fetchMembers();
-    } catch (err) { toast.error(getErrorMessage(err, 'Failed')); }
+  const handleStatusChange = (id: number, status: string) => {
+    const member = members.find(m => m.id === id);
+    setConfirmRequest({
+      title: `Mark member as "${status}"?`,
+      description: member ? `${member.full_name} (${member.service_number})` : 'This member',
+      confirmLabel: 'Confirm',
+      reasonLabel: `Reason for marking this member as "${status}"`,
+      reasonRequired: true,
+      reasonMinLength: 10,
+      onConfirm: async (reason) => {
+        try {
+          await api.post(`/members/${id}/status`, { status, reason });
+          toast.success('Member status updated');
+          fetchMembers();
+        } catch (err) { toast.error(getErrorMessage(err, 'Failed')); }
+      },
+    });
   };
 
   const statusBadge = (status: string) => {
-    const colors: Record<string, string> = { active: 'bg-green-100 text-green-800', transferred: 'bg-amber-100 text-amber-800', left: 'bg-gray-100 text-gray-800' };
+    const colors: Record<string, string> = { active: 'bg-green-100 text-green-800', transferred: 'bg-amber-100 text-amber-800', left: 'bg-muted text-muted-foreground' };
     return <Badge className={colors[status] || ''}>{status}</Badge>;
   };
 
@@ -144,7 +155,7 @@ export default function Members() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><IdCard size={24} /> Member Management</h1>
+        <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><IdCard size={24} /> Member Management</h1>
         <div className="flex gap-2">
         {hasPermission(user, 'womens_bloc_rates', 'edit') && (
           <Dialog open={wbRatesOpen} onOpenChange={setWbRatesOpen}>
@@ -152,7 +163,7 @@ export default function Members() {
             <DialogContent className="max-w-md">
               <DialogHeader><DialogTitle>Women's Bloc Rank Rates</DialogTitle></DialogHeader>
               <div className="space-y-3">
-                <p className="text-xs text-gray-500">Monthly HRA rate for a Women's Bloc resident, by rank - used instead of the standard HRA rate for members flagged Women's Bloc. Unset bands bill at Rs 0 until saved here.</p>
+                <p className="text-xs text-muted-foreground">Monthly HRA rate for a Women's Bloc resident, by rank - used instead of the standard HRA rate for members flagged Women's Bloc. Unset bands bill at Rs 0 until saved here.</p>
                 {WOMENS_BLOC_BANDS.map(([band, label]) => (
                   <div key={band} className="flex items-center gap-2">
                     <Label className="flex-1">{label}</Label>
@@ -219,29 +230,29 @@ export default function Members() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card><CardContent className="p-5"><p className="text-sm text-gray-500">Active Members</p><p className="text-2xl font-bold">{activeCount}</p></CardContent></Card>
-        <Card><CardContent className="p-5"><p className="text-sm text-gray-500">Officers</p><p className="text-2xl font-bold">{members.filter(m => m.mess_category === 'officers').length}</p></CardContent></Card>
-        <Card><CardContent className="p-5"><p className="text-sm text-gray-500">JCOs</p><p className="text-2xl font-bold">{members.filter(m => m.mess_category === 'jcos').length}</p></CardContent></Card>
-        <Card><CardContent className="p-5"><p className="text-sm text-gray-500">ORs</p><p className="text-2xl font-bold">{members.filter(m => m.mess_category === 'ors').length}</p></CardContent></Card>
+        <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Active Members</p><p className="text-2xl font-bold">{activeCount}</p></CardContent></Card>
+        <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Officers</p><p className="text-2xl font-bold">{members.filter(m => m.mess_category === 'officers').length}</p></CardContent></Card>
+        <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">JCOs</p><p className="text-2xl font-bold">{members.filter(m => m.mess_category === 'jcos').length}</p></CardContent></Card>
+        <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">ORs</p><p className="text-2xl font-bold">{members.filter(m => m.mess_category === 'ors').length}</p></CardContent></Card>
       </div>
 
-      <div className="relative max-w-sm"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><Input placeholder="Search members..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" /></div>
+      <div className="relative max-w-sm"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} /><Input placeholder="Search members..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" /></div>
 
       <Card>
         <CardContent className="p-0">
           <Table>
             <TableHeader><TableRow><TableHead>Service #</TableHead><TableHead>Name</TableHead><TableHead>Rank</TableHead><TableHead>Unit</TableHead><TableHead>Category</TableHead><TableHead>Dining</TableHead><TableHead>Current Room</TableHead><TableHead>Status</TableHead><TableHead className="w-24">Actions</TableHead></TableRow></TableHeader>
             <TableBody>
-              {loading && <TableRow><TableCell colSpan={9} className="text-center py-8 text-gray-500">Loading members...</TableCell></TableRow>}
+              {loading && <TableRow><TableCell colSpan={9} className="text-center py-8 text-muted-foreground">Loading members...</TableCell></TableRow>}
               {!loading && members.map(m => (
-                <TableRow key={m.id} className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900" onClick={() => openEdit(m)}>
+                <TableRow key={m.id} className="cursor-pointer hover:bg-accent" onClick={() => openEdit(m)}>
                   <TableCell className="font-medium">{m.service_number}</TableCell>
                   <TableCell>{m.full_name}</TableCell>
                   <TableCell>{m.rank}</TableCell>
                   <TableCell>{m.unit || '-'}</TableCell>
                   <TableCell className="capitalize">{m.mess_category}</TableCell>
-                  <TableCell>{m.dining_status === 'non_dining' ? <Badge variant="outline">Non-Dining</Badge> : <span className="text-gray-400">Dining</span>}</TableCell>
-                  <TableCell>{m.current_room_number ? <Badge className="bg-purple-100 text-purple-800">{m.current_room_number} (HRA)</Badge> : <span className="text-gray-400">-</span>}</TableCell>
+                  <TableCell>{m.dining_status === 'non_dining' ? <Badge variant="outline">Non-Dining</Badge> : <span className="text-muted-foreground">Dining</span>}</TableCell>
+                  <TableCell>{m.current_room_number ? <Badge className="bg-purple-100 text-purple-800">{m.current_room_number} (HRA)</Badge> : <span className="text-muted-foreground">-</span>}</TableCell>
                   <TableCell>{statusBadge(m.status)}</TableCell>
                   <TableCell>
                     <div className="flex gap-1">
@@ -257,11 +268,13 @@ export default function Members() {
                   </TableCell>
                 </TableRow>
               ))}
-              {!loading && members.length === 0 && <TableRow><TableCell colSpan={9} className="text-center py-8 text-gray-500">No members found</TableCell></TableRow>}
+              {!loading && members.length === 0 && <TableRow><TableCell colSpan={9} className="text-center py-8 text-muted-foreground">No members found</TableCell></TableRow>}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+
+      <ConfirmDialog request={confirmRequest} onClose={() => setConfirmRequest(null)} />
     </div>
   );
 }

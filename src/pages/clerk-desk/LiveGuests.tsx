@@ -17,9 +17,9 @@ export default function LiveGuests() {
 
   return (
     <div>
-      <p className="text-sm text-gray-500 mb-3">In-house guests with a live, accruing bill. Charges are added as the stay goes on; nothing is finalised until checkout.</p>
-      {loading && <p className="text-sm text-gray-500">Loading…</p>}
-      {!loading && guests.length === 0 && <p className="text-sm text-gray-500">No checked-in guests right now.</p>}
+      <p className="text-sm text-muted-foreground mb-3">In-house guests with a live, accruing bill. Charges are added as the stay goes on; nothing is finalised until checkout.</p>
+      {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {!loading && guests.length === 0 && <p className="text-sm text-muted-foreground">No checked-in guests right now.</p>}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {guests.map(g => {
           const bal = g.balance;
@@ -32,7 +32,7 @@ export default function LiveGuests() {
                       {g.rank ? `${g.rank} ` : ''}{g.guest_name}
                       {g.source === 'online' && <span className="shrink-0 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 text-[10px] font-medium px-1.5 py-0.5">Online</span>}
                     </p>
-                    <p className="text-xs text-gray-500">Room {g.room_number}</p>
+                    <p className="text-xs text-muted-foreground">Room {g.room_number}</p>
                   </div>
                   <div className="text-right shrink-0">
                     <p className="text-xl font-bold">{formatCurrency(bal.balance_due)}</p>

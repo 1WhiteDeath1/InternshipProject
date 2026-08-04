@@ -54,10 +54,11 @@ function NewEventDialog({ open, onClose, onCreated }: { open: boolean; onClose: 
     }
     setSaving(true);
     try {
-      await api.post('/events', {
+      const res = await api.post('/events', {
         ...form, capacity: Number(form.capacity), headcount: Number(form.headcount),
       });
       toast.success('Event booked');
+      if (res.data.capacity_warning) toast.warning(res.data.capacity_warning);
       setForm(emptyForm());
       onCreated();
       onClose();
@@ -93,7 +94,7 @@ function NewEventDialog({ open, onClose, onCreated }: { open: boolean; onClose: 
           </div>
           <div><Label>Requirements / Requests</Label><Textarea rows={2} value={form.requirements} onChange={e => setForm({ ...form, requirements: e.target.value })} placeholder="e.g. sound system, extra chairs" /></div>
           <div><Label>Arrangement</Label><Textarea rows={2} value={form.arrangement} onChange={e => setForm({ ...form, arrangement: e.target.value })} placeholder="e.g. round tables of 10, stage on the north side" /></div>
-          <p className="text-xs text-gray-500">No fixed hall catalog - pick whatever area fits and set its capacity here. If it turns out too small, postpone or cancel from the event's detail view.</p>
+          <p className="text-xs text-muted-foreground">No fixed hall catalog - pick whatever area fits and set its capacity here. If it turns out too small, postpone or cancel from the event's detail view.</p>
           <Button className="w-full" onClick={handleCreate} disabled={saving}>{saving ? 'Booking…' : 'Book Event'}</Button>
         </div>
       </DialogContent>
@@ -205,22 +206,22 @@ function EventDetailDialog({ event, onClose, onChanged }: { event: EventItem | n
 
           <div className="space-y-3 text-sm">
             <div className="grid grid-cols-2 gap-3">
-              <p className="flex items-center gap-1.5"><CalendarDays size={15} className="text-gray-400" /> {new Date(event.event_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
-              <p className="flex items-center gap-1.5"><Users size={15} className="text-gray-400" /> {event.headcount} people (capacity {event.capacity})</p>
-              <p className="flex items-center gap-1.5"><MapPin size={15} className="text-gray-400" /> {event.hall_name}</p>
-              <p className="flex items-center gap-1.5"><Wallet size={15} className="text-gray-400" /> {event.billing_type === 'split' ? 'Cost split among guests' : 'One person pays'}</p>
+              <p className="flex items-center gap-1.5"><CalendarDays size={15} className="text-muted-foreground" /> {new Date(event.event_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+              <p className="flex items-center gap-1.5"><Users size={15} className="text-muted-foreground" /> {event.headcount} people (capacity {event.capacity})</p>
+              <p className="flex items-center gap-1.5"><MapPin size={15} className="text-muted-foreground" /> {event.hall_name}</p>
+              <p className="flex items-center gap-1.5"><Wallet size={15} className="text-muted-foreground" /> {event.billing_type === 'split' ? 'Cost split among guests' : 'One person pays'}</p>
             </div>
-            <p className="text-gray-500">Organizer: <span className="font-medium text-gray-800 dark:text-gray-200">{event.guest_name}</span>{event.guest_phone ? ` · ${event.guest_phone}` : ''}</p>
-            {event.requirements && <p><span className="text-gray-400">Requirements:</span> {event.requirements}</p>}
-            {event.arrangement && <p><span className="text-gray-400">Arrangement:</span> {event.arrangement}</p>}
+            <p className="text-muted-foreground">Organizer: <span className="font-medium text-foreground">{event.guest_name}</span>{event.guest_phone ? ` · ${event.guest_phone}` : ''}</p>
+            {event.requirements && <p><span className="text-muted-foreground">Requirements:</span> {event.requirements}</p>}
+            {event.arrangement && <p><span className="text-muted-foreground">Arrangement:</span> {event.arrangement}</p>}
           </div>
 
           <div className="rounded-lg border p-3 space-y-2">
             <p className="text-sm font-semibold flex items-center gap-1.5"><UtensilsCrossed size={15} /> Menu</p>
-            {event.menu_items.length === 0 && <p className="text-xs text-gray-400">No dishes added yet</p>}
+            {event.menu_items.length === 0 && <p className="text-xs text-muted-foreground">No dishes added yet</p>}
             {event.menu_items.map(mi => (
               <div key={mi.id} className="flex items-center justify-between text-sm">
-                <span>{mi.dish_name} <span className="text-gray-400 text-xs">× {mi.quantity}</span></span>
+                <span>{mi.dish_name} <span className="text-muted-foreground text-xs">× {mi.quantity}</span></span>
                 <span className="flex items-center gap-2">
                   <span className="font-mono">{formatCurrency(mi.estimated_price * mi.quantity)}</span>
                   {canManageKitchen && <button type="button" onClick={() => removeDish(mi.id)} className="text-red-400 hover:text-red-600"><Trash2 size={13} /></button>}
@@ -308,8 +309,8 @@ export default function Events() {
           <p className="font-bold truncate">{e.title}</p>
           <Badge className={STATUS_COLORS[e.status]}>{STATUS_LABELS[e.status]}</Badge>
         </div>
-        <p className="text-xs text-gray-500 flex items-center gap-1.5"><CalendarDays size={13} /> {new Date(e.event_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
-        <p className="text-xs text-gray-500 flex items-center gap-1.5"><MapPin size={13} /> {e.hall_name} · <Users size={13} /> {e.headcount}</p>
+        <p className="text-xs text-muted-foreground flex items-center gap-1.5"><CalendarDays size={13} /> {new Date(e.event_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+        <p className="text-xs text-muted-foreground flex items-center gap-1.5"><MapPin size={13} /> {e.hall_name} · <Users size={13} /> {e.headcount}</p>
       </CardContent>
     </Card>
   );
@@ -317,12 +318,12 @@ export default function Events() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><CalendarDays size={24} /> Events</h1>
+        <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><CalendarDays size={24} /> Events</h1>
         {canCreate && <Button onClick={() => setNewOpen(true)}><Plus size={16} className="mr-1" /> New Event</Button>}
       </div>
 
-      {loading && <p className="text-sm text-gray-500">Loading…</p>}
-      {!loading && events.length === 0 && <p className="text-sm text-gray-500">No events booked yet.</p>}
+      {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {!loading && events.length === 0 && <p className="text-sm text-muted-foreground">No events booked yet.</p>}
 
       {active.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -341,7 +342,7 @@ export default function Events() {
 
       {cancelled.length > 0 && (
         <div>
-          <h2 className="text-sm font-semibold mb-2 text-gray-500">Cancelled</h2>
+          <h2 className="text-sm font-semibold mb-2 text-muted-foreground">Cancelled</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {cancelled.map(e => <EventCard key={e.id} e={e} />)}
           </div>

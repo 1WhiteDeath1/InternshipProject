@@ -138,7 +138,7 @@ export default function Tariffs() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><TrendingUp size={24} /> Tariffs</h1>
+      <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><TrendingUp size={24} /> Tariffs</h1>
 
       <Tabs defaultValue="rate-card">
         <TabsList>
@@ -147,7 +147,7 @@ export default function Tariffs() {
         </TabsList>
 
         <TabsContent value="rate-card" className="space-y-6">
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-muted-foreground">
             The official rate card - what a booking is actually charged when no custom override (other tab) matches. Editable here since the mess revises these figures by official letter from time to time.
           </p>
 
@@ -169,7 +169,7 @@ export default function Tariffs() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rateCardLoading && <TableRow><TableCell colSpan={9} className="text-center py-8 text-gray-500">Loading...</TableCell></TableRow>}
+                  {rateCardLoading && <TableRow><TableCell colSpan={9} className="text-center py-8 text-muted-foreground">Loading...</TableCell></TableRow>}
                   {!rateCardLoading && Object.values(roomRates).map(row => (
                     <TableRow key={roomRateKey(row)}>
                       <TableCell className="font-medium">{ROOM_TYPE_LABELS[row.room_type] || row.room_type}</TableCell>
@@ -207,7 +207,7 @@ export default function Tariffs() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {rateCardLoading && <TableRow><TableCell colSpan={4} className="text-center py-8 text-gray-500">Loading...</TableCell></TableRow>}
+                    {rateCardLoading && <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">Loading...</TableCell></TableRow>}
                     {!rateCardLoading && Object.values(dutyRates).map(row => (
                       <TableRow key={row.rank_band}>
                         <TableCell className="font-medium">{row.label}</TableCell>
@@ -217,7 +217,7 @@ export default function Tariffs() {
                               onChange={e => setDutyRates({ ...dutyRates, [row.rank_band]: { ...row, da_amount: Number(e.target.value) } })} />
                           ) : formatCurrency(row.da_amount)}
                         </TableCell>
-                        <TableCell className="font-mono text-gray-500">{formatCurrency(row.da_amount * 1.5)}</TableCell>
+                        <TableCell className="font-mono text-muted-foreground">{formatCurrency(row.da_amount * 1.5)}</TableCell>
                         {canEditRates && (
                           <TableCell><Button size="sm" onClick={() => saveDutyRate(row)}>Save</Button></TableCell>
                         )}
@@ -240,7 +240,7 @@ export default function Tariffs() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {rateCardLoading && <TableRow><TableCell colSpan={3} className="text-center py-8 text-gray-500">Loading...</TableCell></TableRow>}
+                    {rateCardLoading && <TableRow><TableCell colSpan={3} className="text-center py-8 text-muted-foreground">Loading...</TableCell></TableRow>}
                     {!rateCardLoading && Object.values(hraRankRates).map(row => (
                       <TableRow key={row.rank_band}>
                         <TableCell className="font-medium">{row.label}</TableCell>
@@ -272,7 +272,7 @@ export default function Tariffs() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {rateCardLoading && <TableRow><TableCell colSpan={3} className="text-center py-8 text-gray-500">Loading...</TableCell></TableRow>}
+                    {rateCardLoading && <TableRow><TableCell colSpan={3} className="text-center py-8 text-muted-foreground">Loading...</TableCell></TableRow>}
                     {!rateCardLoading && Object.values(utilityRates).map(row => (
                       <TableRow key={row.room_type}>
                         <TableCell className="font-medium">{UTILITY_LABELS[row.room_type] || row.room_type}</TableCell>
@@ -296,7 +296,7 @@ export default function Tariffs() {
 
         <TabsContent value="overrides" className="space-y-6">
           <div className="flex items-center justify-between">
-            <p className="text-sm text-gray-500 max-w-2xl">
+            <p className="text-sm text-muted-foreground max-w-2xl">
               When a booking's rank, room type, and stay type all match a row below, this rate overrides the rate card. Bookings without a match are unaffected.
             </p>
             {canEditRates && (
@@ -328,7 +328,7 @@ export default function Tariffs() {
                       <Input type="number" min={0} value={form.nightly_rate} onChange={e => setForm({ ...form, nightly_rate: Number(e.target.value) })} />
                     </div>
                     <Button onClick={handleSave} className="w-full">Save Rate</Button>
-                    <p className="text-xs text-gray-400">Saving an existing rank/room type/stay type combination updates its rate in place.</p>
+                    <p className="text-xs text-muted-foreground">Saving an existing rank/room type/stay type combination updates its rate in place.</p>
                   </div>
                 </DialogContent>
               </Dialog>
@@ -348,7 +348,7 @@ export default function Tariffs() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {loading && <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500">Loading tariffs...</TableCell></TableRow>}
+                  {loading && <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Loading tariffs...</TableCell></TableRow>}
                   {!loading && rows.map(r => (
                     <TableRow key={r.id}>
                       <TableCell className="font-medium">{r.rank}</TableCell>
@@ -362,7 +362,7 @@ export default function Tariffs() {
                       )}
                     </TableRow>
                   ))}
-                  {!loading && rows.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500">No tariff rates configured yet</TableCell></TableRow>}
+                  {!loading && rows.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No tariff rates configured yet</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </CardContent>

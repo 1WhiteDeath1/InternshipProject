@@ -63,7 +63,7 @@ export default function Security() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Security</h1>
+        <h1 className="text-2xl font-bold text-foreground">Security</h1>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild><Button><Plus size={16} className="mr-1" /> Report Incident</Button></DialogTrigger>
           <DialogContent>
@@ -99,7 +99,7 @@ export default function Security() {
                       <TableCell>#{log.processed_by}</TableCell>
                     </TableRow>
                   ))}
-                  {logs.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500">No security logs</TableCell></TableRow>}
+                  {logs.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No security logs</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </CardContent>
@@ -121,7 +121,7 @@ export default function Security() {
                       <TableCell>{new Date(inc.created_at).toLocaleDateString()}</TableCell>
                     </TableRow>
                   ))}
-                  {incidents.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500">No incidents reported</TableCell></TableRow>}
+                  {incidents.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No incidents reported</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </CardContent>

@@ -57,7 +57,7 @@ export default function Alerts() {
   const statusBadge = (status: string) => {
     const colors: Record<string, string> = {
       new: 'bg-red-100 text-red-800 animate-pulse', acknowledged: 'bg-blue-100 text-blue-800',
-      resolved: 'bg-green-100 text-green-800', dismissed: 'bg-gray-100 text-gray-800',
+      resolved: 'bg-green-100 text-green-800', dismissed: 'bg-muted text-muted-foreground',
     };
     return <Badge className={colors[status] || ''}>{status}</Badge>;
   };
@@ -66,7 +66,7 @@ export default function Alerts() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Alerts</h1>
+          <h1 className="text-2xl font-bold text-foreground">Alerts</h1>
           {unreadCount > 0 && <Badge variant="destructive" className="animate-pulse">{unreadCount} new</Badge>}
         </div>
         <Button variant="outline" onClick={runChecks}><RotateCw size={16} className="mr-1" /> Run Checks</Button>
@@ -80,11 +80,11 @@ export default function Alerts() {
           return (
             <Card key={status} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => {}}>
               <CardContent className="p-5 flex items-center gap-4">
-                <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-                  <Icon size={20} className="text-gray-600" />
+                <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
+                  <Icon size={20} className="text-muted-foreground" />
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500 capitalize">{status}</p>
+                  <p className="text-xs text-muted-foreground capitalize">{status}</p>
                   <p className="text-2xl font-bold">{count}</p>
                 </div>
               </CardContent>
@@ -105,7 +105,7 @@ export default function Alerts() {
                   <TableCell>{severityBadge(alert.severity)}</TableCell>
                   <TableCell>{statusBadge(alert.status)}</TableCell>
                   <TableCell className="capitalize">{alert.module}</TableCell>
-                  <TableCell className="text-sm text-gray-500">{new Date(alert.created_at).toLocaleString()}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{new Date(alert.created_at).toLocaleString()}</TableCell>
                   <TableCell>
                     <div className="flex gap-1">
                       {alert.status === 'new' && <Button size="sm" variant="ghost" onClick={() => handleAcknowledge(alert.id)}><CheckCircle size={16} className="text-blue-600" /></Button>}
@@ -114,7 +114,7 @@ export default function Alerts() {
                   </TableCell>
                 </TableRow>
               ))}
-              {alerts.length === 0 && <TableRow><TableCell colSpan={7} className="text-center py-8 text-gray-500">No alerts</TableCell></TableRow>}
+              {alerts.length === 0 && <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No alerts</TableCell></TableRow>}
             </TableBody>
           </Table>
         </CardContent>

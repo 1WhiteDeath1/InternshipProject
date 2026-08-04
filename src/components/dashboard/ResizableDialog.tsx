@@ -145,11 +145,11 @@ export function ResizableDialog({
             <DialogTitle className="flex items-center gap-2">{title}</DialogTitle>
             <div className="flex items-center gap-1">
               <button type="button" onClick={resetSize} title="Reset to default size"
-                className="p-1.5 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800">
+                className="p-1.5 rounded text-muted-foreground hover:text-foreground dark:hover:text-gray-200 hover:bg-accent">
                 <RotateCcw size={15} />
               </button>
               <button type="button" onClick={fitToScreen} title="Fill the screen"
-                className="p-1.5 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800">
+                className="p-1.5 rounded text-muted-foreground hover:text-foreground dark:hover:text-gray-200 hover:bg-accent">
                 <Maximize2 size={15} />
               </button>
             </div>
@@ -167,7 +167,7 @@ export function ResizableDialog({
           title="Drag to resize"
           className="absolute bottom-0 right-0 w-5 h-5 cursor-nwse-resize flex items-end justify-end p-0.5 touch-none"
         >
-          <svg width="12" height="12" viewBox="0 0 12 12" className="text-gray-400 dark:text-gray-500">
+          <svg width="12" height="12" viewBox="0 0 12 12" className="text-muted-foreground">
             <path d="M11 3 3 11M11 7l-4 4M11 11h-.01" stroke="currentColor" strokeWidth="1.25" fill="none" strokeLinecap="round" />
           </svg>
         </div>

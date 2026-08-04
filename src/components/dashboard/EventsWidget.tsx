@@ -30,7 +30,7 @@ function EventRow({ e }: { e: EventBrief }) {
   return (
     <div className="flex items-center justify-between gap-2 py-1">
       <span className="text-sm truncate min-w-0">{e.title}</span>
-      <span className="text-xs text-gray-500 shrink-0">{fmtDate(e.event_date)}</span>
+      <span className="text-xs text-muted-foreground shrink-0">{fmtDate(e.event_date)}</span>
     </div>
   );
 }
@@ -58,8 +58,8 @@ function EventsDetailDialog({ open, onClose }: { open: boolean; onClose: () => v
       title={<><CalendarDays size={20} /> Upcoming Events</>}>
       {({ bucket }) => (
         <>
-          {loading && <p className="text-sm text-gray-500 py-8 text-center">Loading…</p>}
-          {!loading && events.length === 0 && <p className="text-sm text-gray-500 py-8 text-center">No upcoming events booked.</p>}
+          {loading && <p className="text-sm text-muted-foreground py-8 text-center">Loading…</p>}
+          {!loading && events.length === 0 && <p className="text-sm text-muted-foreground py-8 text-center">No upcoming events booked.</p>}
 
           {/* Flexbox instead of a fixed-column grid: a short last row (e.g. 2
               cards after two full rows of 3) grows to fill the row's width
@@ -71,16 +71,16 @@ function EventsDetailDialog({ open, onClose }: { open: boolean; onClose: () => v
                   <p className="font-bold">{e.title}</p>
                   <Badge className={STATUS_COLORS[e.status]}>{STATUS_LABELS[e.status] || e.status}</Badge>
                 </div>
-                <div className={`grid gap-1.5 text-gray-600 dark:text-gray-300 ${bucket === 'sm' ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                  <p className="flex items-center gap-1.5"><CalendarDays size={13} className="text-gray-400" /> {fmtDate(e.event_date)}</p>
-                  <p className="flex items-center gap-1.5"><Users size={13} className="text-gray-400" /> {e.headcount} people</p>
-                  <p className={`flex items-center gap-1.5 ${bucket === 'sm' ? 'col-span-2' : ''}`}><MapPin size={13} className="text-gray-400" /> {e.hall_name} (capacity {e.capacity})</p>
+                <div className={`grid gap-1.5 text-muted-foreground ${bucket === 'sm' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                  <p className="flex items-center gap-1.5"><CalendarDays size={13} className="text-muted-foreground" /> {fmtDate(e.event_date)}</p>
+                  <p className="flex items-center gap-1.5"><Users size={13} className="text-muted-foreground" /> {e.headcount} people</p>
+                  <p className={`flex items-center gap-1.5 ${bucket === 'sm' ? 'col-span-2' : ''}`}><MapPin size={13} className="text-muted-foreground" /> {e.hall_name} (capacity {e.capacity})</p>
                 </div>
-                <p className="text-xs text-gray-500">Organizer: {e.guest_name}{e.guest_phone ? ` · ${e.guest_phone}` : ''} · {e.billing_type === 'split' ? 'Cost split among guests' : 'One person pays'}</p>
+                <p className="text-xs text-muted-foreground">Organizer: {e.guest_name}{e.guest_phone ? ` · ${e.guest_phone}` : ''} · {e.billing_type === 'split' ? 'Cost split among guests' : 'One person pays'}</p>
                 {/* The long free-text fields are the first thing to go when
                     each card is only a third of the width. */}
-                {bucket !== 'lg' && e.requirements && <p className="text-xs"><span className="text-gray-400">Requirements:</span> {e.requirements}</p>}
-                {bucket !== 'lg' && e.arrangement && <p className="text-xs"><span className="text-gray-400">Arrangement:</span> {e.arrangement}</p>}
+                {bucket !== 'lg' && e.requirements && <p className="text-xs"><span className="text-muted-foreground">Requirements:</span> {e.requirements}</p>}
+                {bucket !== 'lg' && e.arrangement && <p className="text-xs"><span className="text-muted-foreground">Arrangement:</span> {e.arrangement}</p>}
               </div>
             ))}
           </div>
@@ -113,10 +113,10 @@ export default function EventsWidget() {
           widget's only vertical padding. */}
       <Card className="cursor-pointer hover:shadow-lg transition-all py-0" onClick={() => setDetailOpen(true)}>
         <CardContent className="p-4">
-          <p className="text-base text-gray-500 dark:text-gray-400 flex items-center gap-1.5 mb-2"><CalendarDays size={16} /> Events</p>
+          <p className="text-base text-muted-foreground flex items-center gap-1.5 mb-2"><CalendarDays size={16} /> Events</p>
 
-          {loading && <p className="text-sm text-gray-400">Loading…</p>}
-          {nothing && <p className="text-sm text-gray-400">No upcoming events</p>}
+          {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+          {nothing && <p className="text-sm text-muted-foreground">No upcoming events</p>}
 
           {!loading && data && data.today.length > 0 && (
             <div className="mb-2">
@@ -127,12 +127,12 @@ export default function EventsWidget() {
 
           {!loading && data && data.upcoming.length > 0 && (
             <div>
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Upcoming</p>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Upcoming</p>
               {data.upcoming.map(e => <EventRow key={e.id} e={e} />)}
             </div>
           )}
 
-          {extra > 0 && <p className="text-xs text-gray-500 mt-1.5">+{extra} more</p>}
+          {extra > 0 && <p className="text-xs text-muted-foreground mt-1.5">+{extra} more</p>}
 
           {!nothing && (
             <button type="button" className="text-xs text-blue-600 hover:underline mt-2" onClick={e => { e.stopPropagation(); navigate('/events'); }}>

@@ -32,6 +32,7 @@ from backend.schemas.procurement import (
 )
 from backend.schemas.rooms import (
     AttendantBase, AttendantCreate, AttendantUpdate, AttendantOut, AttendantDuty,
+    AttendantActivitySummaryOut, AttendantActivityTrendOut,
     RoomBase, RoomCreate, RoomUpdate, RoomOut,
 )
 from backend.schemas.rates import (
@@ -92,6 +93,7 @@ __all__ = [
     "GasChargeRateOut", "GasChargeRateUpdate", "GasChargeRateHistoryOut", "MessChargeOverviewRow", "OrderHistoryRow",
     "VendorBase", "VendorCreate", "VendorUpdate", "VendorOut",
     "AttendantBase", "AttendantCreate", "AttendantUpdate", "AttendantOut", "AttendantDuty",
+    "AttendantActivitySummaryOut", "AttendantActivityTrendOut",
     "RoomBase", "RoomCreate", "RoomUpdate", "RoomOut",
     "TariffRateCreate", "TariffRateOut", "WomensBlocRankRateCreate", "WomensBlocRankRateOut",
     "RoomRateCreate", "RoomRateOut", "DutyRateCreate", "DutyRateOut",

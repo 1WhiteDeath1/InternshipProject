@@ -35,6 +35,24 @@ class AttendantDuty(BaseModel):
     on_duty: bool
 
 
+class AttendantActivitySummaryOut(BaseModel):
+    attendant_id: int
+    full_name: str
+    photo_url: Optional[str] = None
+    is_active: bool
+    on_duty: bool
+    total_hours: float
+    session_count: int
+    avg_session_hours: float
+    last_clock_in: Optional[datetime] = None
+    last_clock_out: Optional[datetime] = None
+
+
+class AttendantActivityTrendOut(BaseModel):
+    labels: list[str]
+    values: list[float]
+
+
 class RoomBase(BaseModel):
     room_number: str = Field(..., min_length=1, max_length=20)
     room_type: str

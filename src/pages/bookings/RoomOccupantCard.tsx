@@ -66,7 +66,7 @@ export function RoomOccupantCard({
           </div>
         )}
         <div className="flex items-center gap-1.5 mb-1">
-          <p className="text-xs text-gray-400">{current.nature_of_duty === 'hra' ? 'HRA resident' : 'Now staying'}</p>
+          <p className="text-xs text-muted-foreground">{current.nature_of_duty === 'hra' ? 'HRA resident' : 'Now staying'}</p>
           {current.nature_of_duty === 'hra' && <HraBadge />}
           {current.nature_of_duty !== 'hra' && current.is_indefinite && (
             <span className="text-[10px] font-medium text-violet-700 bg-violet-50 dark:bg-violet-950 dark:text-violet-300 rounded px-1 py-0.5">Open-ended</span>
@@ -74,16 +74,16 @@ export function RoomOccupantCard({
           {current.source === 'online' && <span className="text-[10px] font-medium text-blue-700 bg-blue-50 dark:bg-blue-950 dark:text-blue-300 rounded px-1 py-0.5">Online{current.online_voucher_no ? ` · V/No ${current.online_voucher_no}` : ''}</span>}
         </div>
         <p className="font-medium">{current.rank ? `${current.rank} ` : ''}{current.guest_name}</p>
-        <p className="text-xs text-gray-500">{current.booking_reference}{current.guest_phone ? ` · ${current.guest_phone}` : ''}</p>
-        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs text-gray-600 dark:text-gray-300">
-          {current.client_category && <p><span className="text-gray-400">Category:</span> {current.client_category.replace(/_/g, ' ')}</p>}
-          {current.guest_id_number && <p><span className="text-gray-400">{(current.guest_id_type || 'ID').toUpperCase()}:</span> {current.guest_id_number}</p>}
-          {current.pa_number && <p><span className="text-gray-400">PA No:</span> {current.pa_number}</p>}
-          {current.unit_address && <p><span className="text-gray-400">Unit:</span> {current.unit_address}</p>}
-          {current.reference_person && <p className="col-span-2"><span className="text-gray-400">Reference:</span> {current.reference_person}</p>}
-          {current.mattress_count > 0 && <p><span className="text-gray-400">Mattresses:</span> {current.mattress_count}</p>}
-          {current.actual_check_in && <p className="col-span-2"><span className="text-gray-400">Checked in:</span> {new Date(current.actual_check_in).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>}
-          {current.special_requests && <p className="col-span-2"><span className="text-gray-400">Remarks:</span> {current.special_requests}</p>}
+        <p className="text-xs text-muted-foreground">{current.booking_reference}{current.guest_phone ? ` · ${current.guest_phone}` : ''}</p>
+        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+          {current.client_category && <p><span className="text-muted-foreground">Category:</span> {current.client_category.replace(/_/g, ' ')}</p>}
+          {current.guest_id_number && <p><span className="text-muted-foreground">{(current.guest_id_type || 'ID').toUpperCase()}:</span> {current.guest_id_number}</p>}
+          {current.pa_number && <p><span className="text-muted-foreground">PA No:</span> {current.pa_number}</p>}
+          {current.unit_address && <p><span className="text-muted-foreground">Unit:</span> {current.unit_address}</p>}
+          {current.reference_person && <p className="col-span-2"><span className="text-muted-foreground">Reference:</span> {current.reference_person}</p>}
+          {current.mattress_count > 0 && <p><span className="text-muted-foreground">Mattresses:</span> {current.mattress_count}</p>}
+          {current.actual_check_in && <p className="col-span-2"><span className="text-muted-foreground">Checked in:</span> {new Date(current.actual_check_in).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>}
+          {current.special_requests && <p className="col-span-2"><span className="text-muted-foreground">Remarks:</span> {current.special_requests}</p>}
         </div>
         <div className="flex items-center justify-between mt-2 text-sm">
           <span>
@@ -93,12 +93,12 @@ export function RoomOccupantCard({
           </span>
           {current.nature_of_duty !== 'hra' && <span className="font-medium">{formatCurrency(current.total_amount)}</span>}
         </div>
-        {current.nature_of_duty === 'hra' && <p className="text-xs text-gray-500 mt-0.5">Billed monthly via the mess bill, not a fixed total</p>}
-        {current.nature_of_duty !== 'hra' && current.is_indefinite && <p className="text-xs text-gray-500 mt-0.5">Nightly-rate estimate shown — actual total is billed at checkout</p>}
+        {current.nature_of_duty === 'hra' && <p className="text-xs text-muted-foreground mt-0.5">Billed monthly via the mess bill, not a fixed total</p>}
+        {current.nature_of_duty !== 'hra' && current.is_indefinite && <p className="text-xs text-muted-foreground mt-0.5">Nightly-rate estimate shown — actual total is billed at checkout</p>}
 
         {current.nature_of_duty !== 'hra' && (
-          <div className="mt-2 rounded-md border bg-gray-50 dark:bg-gray-900/40 px-2.5 py-2 text-xs space-y-1">
-            <p className="font-semibold text-gray-500 uppercase tracking-wide text-[10px] mb-1">Live Bill Summary</p>
+          <div className="mt-2 rounded-md border bg-muted/40 px-2.5 py-2 text-xs space-y-1">
+            <p className="font-semibold text-muted-foreground uppercase tracking-wide text-[10px] mb-1">Live Bill Summary</p>
             <div className="flex justify-between">
               <span>Room Stay Base {current.is_indefinite ? '(open-ended)' : `(${fmtDay(current.check_in)} - ${fmtDay(current.check_out)})`}</span>
               <span className="font-mono">{formatCurrency(current.total_amount)}</span>
@@ -158,9 +158,9 @@ export function RoomOccupantCard({
                 {transferOptions.length === 0 && <p className="text-xs text-amber-700">No other rooms are free until {fmtDay(extendDate)} — a standard checkout is the only option.</p>}
                 {transferOptions.slice(0, 6).map(r => (
                   <button key={r.id} type="button" disabled={extending}
-                    className="w-full flex items-center justify-between text-xs bg-white dark:bg-gray-900 border rounded px-2 py-1.5 hover:border-blue-400"
+                    className="w-full flex items-center justify-between text-xs bg-card border rounded px-2 py-1.5 hover:border-blue-400"
                     onClick={() => onExtend(r.id)}>
-                    <span className="font-medium">Room {r.room_number} <span className="text-gray-400 font-normal">{ROOM_TYPE_LABELS[r.room_type] || r.room_type}</span></span>
+                    <span className="font-medium">Room {r.room_number} <span className="text-muted-foreground font-normal">{ROOM_TYPE_LABELS[r.room_type] || r.room_type}</span></span>
                     <span>{formatCurrency(r.pricing.total)} total</span>
                   </button>
                 ))}
@@ -183,11 +183,11 @@ export function RoomOccupantCard({
       {arrivalToday && (
         <div className="rounded-lg border p-3">
           <div className="flex items-center gap-1.5 mb-1">
-            <p className="text-xs text-gray-400">Arriving today</p>
+            <p className="text-xs text-muted-foreground">Arriving today</p>
             {arrivalToday.nature_of_duty === 'hra' && <HraBadge />}
           </div>
           <p className="font-medium">{arrivalToday.guest_name}</p>
-          <p className="text-xs text-gray-500">{arrivalToday.booking_reference}</p>
+          <p className="text-xs text-muted-foreground">{arrivalToday.booking_reference}</p>
           {roomReady && (
             <div className="mt-2">
               <Label className="text-xs">Attendant</Label>

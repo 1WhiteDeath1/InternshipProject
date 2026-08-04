@@ -76,7 +76,7 @@ export default function Directives() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><MessageSquare size={24} /> Directives</h1>
+        <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><MessageSquare size={24} /> Directives</h1>
       </div>
 
       {canSend && (
@@ -103,17 +103,17 @@ export default function Directives() {
 
       <Card>
         <CardContent className="p-0 divide-y">
-          {loading && <p className="text-center py-8 text-gray-500">Loading directives...</p>}
-          {!loading && items.length === 0 && <p className="text-center py-8 text-gray-500">No directives</p>}
+          {loading && <p className="text-center py-8 text-muted-foreground">Loading directives...</p>}
+          {!loading && items.length === 0 && <p className="text-center py-8 text-muted-foreground">No directives</p>}
           {!loading && items.map(d => (
             <div key={d.id} className="p-4 flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <Badge variant={d.status === 'new' ? 'default' : 'outline'}>{d.to_role_name}</Badge>
-                  {d.status === 'acknowledged' && <span className="text-xs text-gray-400">Acknowledged{d.acknowledged_by_name ? ` by ${d.acknowledged_by_name}` : ''}</span>}
+                  {d.status === 'acknowledged' && <span className="text-xs text-muted-foreground">Acknowledged{d.acknowledged_by_name ? ` by ${d.acknowledged_by_name}` : ''}</span>}
                 </div>
                 <p className="text-sm">{d.message}</p>
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs text-muted-foreground mt-1">
                   From {d.from_user_name || 'Manager'} · {new Date(d.created_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                 </p>
               </div>

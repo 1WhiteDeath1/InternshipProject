@@ -58,8 +58,8 @@ export function GuestChargePanel({ bookingId, isMess, title, onChanged, onTotals
   return (
     <div className="rounded-lg border p-3 space-y-2">
       <p className="text-sm font-semibold">{title || (isMess ? 'Mess Charges' : 'Room Charges')}</p>
-      {loading && <p className="text-xs text-gray-400">Loading…</p>}
-      {!loading && live.length === 0 && <p className="text-xs text-gray-400">No charges logged yet</p>}
+      {loading && <p className="text-xs text-muted-foreground">Loading…</p>}
+      {!loading && live.length === 0 && <p className="text-xs text-muted-foreground">No charges logged yet</p>}
       {!loading && live.map(c => (
         <div key={c.id} className="flex items-center justify-between text-sm">
           <span className="truncate">{c.head}</span>

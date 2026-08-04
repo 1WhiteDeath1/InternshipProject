@@ -60,7 +60,7 @@ export default function MessOnly() {
                         {first.guest_name || '—'}
                         <BillStatusBadge input={first} />
                       </p>
-                      <p className="text-xs text-gray-500">Walk-in · {group.map(i => i.invoice_number).join(' · ')}</p>
+                      <p className="text-xs text-muted-foreground">Walk-in · {group.map(i => i.invoice_number).join(' · ')}</p>
                     </div>
                     <p className="text-lg font-bold font-mono">{formatCurrency(balance)}</p>
                     <Button size="sm" onClick={() => setSettleInvoiceIds(group.map(i => i.id))}>
@@ -76,9 +76,9 @@ export default function MessOnly() {
 
       <div>
         <h2 className="text-lg font-semibold mb-3 flex items-center gap-2"><UtensilsCrossed size={18} /> Walk-in meals to bill</h2>
-        <p className="text-sm text-gray-500 mb-3">Guests who dined without a room booking. Generate one mess bill per guest, then settle.</p>
-        {loading && <p className="text-sm text-gray-500">Loading…</p>}
-        {!loading && messOnly.items.length === 0 && <p className="text-sm text-gray-500">No walk-in meals awaiting billing.</p>}
+        <p className="text-sm text-muted-foreground mb-3">Guests who dined without a room booking. Generate one mess bill per guest, then settle.</p>
+        {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {!loading && messOnly.items.length === 0 && <p className="text-sm text-muted-foreground">No walk-in meals awaiting billing.</p>}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {messOnly.items.map(g => {
             const bal = g.balance;

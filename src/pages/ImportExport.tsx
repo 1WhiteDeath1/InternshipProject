@@ -58,7 +58,7 @@ export default function ImportExport() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><FileUp size={24} /> Import / Export</h1>
+      <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><FileUp size={24} /> Import / Export</h1>
 
       <div className="grid grid-cols-1 gap-4">
         {MODULES.map(mod => {
@@ -73,7 +73,7 @@ export default function ImportExport() {
                     </div>
                     <div>
                       <p className="font-medium">{mod.label}</p>
-                      <p className="text-xs text-gray-500">Import or export {mod.label.toLowerCase()}</p>
+                      <p className="text-xs text-muted-foreground">Import or export {mod.label.toLowerCase()}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">

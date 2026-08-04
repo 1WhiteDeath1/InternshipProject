@@ -75,13 +75,13 @@ export default function BookingsListTab({ onChanged }: BookingsListTabProps) {
 
   return (
     <div>
-      <div className="relative max-w-sm mb-4"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><Input placeholder="Search bookings..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" /></div>
+      <div className="relative max-w-sm mb-4"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} /><Input placeholder="Search bookings..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" /></div>
       <Card>
         <CardContent className="p-0">
           <Table>
             <TableHeader><TableRow><TableHead>Reference</TableHead><TableHead>Guest</TableHead><TableHead>Duty</TableHead><TableHead>Room</TableHead><TableHead>Check In</TableHead><TableHead>Check Out</TableHead><TableHead>Amount</TableHead><TableHead>Status</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
             <TableBody>
-              {loading && <TableRow><TableCell colSpan={9} className="text-center py-8 text-gray-500">Loading bookings...</TableCell></TableRow>}
+              {loading && <TableRow><TableCell colSpan={9} className="text-center py-8 text-muted-foreground">Loading bookings...</TableCell></TableRow>}
               {!loading && bookings.map(b => (
                 <TableRow key={b.id}>
                   <TableCell className="font-medium">{b.booking_reference}</TableCell>
@@ -99,12 +99,12 @@ export default function BookingsListTab({ onChanged }: BookingsListTabProps) {
                             </span>
                           )}
                         </p>
-                        {b.member_name && <span className="block text-xs text-gray-500 truncate">Member: {b.member_name}</span>}
+                        {b.member_name && <span className="block text-xs text-muted-foreground truncate">Member: {b.member_name}</span>}
                         {b.arrival_overdue && <span className="block text-xs text-red-600 font-medium">Overdue arrival</span>}
                       </div>
                     </div>
                   </TableCell>
-                  <TableCell className="text-xs capitalize text-gray-500">{b.nature_of_duty?.replace(/_/g, ' ') || '-'}</TableCell>
+                  <TableCell className="text-xs capitalize text-muted-foreground">{b.nature_of_duty?.replace(/_/g, ' ') || '-'}</TableCell>
                   <TableCell>{b.room_number}</TableCell>
                   <TableCell>{b.check_in}</TableCell>
                   <TableCell>{b.check_out}</TableCell>
@@ -126,7 +126,7 @@ export default function BookingsListTab({ onChanged }: BookingsListTabProps) {
                   </TableCell>
                 </TableRow>
               ))}
-              {!loading && bookings.length === 0 && <TableRow><TableCell colSpan={9} className="text-center py-8 text-gray-500">No bookings found</TableCell></TableRow>}
+              {!loading && bookings.length === 0 && <TableRow><TableCell colSpan={9} className="text-center py-8 text-muted-foreground">No bookings found</TableCell></TableRow>}
             </TableBody>
           </Table>
         </CardContent>

@@ -974,7 +974,12 @@ async def reject_edit_request(request_id: int, data: InvoiceEditDecision, reques
 async def invoice_print_data(invoice_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """Everything needed to print one bill in the mess's paper format:
     invoice lines, booking-register header fields, mess identity, and a QR
-    code carrying the bill summary."""
+    code carrying the bill summary. Guest PII and amounts, and invoice_id is
+    directly enumerable - gated the same as /desk, plus guests:view since the
+    Customer Directory's BillPrintView (Manager-only) also calls this."""
+    if not (check_permission(current_user, "billing", "view") or check_permission(current_user, "clerk_desk", "view")
+            or check_permission(current_user, "guests", "view")):
+        raise HTTPException(status_code=403, detail="Permission denied")
     inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
@@ -1111,7 +1116,10 @@ async def record_payment(invoice_id: int, data: PaymentCreate, request: Request,
 @router.get("/payments/{payment_id}/receipt-data")
 async def payment_receipt_data(payment_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """Print data for the mess's cash-receipt format ('Received from ... the
-    sum of Rupees ... on account of Mess Bill ... by Cash/Cheque')."""
+    sum of Rupees ... on account of Mess Bill ... by Cash/Cheque'). Same gate
+    as /desk - guest name and amount, and payment_id is directly enumerable."""
+    if not (check_permission(current_user, "billing", "view") or check_permission(current_user, "clerk_desk", "view")):
+        raise HTTPException(status_code=403, detail="Permission denied")
     payment = db.query(InvoicePayment).filter(InvoicePayment.id == payment_id).first()
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
@@ -1150,6 +1158,9 @@ async def payment_receipt_data(payment_id: int, db: Session = Depends(get_db), c
 
 @router.get("/dashboard-stats")
 async def billing_stats(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Revenue totals for the Clerk dashboard - same gate as /desk."""
+    if not (check_permission(current_user, "billing", "view") or check_permission(current_user, "clerk_desk", "view")):
+        raise HTTPException(status_code=403, detail="Permission denied")
     today = date.today()
     month_start = today.replace(day=1)
 

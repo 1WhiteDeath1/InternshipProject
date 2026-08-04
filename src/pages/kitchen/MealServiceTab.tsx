@@ -120,7 +120,7 @@ export function MealServiceTab({ onSpecialOrder }: MealServiceTabProps) {
             <div className="flex rounded-md border overflow-hidden text-sm">
               {MEAL_OPTIONS.map(mt => (
                 <button key={mt} type="button"
-                  className={`flex-1 px-3 py-2 capitalize ${meal === mt ? 'bg-primary text-primary-foreground font-medium' : 'bg-transparent text-gray-500 hover:text-gray-700'}`}
+                  className={`flex-1 px-3 py-2 capitalize ${meal === mt ? 'bg-primary text-primary-foreground font-medium' : 'bg-transparent text-muted-foreground hover:text-foreground'}`}
                   onClick={() => setMeal(mt)}>
                   {mt}
                 </button>
@@ -133,7 +133,7 @@ export function MealServiceTab({ onSpecialOrder }: MealServiceTabProps) {
           </div>
 
           <div className="relative max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
             <Input ref={inputRef} placeholder="Search room, member ID, or name…" value={q}
               onChange={e => setQ(e.target.value)} className="pl-10" autoFocus />
           </div>
@@ -141,16 +141,16 @@ export function MealServiceTab({ onSpecialOrder }: MealServiceTabProps) {
       </Card>
 
       <div className="space-y-2">
-        {searching && <p className="text-sm text-gray-500">Searching…</p>}
+        {searching && <p className="text-sm text-muted-foreground">Searching…</p>}
         {!searching && q.trim().length >= 2 && results.length === 0 && (
-          <p className="text-sm text-gray-500">No matches for "{q}"</p>
+          <p className="text-sm text-muted-foreground">No matches for "{q}"</p>
         )}
         {results.map(r => (
           <Card key={`${r.kind}-${r.id}`}>
             <CardContent className="p-3 flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <p className="font-medium">{r.name}</p>
-                <p className="text-xs text-gray-500">{r.sub_label || (r.kind === 'member' ? 'Member' : 'Guest')}</p>
+                <p className="text-xs text-muted-foreground">{r.sub_label || (r.kind === 'member' ? 'Member' : 'Guest')}</p>
               </div>
               <div className="flex items-center gap-2">
                 <IntentPill status={r.attendance_status} />

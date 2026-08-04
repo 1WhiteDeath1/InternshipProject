@@ -165,7 +165,7 @@ export default function MessBilling() {
   };
 
   const statusBadge = (status: string) => {
-    const colors: Record<string, string> = { draft: 'bg-gray-100 text-gray-800', issued: 'bg-blue-100 text-blue-800', paid: 'bg-green-100 text-green-800' };
+    const colors: Record<string, string> = { draft: 'bg-muted text-muted-foreground', issued: 'bg-blue-100 text-blue-800', paid: 'bg-green-100 text-green-800' };
     return <Badge className={colors[status] || ''}>{status}</Badge>;
   };
 
@@ -177,7 +177,7 @@ export default function MessBilling() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><Wallet size={24} /> Mess Billing</h1>
+        <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><Wallet size={24} /> Mess Billing</h1>
         <div className="flex items-center gap-2">
           <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={month} onChange={e => setMonth(Number(e.target.value))}>
             {Array.from({ length: 12 }, (_, i) => i + 1).map(m => <option key={m} value={m}>{new Date(2000, m - 1).toLocaleString('default', { month: 'long' })}</option>)}
@@ -194,10 +194,10 @@ export default function MessBilling() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Total Billed</p><p className="text-xl font-bold">{formatCurrency(totalBilled)}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Collected</p><p className="text-xl font-bold text-green-600">{formatCurrency(collected)}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Outstanding</p><p className="text-xl font-bold text-amber-600">{formatCurrency(outstanding)}</p></CardContent></Card>
-        <Card><CardContent className="p-4"><p className="text-xs text-gray-500">Drafts</p><p className="text-xl font-bold">{draftCount}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total Billed</p><p className="text-xl font-bold">{formatCurrency(totalBilled)}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Collected</p><p className="text-xl font-bold text-green-600">{formatCurrency(collected)}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Outstanding</p><p className="text-xl font-bold text-amber-600">{formatCurrency(outstanding)}</p></CardContent></Card>
+        <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Drafts</p><p className="text-xl font-bold">{draftCount}</p></CardContent></Card>
       </div>
 
       <Tabs defaultValue="bills">
@@ -211,17 +211,17 @@ export default function MessBilling() {
                   <TableRow><TableHead>Member</TableHead><TableHead>Dining</TableHead><TableHead>Man-Days</TableHead><TableHead>Menu</TableHead><TableHead>Stay</TableHead><TableHead>Extras</TableHead><TableHead>A La Carte</TableHead><TableHead>Discount</TableHead><TableHead>Total</TableHead><TableHead>Status</TableHead><TableHead className="w-32">Actions</TableHead></TableRow>
                 </TableHeader>
                 <TableBody>
-                  {loading && <TableRow><TableCell colSpan={11} className="text-center py-8 text-gray-500">Loading bills...</TableCell></TableRow>}
+                  {loading && <TableRow><TableCell colSpan={11} className="text-center py-8 text-muted-foreground">Loading bills...</TableCell></TableRow>}
                   {!loading && bills.map(b => (
                     <TableRow key={b.id}>
                       <TableCell className="font-medium">{b.member_name}</TableCell>
-                      <TableCell>{b.member_dining_status === 'non_dining' ? <Badge variant="outline">Non-Dining</Badge> : <span className="text-gray-400">Dining</span>}</TableCell>
+                      <TableCell>{b.member_dining_status === 'non_dining' ? <Badge variant="outline">Non-Dining</Badge> : <span className="text-muted-foreground">Dining</span>}</TableCell>
                       <TableCell>{b.man_days}</TableCell>
                       <TableCell>{formatCurrency(b.base_menu_amount)}</TableCell>
                       <TableCell>{formatCurrency(b.stay_amount)}</TableCell>
                       <TableCell>{formatCurrency(b.extra_meals_amount)}</TableCell>
                       <TableCell>{formatCurrency(b.ala_carte_amount)}</TableCell>
-                      <TableCell className="text-sm text-gray-500">{b.applied_discount_rate}% ({formatCurrency(b.discount_amount)})</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{b.applied_discount_rate}% ({formatCurrency(b.discount_amount)})</TableCell>
                       <TableCell className="font-semibold">{formatCurrency(b.total_amount)}</TableCell>
                       <TableCell>{statusBadge(b.status)}</TableCell>
                       <TableCell>
@@ -234,13 +234,13 @@ export default function MessBilling() {
                             </Button>
                           )}
                           <Button size="sm" variant="ghost" title="Print Diet Invoice" onClick={() => setDietInvoiceBillId(b.id)}>
-                            <FileText size={16} className="text-gray-600" />
+                            <FileText size={16} className="text-muted-foreground" />
                           </Button>
                         </div>
                       </TableCell>
                     </TableRow>
                   ))}
-                  {!loading && bills.length === 0 && <TableRow><TableCell colSpan={11} className="text-center py-8 text-gray-500">No bills for this period - click Generate Bills</TableCell></TableRow>}
+                  {!loading && bills.length === 0 && <TableRow><TableCell colSpan={11} className="text-center py-8 text-muted-foreground">No bills for this period - click Generate Bills</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </CardContent>
@@ -285,7 +285,7 @@ export default function MessBilling() {
                       <TableCell>{formatCurrency(c.amount)}</TableCell>
                     </TableRow>
                   ))}
-                  {charges.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500">No guest meal charges recorded</TableCell></TableRow>}
+                  {charges.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No guest meal charges recorded</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </CardContent>

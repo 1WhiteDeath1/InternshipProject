@@ -57,6 +57,25 @@ async def list_bills(
          "total_amount": float(b.total_amount), "status": b.status.value, "generated_at": b.generated_at} for b in bills], "total": total}
 
 
+@router.get("/bills/outstanding-summary")
+async def outstanding_bills_summary(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Draft/issued mess-bill counts and the issued total, computed
+    server-side via GROUP BY - the Clerk dashboard's Outstanding figure
+    previously summed a page_size=100 fetch of list_bills() client-side and
+    silently under-reported once bills-not-yet-paid crossed 100 rows."""
+    rows = db.query(
+        MessBill.status, func.count(MessBill.id), func.coalesce(func.sum(MessBill.total_amount), 0),
+    ).group_by(MessBill.status).all()
+    out = {"draft_count": 0, "issued_count": 0, "issued_total": 0.0}
+    for status_, count, total in rows:
+        if status_ == MessBillStatus.DRAFT:
+            out["draft_count"] = count
+        elif status_ == MessBillStatus.ISSUED:
+            out["issued_count"] = count
+            out["issued_total"] = float(total)
+    return out
+
+
 def _invoice_qr_svg(payload: str) -> str:
     """Locally generated QR (reportlab - no internet, nothing leaves the
     LAN), returned as an inline-able SVG string. Duplicated from

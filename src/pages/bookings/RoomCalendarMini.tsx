@@ -41,7 +41,7 @@ export function RoomCalendarMini({ data, ym, setYm, today, formOpen, form, setFo
   const stayColor = (s: CalendarStay) =>
     s.status === 'checked_in' ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100'
       : s.status === 'confirmed' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100'
-        : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300';
+        : 'bg-gray-100 text-muted-foreground dark:bg-gray-800 dark:text-muted-foreground';
 
   const handleDayClick = (iso: string) => {
     setSelectedDay(iso);
@@ -121,7 +121,7 @@ export function RoomCalendarMini({ data, ym, setYm, today, formOpen, form, setFo
           <Button size="sm" variant="ghost" onClick={() => setYm(({ year, month }) => month === 12 ? { year: year + 1, month: 1 } : { year, month: month + 1 })}><ChevronRight size={16} /></Button>
         </div>
         <div className="grid grid-cols-7 gap-0.5 text-center">
-          {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(d => <div key={d} className="text-[11px] text-gray-400 py-1">{d}</div>)}
+          {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(d => <div key={d} className="text-[11px] text-muted-foreground py-1">{d}</div>)}
           {Array.from({ length: firstDow }).map((_, i) => <div key={`b${i}`} />)}
           {Array.from({ length: daysInMonth }).map((_, i) => {
             const day = i + 1;
@@ -144,7 +144,7 @@ export function RoomCalendarMini({ data, ym, setYm, today, formOpen, form, setFo
             );
           })}
         </div>
-        <p className="text-xs text-gray-500 min-h-4 mt-1.5">
+        <p className="text-xs text-muted-foreground min-h-4 mt-1.5">
           {dragging
             ? <span className="text-blue-700 dark:text-blue-300 font-medium">{fmtDay(dragLo!)} → {fmtDay(dragHi!)} · {dragNights} night{dragNights > 1 ? 's' : ''}</span>
             : selectedDay
@@ -155,7 +155,7 @@ export function RoomCalendarMini({ data, ym, setYm, today, formOpen, form, setFo
               : formOpen && form.nature_of_duty !== 'hra' ? 'Click and drag across days to select your stay, or tap a single day'
                 : formOpen ? 'Tap the move-in day' : 'Tap a day to see its booking'}
         </p>
-        <div className="flex gap-3 text-[11px] text-gray-500 mt-1">
+        <div className="flex gap-3 text-[11px] text-muted-foreground mt-1">
           <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-red-200 align-middle mr-1" />In-house</span>
           <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-blue-200 align-middle mr-1" />Reserved</span>
           <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-gray-200 align-middle mr-1" />Past stay</span>
@@ -164,10 +164,10 @@ export function RoomCalendarMini({ data, ym, setYm, today, formOpen, form, setFo
 
       {upcoming.length > 0 && (
         <div>
-          <p className="text-xs text-gray-400 mb-1">Upcoming</p>
+          <p className="text-xs text-muted-foreground mb-1">Upcoming</p>
           {upcoming.map(s => (
             <div key={s.id} className="flex justify-between text-sm border rounded-md px-2.5 py-1.5 mb-1">
-              <span>{s.guest_name} <span className="text-gray-400 text-xs">{s.booking_reference}</span></span>
+              <span>{s.guest_name} <span className="text-muted-foreground text-xs">{s.booking_reference}</span></span>
               <span className="text-blue-700 dark:text-blue-300">{fmtDay(s.check_in)}–{fmtDay(s.check_out)}</span>
             </div>
           ))}

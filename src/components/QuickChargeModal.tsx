@@ -73,15 +73,15 @@ export function QuickChargeModal({ open, onOpenChange }: QuickChargeModalProps) 
           {!selected ? (
             <div>
               <Input placeholder="Search room or guest name…" value={search} onChange={e => setSearch(e.target.value)} autoFocus />
-              {loading && <p className="text-xs text-gray-400 mt-2">Loading occupied rooms…</p>}
+              {loading && <p className="text-xs text-muted-foreground mt-2">Loading occupied rooms…</p>}
               {!loading && q.length > 0 && (
                 <div className="mt-2 max-h-56 overflow-y-auto rounded-md border divide-y">
-                  {matches.length === 0 && <p className="text-xs text-gray-400 p-2">No matching occupied room or guest</p>}
+                  {matches.length === 0 && <p className="text-xs text-muted-foreground p-2">No matching occupied room or guest</p>}
                   {matches.map(r => (
-                    <button key={r.id} type="button" className="w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    <button key={r.id} type="button" className="w-full text-left px-3 py-2 hover:bg-accent"
                       onClick={() => setSelected(r)}>
                       <span className="font-medium">Room {r.room_number}</span>
-                      <span className="text-gray-400 text-xs"> — {r.current_guest}</span>
+                      <span className="text-muted-foreground text-xs"> — {r.current_guest}</span>
                     </button>
                   ))}
                 </div>
@@ -97,7 +97,7 @@ export function QuickChargeModal({ open, onOpenChange }: QuickChargeModalProps) 
               <div className="flex rounded-md border overflow-hidden text-xs">
                 {([[false, 'Room Charge'], [true, 'Mess Charge']] as const).map(([val, label]) => (
                   <button key={label} type="button"
-                    className={`flex-1 py-1.5 ${isMess === val ? 'bg-primary text-primary-foreground font-medium' : 'bg-transparent text-gray-500 hover:text-gray-700'}`}
+                    className={`flex-1 py-1.5 ${isMess === val ? 'bg-primary text-primary-foreground font-medium' : 'bg-transparent text-muted-foreground hover:text-foreground'}`}
                     onClick={() => { setIsMess(val); setHead((val ? MESS_CHARGE_HEADS[0] : ROOM_CHARGE_HEADS[0]) ?? CUSTOM_CHARGE_HEAD); }}>
                     {label}
                   </button>

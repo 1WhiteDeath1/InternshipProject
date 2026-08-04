@@ -5,7 +5,7 @@ import { hasPermission } from '@/contexts/auth-context';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   AlertTriangle, BedDouble, LogIn, LogOut, Wallet, ArrowRight, ClipboardCheck, CalendarDays,
-  ChefHat, PackageX, Utensils, Clock, Star, Shield,
+  ChefHat, PackageX, Utensils, Clock, Star, Shield, Banknote,
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, CartesianGrid, XAxis, YAxis, Tooltip, Legend,
@@ -15,6 +15,7 @@ import RevenueWidget from '@/components/dashboard/RevenueWidget';
 import OccupancyWidget from '@/components/dashboard/OccupancyWidget';
 import CostRevenueSankeyWidget from '@/components/dashboard/CostRevenueSankeyWidget';
 import EventsWidget from '@/components/dashboard/EventsWidget';
+import StockOverviewWidget from '@/components/dashboard/StockOverviewWidget';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '@/contexts/useTheme';
 import { toast } from 'sonner';
@@ -45,7 +46,7 @@ interface BillingStats {
   today_room_revenue: number; today_mess_revenue: number; today_discounts: number;
 }
 
-interface MemberBillLite { status: string; total_amount: number; }
+interface MessBillOutstanding { draft_count: number; issued_count: number; issued_total: number; }
 
 interface KitchenOrderLite {
   id: number; menu_item_name: string | null; quantity_ordered: number; status: string;
@@ -60,7 +61,9 @@ interface ExpiringBatchLite {
   batch_id: number; item_id: number; item_name: string; quantity: number; unit: string; expiry_date: string;
 }
 
-interface AttendanceLite { meal_type: string; status: string; }
+interface DailyCountEntry {
+  date: string; meal_type: string; booked: number; attended: number; cancelled: number; excluded: number; no_show: number;
+}
 
 interface IncidentLite {
   id: number; title: string; location: string | null; severity: string; status: string; created_at: string;
@@ -76,7 +79,7 @@ const bigMoney = (n: number | null | undefined) =>
   `Rs ${Math.round(typeof n === 'number' && !Number.isNaN(n) ? n : 0).toLocaleString('en-US')}`;
 
 function StatValue({ loading, value }: { loading: boolean; value: string | number }) {
-  if (loading) return <span className="inline-block h-10 w-28 bg-gray-200 dark:bg-gray-700 rounded animate-pulse" />;
+  if (loading) return <span className="inline-block h-10 w-28 bg-muted rounded animate-pulse" />;
   return <>{value}</>;
 }
 
@@ -92,15 +95,15 @@ function HeroTile({ label, value, sub, icon: Icon, tone, onClick, alert }: {
     >
       <CardContent className="p-5">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-base text-gray-500 dark:text-gray-400">{label}</p>
+          <p className="text-base text-muted-foreground">{label}</p>
           <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${tone}`}>
             <Icon size={21} />
           </div>
         </div>
-        <p className={`text-3xl xl:text-4xl font-bold tracking-tight mt-1.5 ${alert ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>
+        <p className={`text-3xl xl:text-4xl font-bold tracking-tight mt-1.5 ${alert ? 'text-red-600 dark:text-red-400' : 'text-foreground'}`}>
           {value}
         </p>
-        {sub && <p className="text-sm text-gray-500 dark:text-gray-400 mt-1.5">{sub}</p>}
+        {sub && <p className="text-sm text-muted-foreground mt-1.5">{sub}</p>}
       </CardContent>
     </Card>
   );
@@ -124,15 +127,13 @@ export default function Dashboard() {
   const [occupancy, setOccupancy] = useState<OccupancyData | null>(null);
   const [unsettled, setUnsettled] = useState<UnsettledInvoice[]>([]);
   const [billingStats, setBillingStats] = useState<BillingStats | null>(null);
-  const [memberBills, setMemberBills] = useState<MemberBillLite[]>([]);
+  const [messBillOutstanding, setMessBillOutstanding] = useState<MessBillOutstanding | null>(null);
   const [kitchenOrders, setKitchenOrders] = useState<KitchenOrderLite[]>([]);
   const [lateOrderCount, setLateOrderCount] = useState(0);
   const [lowStockCount, setLowStockCount] = useState(0);
   const [lowStockItems, setLowStockItems] = useState<LowStockItemLite[]>([]);
   const [expiringItems, setExpiringItems] = useState<ExpiringBatchLite[]>([]);
-  const [todayAttendance, setTodayAttendance] = useState<AttendanceLite[]>([]);
-  const [tomorrowMealCount, setTomorrowMealCount] = useState(0);
-  const [weeklyMealVolume, setWeeklyMealVolume] = useState<{ date: string; count: number }[]>([]);
+  const [attendanceCounts, setAttendanceCounts] = useState<DailyCountEntry[]>([]);
   const [openIncidents, setOpenIncidents] = useState<IncidentLite[]>([]);
   const [loading, setLoading] = useState(true);
   const { darkMode } = useTheme();
@@ -149,11 +150,15 @@ export default function Dashboard() {
   const isSecurity = hasPermission(user, 'security', 'view')
     && !hasPermission(user, 'bookings', 'view') && !hasPermission(user, 'clerk_desk', 'view') && !hasPermission(user, 'billing', 'view');
   const canSeeOccupancy = hasPermission(user, 'bookings', 'view');
+  // Whether /billing/desk was actually fetched - the generic ops-only board
+  // below shows a "Bills To Settle" tile that must stay hidden (not read as
+  // a false "all collected") for any role that lacks the permission to see
+  // that data in the first place.
+  const canSeeDesk = hasPermission(user, 'billing', 'view') || hasPermission(user, 'clerk_desk', 'view');
 
   useEffect(() => {
     queueMicrotask(() => {
       setLoading(true);
-      const canSeeDesk = hasPermission(user, 'billing', 'view') || hasPermission(user, 'clerk_desk', 'view');
       const todayStr = new Date().toISOString().slice(0, 10);
       const common = [
         // Guest names/rooms are PII - only fetched when the role actually
@@ -172,7 +177,11 @@ export default function Dashboard() {
         // member billing rather than just the guest side.
         ...(isClerk ? [
           api.get('/billing/dashboard-stats').then(res => setBillingStats(res.data)),
-          api.get('/mess-billing/bills?page_size=100').then(res => setMemberBills(res.data.items || [])),
+          // Server-side aggregate (see /mess-billing/bills/outstanding-summary)
+          // instead of paging through list_bills() and summing client-side -
+          // that used to silently under-report once outstanding bills crossed
+          // the endpoint's page_size=100 cap.
+          api.get('/mess-billing/bills/outstanding-summary').then(res => setMessBillOutstanding(res.data)),
         ] : []),
         // Kitchen NCO has no reports/alerts access, so this board is built
         // straight off the same kitchen/inventory/attendance endpoints the
@@ -189,34 +198,25 @@ export default function Dashboard() {
           // directly instead, same pattern as low-stock above.
           api.get('/inventory/expiring', { params: { days: 3 } })
             .then(res => setExpiringItems(res.data || [])),
-          api.get('/attendance', { params: { date: todayStr, page_size: 100 } })
-            .then(res => setTodayAttendance(res.data.items || [])),
-          // Tomorrow's booked meals - what actually drives what to cook and
-          // buy, unlike today's count which has already happened.
-          api.get('/attendance', { params: { date: new Date(Date.now() + 86400000).toISOString().slice(0, 10), page_size: 100 } })
-            .then(res => setTomorrowMealCount((res.data.items || []).filter((a: AttendanceLite) => a.status === 'booked' || a.status === 'attended').length)),
-          // Weekly volume chart - one lightweight call per of the last 7 days
-          // rather than a wide date_from/date_to range, since /attendance's
-          // page_size caps at 100 and a week across every meal/member could
-          // exceed that in one page.
-          Promise.all(
-            Array.from({ length: 7 }, (_, i) => {
-              const d = new Date();
-              d.setDate(d.getDate() - (6 - i));
-              return d.toISOString().slice(0, 10);
-            }).map(dateStr => api.get('/attendance', { params: { date: dateStr, page_size: 100 } })
-              .then(res => ({
-                date: dateStr,
-                count: (res.data.items || []).filter((a: AttendanceLite) => a.status === 'booked' || a.status === 'attended').length,
-              })))
-          ).then(setWeeklyMealVolume),
+          // One aggregate call covering the last 7 days through tomorrow,
+          // computed server-side via GROUP BY (see /attendance/daily-counts) -
+          // replaces what used to be 9 separate /attendance list calls (one
+          // per day plus today/tomorrow), each capped at page_size=100 and
+          // silently under-counting past that. Feeds today's meal counts,
+          // the meal-type donut, tomorrow's count, and the weekly chart.
+          api.get('/attendance/daily-counts', {
+            params: {
+              date_from: new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10),
+              date_to: new Date(Date.now() + 86400000).toISOString().slice(0, 10),
+            },
+          }).then(res => setAttendanceCounts(res.data || [])),
         ] : []),
       ];
       Promise.all(common)
         .catch(() => toast.error('Failed to load dashboard data'))
         .finally(() => setLoading(false));
     });
-  }, [user, isClerk, isKitchen, isSecurity, canSeeOccupancy]);
+  }, [user, isClerk, isKitchen, isSecurity, canSeeOccupancy, canSeeDesk]);
 
   const overdueDepartures = occupancy?.departures.filter(d => d.overdue) ?? [];
   const billsAmount = unsettled.reduce((s, i) => s + i.balance_due, 0);
@@ -245,25 +245,25 @@ export default function Dashboard() {
       action={<button className="text-sm text-blue-600 hover:underline flex items-center gap-1" onClick={() => navigate('/bookings')}>Bookings <ArrowRight size={15} /></button>}>
       <div className="space-y-3">
         <div>
-          <p className="text-sm font-semibold text-gray-500 dark:text-gray-400 flex items-center gap-2 mb-1.5">
+          <p className="text-sm font-semibold text-muted-foreground flex items-center gap-2 mb-1.5">
             <LogIn size={16} className="text-emerald-600" /> Arrivals ({occupancy?.arrivals.length ?? 0})
           </p>
-          {(occupancy?.arrivals.length ?? 0) === 0 && <p className="text-base text-gray-400 pl-6">None expected today</p>}
+          {(occupancy?.arrivals.length ?? 0) === 0 && <p className="text-base text-muted-foreground pl-6">None expected today</p>}
           {occupancy?.arrivals.slice(0, 4).map(a => (
             <p key={a.booking_id} className="text-base pl-6 py-0.5 truncate">
-              {a.guest_name} <span className="text-gray-400">· Room {a.room_number}</span>
+              {a.guest_name} <span className="text-muted-foreground">· Room {a.room_number}</span>
               {a.arrival_overdue && <span className="text-red-600 font-medium"> · overdue</span>}
             </p>
           ))}
         </div>
         <div className="border-t pt-3">
-          <p className="text-sm font-semibold text-gray-500 dark:text-gray-400 flex items-center gap-2 mb-1.5">
+          <p className="text-sm font-semibold text-muted-foreground flex items-center gap-2 mb-1.5">
             <LogOut size={16} className="text-blue-600" /> Departures ({occupancy?.departures.length ?? 0})
           </p>
-          {(occupancy?.departures.length ?? 0) === 0 && <p className="text-base text-gray-400 pl-6">None due today</p>}
+          {(occupancy?.departures.length ?? 0) === 0 && <p className="text-base text-muted-foreground pl-6">None due today</p>}
           {occupancy?.departures.slice(0, 4).map(d => (
             <p key={d.booking_id} className="text-base pl-6 py-0.5 truncate">
-              {d.guest_name} <span className="text-gray-400">· Room {d.room_number}</span>
+              {d.guest_name} <span className="text-muted-foreground">· Room {d.room_number}</span>
               {d.overdue && <span className="text-red-600 font-medium"> · {d.days_overdue}d overdue</span>}
             </p>
           ))}
@@ -275,7 +275,7 @@ export default function Dashboard() {
   const billsWidget = (
     <SectionCard title="Bills to Settle"
       action={<button className="text-sm text-blue-600 hover:underline flex items-center gap-1" onClick={() => navigate('/clerk-desk')}>Clerk Desk <ArrowRight size={15} /></button>}>
-      {billGroups.length === 0 && <p className="text-base text-gray-400">All bills collected ✓</p>}
+      {billGroups.length === 0 && <p className="text-base text-muted-foreground">All bills collected ✓</p>}
       <div className="space-y-2">
         {billGroups.slice(0, 5).map(g => {
           const f = g[0];
@@ -284,13 +284,13 @@ export default function Dashboard() {
               className="w-full flex items-center justify-between gap-2 rounded-lg border px-3 py-2 hover:border-blue-400 transition-colors text-left">
               <span className="min-w-0">
                 <span className="text-base font-medium block truncate">{f.rank ? `${f.rank} ` : ''}{f.guest_name || '—'}</span>
-                <span className="text-sm text-gray-500">Room {f.room_number || '—'}{f.checking_out_now ? ' · checking out now' : ''}</span>
+                <span className="text-sm text-muted-foreground">Room {f.room_number || '—'}{f.checking_out_now ? ' · checking out now' : ''}</span>
               </span>
               <span className="text-lg font-bold font-mono shrink-0">{bigMoney(g.reduce((s, i) => s + i.balance_due, 0))}</span>
             </button>
           );
         })}
-        {billGroups.length > 5 && <p className="text-sm text-gray-500">+ {billGroups.length - 5} more on the Clerk Desk</p>}
+        {billGroups.length > 5 && <p className="text-sm text-muted-foreground">+ {billGroups.length - 5} more on the Clerk Desk</p>}
       </div>
     </SectionCard>
   );
@@ -301,14 +301,14 @@ export default function Dashboard() {
   // Desk instead of on the face of this page. clerk_desk permission is
   // exclusive to the Clerk role, so this check alone identifies them. ----
   if (isClerk && !hasPermission(user, 'reports', 'view')) {
-    const memberIssued = memberBills.filter(b => b.status === 'issued');
-    const memberDraftCount = memberBills.filter(b => b.status === 'draft').length;
-    const memberIssuedDue = memberIssued.reduce((s, b) => s + b.total_amount, 0);
+    const memberIssuedDue = messBillOutstanding?.issued_total ?? 0;
     const outstandingAll = billsAmount + memberIssuedDue;
-    const pendingCount = billGroups.length + memberDraftCount + memberIssued.length;
+    const pendingCount = billGroups.length + (messBillOutstanding?.draft_count ?? 0) + (messBillOutstanding?.issued_count ?? 0);
+    const paymentMethods = billingStats?.payment_methods_today ?? [];
+    const cashInTotal = paymentMethods.reduce((s, m) => s + m.amount, 0);
     return (
       <div className="space-y-6">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Welcome, {user?.full_name}</h1>
+        <h1 className="text-3xl font-bold text-foreground">Welcome, {user?.full_name}</h1>
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           <HeroTile label="Today's Collections" value={<StatValue loading={loading} value={bigMoney(billingStats?.today_collections)} />}
             sub="Payments actually received today"
@@ -323,6 +323,30 @@ export default function Dashboard() {
             sub={pendingCount > 0 ? 'Tap to open Clerk Desk' : 'Nothing waiting on you'}
             icon={ClipboardCheck} tone="bg-red-100 dark:bg-red-900/30 text-red-600" onClick={() => navigate('/clerk-desk')} alert={pendingCount > 0} />
         </div>
+
+        {/* End-of-shift cash summary - payment_methods_today was already
+            fetched into billingStats and never rendered; this is that data,
+            broken down by method, so the Clerk has a "what I collected today,
+            ready to hand over" figure without a separate report. */}
+        <SectionCard title="Today's Collections by Method">
+          {!loading && paymentMethods.length === 0 && (
+            <p className="text-base text-muted-foreground">No payments recorded yet today</p>
+          )}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {paymentMethods.map(m => (
+              <div key={m.method} className="rounded-lg border px-3 py-2.5">
+                <p className="text-sm text-muted-foreground capitalize">{m.method.replace(/_/g, ' ')}</p>
+                <p className="text-lg font-bold font-mono">{bigMoney(m.amount)}</p>
+              </div>
+            ))}
+          </div>
+          {paymentMethods.length > 0 && (
+            <div className="mt-3 pt-3 border-t flex items-center justify-between">
+              <span className="text-base font-semibold flex items-center gap-1.5"><Banknote size={17} /> Total collected today</span>
+              <span className="text-xl font-bold font-mono">{bigMoney(cashInTotal)}</span>
+            </div>
+          )}
+        </SectionCard>
       </div>
     );
   }
@@ -334,11 +358,21 @@ export default function Dashboard() {
   if (isKitchen) {
     const activeOrders = kitchenOrders.filter(o => o.status === 'pending' || o.status === 'cooking' || o.status === 'prepared');
     const specialOrders = activeOrders.filter(o => o.is_ala_carte);
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const tomorrowStr = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const confirmedCount = (e: DailyCountEntry) => e.booked + e.attended;
+
     const mealCounts = Object.keys(MEAL_TYPE_LABELS).map(mealType => ({
       mealType,
-      count: todayAttendance.filter(a => a.meal_type === mealType && (a.status === 'booked' || a.status === 'attended')).length,
+      count: attendanceCounts
+        .filter(e => e.date === todayStr && e.meal_type === mealType)
+        .reduce((s, e) => s + confirmedCount(e), 0),
     }));
     const mealsToday = mealCounts.reduce((s, m) => s + m.count, 0);
+    const tomorrowMealCount = attendanceCounts
+      .filter(e => e.date === tomorrowStr)
+      .reduce((s, e) => s + confirmedCount(e), 0);
 
     const gridStroke = darkMode ? '#374151' : '#E5E7EB';
     const tickFill = darkMode ? '#9CA3AF' : '#6B7280';
@@ -347,13 +381,21 @@ export default function Dashboard() {
       border: `1px solid ${gridStroke}`, borderRadius: 8, color: darkMode ? '#F9FAFB' : '#111827', fontSize: 13,
     };
     const weekdayLabel = (dateStr: string) => new Date(`${dateStr}T00:00:00`).toLocaleDateString('en-US', { weekday: 'short' });
-    const weeklyChartData = weeklyMealVolume.map(w => ({ day: weekdayLabel(w.date), meals: w.count }));
+    const last7Days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      return d.toISOString().slice(0, 10);
+    });
+    const weeklyChartData = last7Days.map(dateStr => ({
+      day: weekdayLabel(dateStr),
+      meals: attendanceCounts.filter(e => e.date === dateStr).reduce((s, e) => s + confirmedCount(e), 0),
+    }));
     const mealTypeColors: Record<string, string> = { breakfast: '#F59E0B', lunch: '#10B981', hitea: '#8B5CF6', dinner: '#3B82F6' };
     const donutData = mealCounts.filter(m => m.count > 0).map(m => ({ key: m.mealType, name: MEAL_TYPE_LABELS[m.mealType], value: m.count }));
 
     return (
       <div className="space-y-6">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Welcome, {user?.full_name}</h1>
+        <h1 className="text-3xl font-bold text-foreground">Welcome, {user?.full_name}</h1>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
           <HeroTile label="Meals Booked Today" value={<StatValue loading={loading} value={mealsToday} />}
             sub={<>Members &amp; guests, all meals · Tomorrow: <strong>{tomorrowMealCount}</strong> booked so far</>}
@@ -391,7 +433,7 @@ export default function Dashboard() {
           <SectionCard title="Today's Meals by Type">
             <div className="h-56">
               {donutData.length === 0 ? (
-                <div className="h-full flex items-center justify-center text-base text-gray-400">No meals booked yet today</div>
+                <div className="h-full flex items-center justify-center text-base text-muted-foreground">No meals booked yet today</div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
@@ -411,7 +453,7 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
           <SectionCard title="Kitchen Queue"
             action={<button className="text-sm text-blue-600 hover:underline flex items-center gap-1" onClick={() => navigate('/kitchen')}>Kitchen <ArrowRight size={15} /></button>}>
-            {activeOrders.length === 0 && <p className="text-base text-gray-400">Nothing in the queue right now</p>}
+            {activeOrders.length === 0 && <p className="text-base text-muted-foreground">Nothing in the queue right now</p>}
             <div className="space-y-2">
               {activeOrders.slice(0, 6).map(o => (
                 <button key={o.id} type="button" onClick={() => navigate('/kitchen')}
@@ -421,20 +463,20 @@ export default function Dashboard() {
                       {o.is_ala_carte && <Star size={13} className="text-amber-500 shrink-0" />}
                       {o.menu_item_name || '—'}
                     </span>
-                    <span className="text-sm text-gray-500">
+                    <span className="text-sm text-muted-foreground">
                       {o.is_ala_carte ? (o.consumer_name || 'À la carte') : `${o.quantity_ordered} portions`}
                     </span>
                   </span>
-                  <span className="text-sm font-medium capitalize shrink-0 text-gray-500">{o.status}</span>
+                  <span className="text-sm font-medium capitalize shrink-0 text-muted-foreground">{o.status}</span>
                 </button>
               ))}
-              {activeOrders.length > 6 && <p className="text-sm text-gray-500">+ {activeOrders.length - 6} more in Kitchen</p>}
+              {activeOrders.length > 6 && <p className="text-sm text-muted-foreground">+ {activeOrders.length - 6} more in Kitchen</p>}
             </div>
           </SectionCard>
 
           <SectionCard title="Low Stock Items"
             action={<button className="text-sm text-blue-600 hover:underline flex items-center gap-1" onClick={() => navigate('/stock', { state: { openIntake: true } })}>Restock <ArrowRight size={15} /></button>}>
-            {lowStockItems.length === 0 && <p className="text-base text-gray-400">Nothing below reorder level ✓</p>}
+            {lowStockItems.length === 0 && <p className="text-base text-muted-foreground">Nothing below reorder level ✓</p>}
             <div className="space-y-2">
               {lowStockItems.slice(0, 6).map(it => (
                 <button key={it.id} type="button" onClick={() => navigate('/stock', { state: { openIntake: true, itemId: it.id } })}
@@ -443,13 +485,13 @@ export default function Dashboard() {
                   <span className="text-sm font-medium text-red-600 shrink-0">{it.total_stock} / {it.reorder_level} {it.unit}</span>
                 </button>
               ))}
-              {lowStockCount > lowStockItems.length && <p className="text-sm text-gray-500">+ {lowStockCount - lowStockItems.length} more below reorder level</p>}
+              {lowStockCount > lowStockItems.length && <p className="text-sm text-muted-foreground">+ {lowStockCount - lowStockItems.length} more below reorder level</p>}
             </div>
           </SectionCard>
 
           <SectionCard title="Expiring Soon"
             action={<button className="text-sm text-blue-600 hover:underline flex items-center gap-1" onClick={() => navigate('/stock')}>Inventory <ArrowRight size={15} /></button>}>
-            {expiringItems.length === 0 && <p className="text-base text-gray-400">Nothing expiring in the next 3 days ✓</p>}
+            {expiringItems.length === 0 && <p className="text-base text-muted-foreground">Nothing expiring in the next 3 days ✓</p>}
             <div className="space-y-2">
               {expiringItems.slice(0, 6).map(b => (
                 <div key={b.batch_id} className="w-full flex items-center justify-between gap-2 rounded-lg border px-3 py-2">
@@ -457,7 +499,7 @@ export default function Dashboard() {
                   <span className="text-sm font-medium text-amber-600 shrink-0">{b.quantity} {b.unit} · {new Date(b.expiry_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
                 </div>
               ))}
-              {expiringItems.length > 6 && <p className="text-sm text-gray-500">+ {expiringItems.length - 6} more expiring soon</p>}
+              {expiringItems.length > 6 && <p className="text-sm text-muted-foreground">+ {expiringItems.length - 6} more expiring soon</p>}
             </div>
           </SectionCard>
         </div>
@@ -471,7 +513,7 @@ export default function Dashboard() {
   if (isSecurity) {
     return (
       <div className="space-y-6">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Welcome, {user?.full_name}</h1>
+        <h1 className="text-3xl font-bold text-foreground">Welcome, {user?.full_name}</h1>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <HeroTile label="Open Incidents" value={<StatValue loading={loading} value={openIncidents.length} />}
             sub={openIncidents.length > 0 ? 'Open or under investigation' : 'Nothing outstanding'}
@@ -479,19 +521,19 @@ export default function Dashboard() {
         </div>
         <SectionCard title="Open Incidents"
           action={<button className="text-sm text-blue-600 hover:underline flex items-center gap-1" onClick={() => navigate('/security')}>Security <ArrowRight size={15} /></button>}>
-          {openIncidents.length === 0 && <p className="text-base text-gray-400">Nothing open right now ✓</p>}
+          {openIncidents.length === 0 && <p className="text-base text-muted-foreground">Nothing open right now ✓</p>}
           <div className="space-y-2">
             {openIncidents.slice(0, 8).map(inc => (
               <button key={inc.id} type="button" onClick={() => navigate('/security')}
                 className="w-full flex items-center justify-between gap-2 rounded-lg border px-3 py-2 hover:border-red-400 transition-colors text-left">
                 <span className="min-w-0">
                   <span className="text-base font-medium truncate block">{inc.title}</span>
-                  <span className="text-sm text-gray-500">{inc.location || '—'}</span>
+                  <span className="text-sm text-muted-foreground">{inc.location || '—'}</span>
                 </span>
-                <span className="text-sm font-medium capitalize shrink-0 text-gray-500">{inc.severity}</span>
+                <span className="text-sm font-medium capitalize shrink-0 text-muted-foreground">{inc.severity}</span>
               </button>
             ))}
-            {openIncidents.length > 8 && <p className="text-sm text-gray-500">+ {openIncidents.length - 8} more on Security</p>}
+            {openIncidents.length > 8 && <p className="text-sm text-muted-foreground">+ {openIncidents.length - 8} more on Security</p>}
           </div>
         </SectionCard>
       </div>
@@ -502,7 +544,7 @@ export default function Dashboard() {
   if (!hasPermission(user, 'reports', 'view')) {
     return (
       <div className="space-y-6">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Welcome, {user?.full_name}</h1>
+        <h1 className="text-3xl font-bold text-foreground">Welcome, {user?.full_name}</h1>
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           <HeroTile label="Rooms Occupied" value={<StatValue loading={loading} value={`${occupancy?.occupied ?? 0}/${occupancy?.total_rooms ?? 0}`} />}
             icon={BedDouble} tone="bg-blue-100 dark:bg-blue-900/30 text-blue-600" onClick={() => navigate('/bookings')} />
@@ -511,28 +553,38 @@ export default function Dashboard() {
           <HeroTile label="Departures Due" value={<StatValue loading={loading} value={occupancy?.today_departures ?? 0} />}
             sub={overdueDepartures.length > 0 ? <span className="text-red-600 font-medium">{overdueDepartures.length} overdue</span> : undefined}
             icon={LogOut} tone="bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600" onClick={() => navigate('/bookings')} alert={overdueDepartures.length > 0} />
-          <HeroTile label="Bills To Settle" value={<StatValue loading={loading} value={billGroups.length} />}
-            sub={billGroups.length > 0 ? <span className="font-medium">{bigMoney(billsAmount)} to collect</span> : 'All collected'}
-            icon={Wallet} tone="bg-purple-100 dark:bg-purple-900/30 text-purple-600" onClick={() => navigate('/clerk-desk')} alert={billGroups.length > 0} />
+          {/* Only rendered when /billing/desk was actually fetched - showing
+              this for a role without billing/clerk_desk:view used to read a
+              hardcoded "All collected" regardless of real outstanding bills. */}
+          {canSeeDesk && (
+            <HeroTile label="Bills To Settle" value={<StatValue loading={loading} value={billGroups.length} />}
+              sub={billGroups.length > 0 ? <span className="font-medium">{bigMoney(billsAmount)} to collect</span> : 'All collected'}
+              icon={Wallet} tone="bg-purple-100 dark:bg-purple-900/30 text-purple-600" onClick={() => navigate('/clerk-desk')} alert={billGroups.length > 0} />
+          )}
         </div>
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
           {roomStatusDonut}
           {deskWidget}
-          {billsWidget}
+          {canSeeDesk && billsWidget}
         </div>
       </div>
     );
   }
 
-  // ---- Manager / Deputy Manager: exactly 3 widgets, each a click away from
-  // its own detailed popup. Everything else that used to live on this board
-  // (stock, waste, vendors, incidents, attendance, etc.) is intentionally
-  // gone - those all still surface through their own module pages. ----
+  // ---- Manager / Deputy Manager: a click-through summary board, each card a
+  // click away from its own detailed popup. Manager doesn't operate Bookings
+  // or Inventory day-to-day (see access.py doctrine) - OccupancyWidget's
+  // pie-chart card stays the single occupancy widget, with room-by-room
+  // detail (week calendar + full room table) tucked behind its own "more
+  // details" toggle inside the popup rather than a second dashboard card.
+  // StockOverviewWidget gives the same kind of read-only overview for
+  // procurement/stock - neither grants the full operational module or its
+  // sidebar nav item. ----
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-        <p className="text-base text-gray-500 dark:text-gray-400">{new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
+        <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
+        <p className="text-base text-muted-foreground">{new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
       </div>
 
       {/* 2-up, not 4-up: RevenueWidget's sparkline and the Sankey diagram both
@@ -547,6 +599,7 @@ export default function Dashboard() {
         <RevenueWidget />
         <CostRevenueSankeyWidget />
         <OccupancyWidget />
+        <StockOverviewWidget />
         <EventsWidget />
       </div>
     </div>

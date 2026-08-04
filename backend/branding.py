@@ -10,6 +10,11 @@ from backend.schemas import BrandingConfig
 
 DEFAULT_CONFIG = BrandingConfig()
 SALT = b"sam_hotel_mess_salt_v1"
+# Branding (badge text, splash title/subtitle) carries no sensitive data - the
+# encryption-at-rest here just resists casual file-edit tampering, so a single
+# app-internal key is fine. Authorization for who may change it is RBAC's job
+# (branding:edit), not a user-supplied password - see routers/branding.py.
+DEFAULT_PASSWORD = "2225550100"
 
 
 def _get_key(password: str) -> bytes:
@@ -25,14 +30,14 @@ def _get_key(password: str) -> bytes:
 
 def create_default_branding_file():
     if not BRANDING_FILE.exists():
-        key = _get_key("2225550100")
+        key = _get_key(DEFAULT_PASSWORD)
         f = Fernet(key)
         data = DEFAULT_CONFIG.model_dump_json().encode()
         encrypted = f.encrypt(data)
         BRANDING_FILE.write_bytes(encrypted)
 
 
-def load_branding_config(password: str = "2225550100") -> BrandingConfig:
+def load_branding_config(password: str = DEFAULT_PASSWORD) -> BrandingConfig:
     try:
         key = _get_key(password)
         f = Fernet(key)

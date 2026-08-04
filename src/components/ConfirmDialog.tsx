@@ -14,6 +14,9 @@ export interface ConfirmRequest {
   /** Show a text input; its value is passed to onConfirm. */
   reasonLabel?: string;
   reasonRequired?: boolean;
+  /** Minimum trimmed length before Confirm enables - guards against a
+   * one-character placeholder reaching the audit log on a required field. */
+  reasonMinLength?: number;
   onConfirm: (reason: string) => void;
 }
 
@@ -51,7 +54,7 @@ export function ConfirmDialog({ request, onClose }: {
               <AlertDialogCancel>Cancel</AlertDialogCancel>
               <AlertDialogAction
                 className={request.destructive ? buttonVariants({ variant: 'destructive' }) : undefined}
-                disabled={!!request.reasonLabel && !!request.reasonRequired && !reason.trim()}
+                disabled={!!request.reasonLabel && !!request.reasonRequired && reason.trim().length < (request.reasonMinLength ?? 1)}
                 onClick={() => { request.onConfirm(reason.trim()); onClose(); }}>
                 {request.confirmLabel || 'Confirm'}
               </AlertDialogAction>

@@ -30,7 +30,7 @@ export function RoomDrawerHeader({ room, current, uploading, onUploadPhoto, onDe
         </SheetTitle>
       </SheetHeader>
 
-      <div className="relative w-full aspect-video rounded-lg overflow-hidden border bg-gray-100 dark:bg-gray-900 mt-2">
+      <div className="relative w-full aspect-video rounded-lg overflow-hidden border bg-muted mt-2">
         {mainPhoto ? (
           <>
             <img src={mainPhoto.url} alt={`Room ${room.room_number}`} className="w-full h-full object-cover" />
@@ -40,7 +40,7 @@ export function RoomDrawerHeader({ room, current, uploading, onUploadPhoto, onDe
             </button>
           </>
         ) : (
-          <label className="w-full h-full flex flex-col items-center justify-center gap-1 cursor-pointer text-gray-400 hover:text-gray-600">
+          <label className="w-full h-full flex flex-col items-center justify-center gap-1 cursor-pointer text-muted-foreground hover:text-muted-foreground">
             <Camera size={24} />
             <span className="text-xs">{uploading ? 'Uploading…' : 'Add room photos'}</span>
             <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" disabled={uploading}
@@ -60,7 +60,7 @@ export function RoomDrawerHeader({ room, current, uploading, onUploadPhoto, onDe
               </button>
             </div>
           ))}
-          <label className="shrink-0 w-14 h-14 rounded-md border-2 border-dashed flex items-center justify-center cursor-pointer text-gray-400 hover:text-gray-600 hover:border-gray-400">
+          <label className="shrink-0 w-14 h-14 rounded-md border-2 border-dashed flex items-center justify-center cursor-pointer text-muted-foreground hover:text-muted-foreground hover:border-gray-400">
             <ImagePlus size={16} />
             <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" disabled={uploading}
               onChange={e => { const f = e.target.files?.[0]; if (f) onUploadPhoto(f); e.target.value = ''; }} />
@@ -68,7 +68,7 @@ export function RoomDrawerHeader({ room, current, uploading, onUploadPhoto, onDe
         </div>
       )}
 
-      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1.5">
+      <p className="text-sm text-muted-foreground mt-1.5">
         {ROOM_TYPE_LABELS[room.room_type] || room.room_type}{room.room_type === 'suite' ? ` · ${room.ac_count || 1}×AC` : ''}
         {' · '}Floor {room.floor} · Capacity {room.capacity} guests · {formatCurrency(room.base_price)}/night
       </p>

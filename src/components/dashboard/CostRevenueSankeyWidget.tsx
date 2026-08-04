@@ -6,7 +6,6 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ResizableDialog } from '@/components/dashboard/ResizableDialog';
 import { Waves } from 'lucide-react';
 import { Sankey, ResponsiveContainer, Rectangle, Layer } from 'recharts';
-import { useTheme } from '@/contexts/useTheme';
 import { formatCurrency } from '@/lib/currency';
 
 interface FlowData {
@@ -34,7 +33,7 @@ function LabeledNode({ x, y, width, height, payload, labelMode }: {
       <Rectangle x={x} y={y} width={width} height={height} fill={payload.color} fillOpacity={1} stroke="none" />
       {labelMode !== 'none' && (
         <text x={isLeft ? x - 6 : x + width + 6} y={y + height / 2} textAnchor={isLeft ? 'end' : 'start'}
-          dominantBaseline="middle" fontSize={labelMode === 'full' ? 12 : 11} fontWeight={600} fill="currentColor" className="text-gray-700 dark:text-gray-200">
+          dominantBaseline="middle" fontSize={labelMode === 'full' ? 12 : 11} fontWeight={600} fill="currentColor" className="text-foreground">
           {payload.name}{labelMode === 'full' ? ` (${formatCurrency(payload.amount)})` : ''}
         </text>
       )}
@@ -96,7 +95,6 @@ function buildFlow(data: FlowData) {
 }
 
 function SankeyDetailDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { darkMode } = useTheme();
   const [range, setRange] = useState('30');
   const [data, setData] = useState<FlowData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -132,15 +130,15 @@ function SankeyDetailDialog({ open, onClose }: { open: boolean; onClose: () => v
               {RANGES.map(r => <ToggleGroupItem key={r.key} value={r.key}>{r.label}</ToggleGroupItem>)}
             </ToggleGroup>
 
-            {loading && <p className="text-sm text-gray-500 py-8 text-center">Loading…</p>}
+            {loading && <p className="text-sm text-muted-foreground py-8 text-center">Loading…</p>}
 
             {!loading && flow && data && (
               <>
-                <div style={{ color: darkMode ? '#E5E7EB' : '#374151' }}>
+                <div style={{ color: 'hsl(var(--foreground))' }}>
                   <ResponsiveContainer width="100%" height={chartHeight}>
                     <Sankey data={flow} nodeWidth={14} nodePadding={bucket === 'sm' ? 16 : 28} linkCurvature={0.5}
                       node={(props: unknown) => <LabeledNode {...(props as { x: number; y: number; width: number; height: number; payload: SankeyNodeDatum })} labelMode={labelMode} />}
-                      link={{ stroke: darkMode ? '#9CA3AF' : '#64748B', strokeOpacity: 0.85 }}
+                      link={{ stroke: 'hsl(var(--muted-foreground))', strokeOpacity: 0.85 }}
                       margin={{ top: 10, bottom: 10, ...sideMargin }} />
                   </ResponsiveContainer>
                 </div>
@@ -148,7 +146,7 @@ function SankeyDetailDialog({ open, onClose }: { open: boolean; onClose: () => v
                 {/* With labels suppressed the diagram alone can't say which
                     band is which - so the colour key becomes the label. */}
                 {labelMode === 'none' && (
-                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500">
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                     {flow.nodes.map((n, i) => (
                       <span key={i} className="flex items-center gap-1">
                         <span className="w-2.5 h-2.5 rounded-sm" style={{ background: n.color }} />
@@ -160,15 +158,15 @@ function SankeyDetailDialog({ open, onClose }: { open: boolean; onClose: () => v
 
                 <div className={`grid gap-3 text-center ${bucket === 'sm' ? 'grid-cols-1' : 'grid-cols-3'}`}>
                   <div className="rounded-lg border p-3">
-                    <p className="text-xs text-gray-500">Total Revenue</p>
+                    <p className="text-xs text-muted-foreground">Total Revenue</p>
                     <p className="text-lg font-bold font-mono text-blue-600">{formatCurrency(data.total_revenue)}</p>
                   </div>
                   <div className="rounded-lg border p-3">
-                    <p className="text-xs text-gray-500">Total Cost</p>
+                    <p className="text-xs text-muted-foreground">Total Cost</p>
                     <p className="text-lg font-bold font-mono text-red-600">{formatCurrency(data.procurement_cost + data.waste_cost)}</p>
                   </div>
                   <div className="rounded-lg border p-3">
-                    <p className="text-xs text-gray-500">{data.profit < 0 ? 'Loss' : 'Profit'}</p>
+                    <p className="text-xs text-muted-foreground">{data.profit < 0 ? 'Loss' : 'Profit'}</p>
                     <p className={`text-lg font-bold font-mono ${data.profit < 0 ? 'text-red-700' : 'text-emerald-600'}`}>{formatCurrency(Math.abs(data.profit))}</p>
                   </div>
                 </div>
@@ -179,11 +177,11 @@ function SankeyDetailDialog({ open, onClose }: { open: boolean; onClose: () => v
                 {bucket === 'lg' && (
                   <div className="grid grid-cols-2 gap-3 text-center">
                     <div className="rounded-lg border p-3">
-                      <p className="text-xs text-gray-500">Procurement</p>
+                      <p className="text-xs text-muted-foreground">Procurement</p>
                       <p className="text-base font-bold font-mono">{formatCurrency(data.procurement_cost)}</p>
                     </div>
                     <div className="rounded-lg border p-3">
-                      <p className="text-xs text-gray-500">Waste</p>
+                      <p className="text-xs text-muted-foreground">Waste</p>
                       <p className="text-base font-bold font-mono">{formatCurrency(data.waste_cost)}</p>
                     </div>
                   </div>
@@ -198,7 +196,6 @@ function SankeyDetailDialog({ open, onClose }: { open: boolean; onClose: () => v
 }
 
 export default function CostRevenueSankeyWidget() {
-  const { darkMode } = useTheme();
   const [data, setData] = useState<FlowData | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -223,18 +220,18 @@ export default function CostRevenueSankeyWidget() {
           widget's only vertical padding. */}
       <Card className="cursor-pointer hover:shadow-lg transition-all py-0" onClick={() => setDetailOpen(true)}>
         <CardContent className="p-4">
-          <p className="text-base text-gray-500 dark:text-gray-400 flex items-center gap-1.5 mb-1.5"><Waves size={16} /> Cost &amp; Revenue Flow</p>
-          <div className="h-32" style={{ color: darkMode ? '#E5E7EB' : '#374151' }}>
+          <p className="text-base text-muted-foreground flex items-center gap-1.5 mb-1.5"><Waves size={16} /> Cost &amp; Revenue Flow</p>
+          <div className="h-32" style={{ color: 'hsl(var(--foreground))' }}>
             {!loading && preview && (
               <ResponsiveContainer width="100%" height="100%">
                 <Sankey data={preview} nodeWidth={12} nodePadding={18} linkCurvature={0.5}
                   node={(props: unknown) => <LabeledNode {...(props as { x: number; y: number; width: number; height: number; payload: SankeyNodeDatum })} labelMode="short" />}
-                  link={{ stroke: darkMode ? '#9CA3AF' : '#64748B', strokeOpacity: 0.85 }}
+                  link={{ stroke: 'hsl(var(--muted-foreground))', strokeOpacity: 0.85 }}
                   margin={{ top: 8, right: 95, bottom: 8, left: 80 }} />
               </ResponsiveContainer>
             )}
           </div>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Tap for the full revenue → cost → profit breakdown</p>
+          <p className="text-sm text-muted-foreground mt-1">Tap for the full revenue → cost → profit breakdown</p>
         </CardContent>
       </Card>
       <SankeyDetailDialog open={detailOpen} onClose={() => setDetailOpen(false)} />

@@ -50,7 +50,7 @@ function BillBox({ title, icon: Icon, items, total, billed, accent }: {
     <div className={`flex-1 rounded-lg border-2 ${accent} p-3 min-w-0`}>
       <p className="text-sm font-semibold flex items-center gap-1.5 mb-2"><Icon size={15} /> {title}</p>
       {billed && <p className="text-xs text-emerald-600">Already billed</p>}
-      {!billed && items.length === 0 && <p className="text-xs text-gray-400">No charges yet</p>}
+      {!billed && items.length === 0 && <p className="text-xs text-muted-foreground">No charges yet</p>}
       <div className="space-y-1">
         {items.map((it, i) => (
           <div key={i} className="flex justify-between gap-2 text-xs">
@@ -158,7 +158,7 @@ export function CheckoutSheet({ guest, onOpenChange, onDone }: {
                       <BillBox title="Food Bill" icon={UtensilsCrossed} items={balance.mess_items}
                         total={balance.mess_bill_total} billed={balance.mess_billed} accent="border-orange-300 dark:border-orange-800" />
                     </div>
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs text-muted-foreground">
                       Room charges are logged as the stay goes on (the "+ Log Charge" quick action). Extra Messing is computed automatically from everything ordered through the kitchen; Sui Gas is that total times the Kitchen NCO's gas percentage — both adjustable below before checkout.
                     </p>
                     {!balance.mess_billed && (
@@ -181,7 +181,7 @@ export function CheckoutSheet({ guest, onOpenChange, onDone }: {
                         </div>
                       )}
                       {balance.outstanding_invoices > 0 && (
-                        <div className="flex justify-between text-xs text-gray-500">
+                        <div className="flex justify-between text-xs text-muted-foreground">
                           <span>Unpaid on bills already generated</span>
                           <span className="font-mono">{formatCurrency(balance.outstanding_invoices)}</span>
                         </div>
@@ -190,7 +190,7 @@ export function CheckoutSheet({ guest, onOpenChange, onDone }: {
                       {balance.unpriced_items.length > 0 && <p className="text-xs text-amber-600">Needs pricing first: {balance.unpriced_items.join(', ')}</p>}
                     </div>
                   </>
-                ) : <p className="text-sm text-gray-500">Loading balance…</p>}
+                ) : <p className="text-sm text-muted-foreground">Loading balance…</p>}
 
                 <div className="rounded-lg border p-3 space-y-2">
                   <Button className="w-full" disabled={checkingOut || !balance} onClick={handleGenerateInvoice}>
@@ -198,7 +198,7 @@ export function CheckoutSheet({ guest, onOpenChange, onDone }: {
                     {checkingOut ? 'Working…' : alreadyFullyBilled ? 'View Invoice' : 'Checkout — Generate Invoice'}
                   </Button>
                   {!alreadyFullyBilled && (
-                    <p className="text-xs text-gray-500">Generating the invoice checks the guest out and sends the room to the housekeeping queue.</p>
+                    <p className="text-xs text-muted-foreground">Generating the invoice checks the guest out and sends the room to the housekeeping queue.</p>
                   )}
                 </div>
               </div>

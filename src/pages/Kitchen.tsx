@@ -334,7 +334,7 @@ export default function Kitchen() {
       pending: { cls: 'bg-amber-100 text-amber-800', label: 'to cook' },
       prepared: { cls: 'bg-blue-100 text-blue-800', label: 'prepared' },
       served: { cls: 'bg-green-100 text-green-800', label: 'cooked' },
-      cancelled: { cls: 'bg-gray-100 text-gray-800', label: 'cancelled' },
+      cancelled: { cls: 'bg-muted text-muted-foreground', label: 'cancelled' },
     };
     const s = map[status] || { cls: '', label: status };
     return <Badge className={s.cls}>{s.label}</Badge>;
@@ -350,7 +350,7 @@ export default function Kitchen() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><ChefHat size={24} /> Kitchen</h1>
+      <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><ChefHat size={24} /> Kitchen</h1>
 
       <Tabs defaultValue="service">
         <TabsList className="grid grid-cols-4 max-w-2xl">
@@ -381,7 +381,7 @@ export default function Kitchen() {
                   <Flame size={16} className="mr-1" /> Cook all pending ({pendingCount})
                 </Button>
               </div>
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-muted-foreground">
                 {suggested.length > 0
                   ? `Booked for this meal: ${suggested.map(s => `${s.menu_item_name || `#${s.menu_item_id}`} ×${s.suggested_quantity}`).join(', ')}. "Generate" turns these into production orders (skips ones already ordered).`
                   : 'No meals booked with a menu item for this date/meal yet. You can still add a manual order below.'}
@@ -395,7 +395,7 @@ export default function Kitchen() {
               <Table>
                 <TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Qty</TableHead><TableHead>Status</TableHead><TableHead className="w-48">Action</TableHead></TableRow></TableHeader>
                 <TableBody>
-                  {loading && <TableRow><TableCell colSpan={4} className="text-center py-8 text-gray-500">Loading…</TableCell></TableRow>}
+                  {loading && <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">Loading…</TableCell></TableRow>}
                   {!loading && routineOrders.map(o => (
                     <TableRow key={o.id}>
                       <TableCell className="font-medium">{o.menu_item_name || `Item #${o.menu_item_id}`}</TableCell>
@@ -414,7 +414,7 @@ export default function Kitchen() {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {!loading && routineOrders.length === 0 && <TableRow><TableCell colSpan={4} className="text-center py-8 text-gray-500">No orders yet — Generate from bookings, or add a manual order</TableCell></TableRow>}
+                  {!loading && routineOrders.length === 0 && <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">No orders yet — Generate from bookings, or add a manual order</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </CardContent>
@@ -422,7 +422,7 @@ export default function Kitchen() {
 
           {/* Manual order — de-emphasized */}
           {!showManual ? (
-            <button className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300" onClick={() => setShowManual(true)}>+ Add a manual order</button>
+            <button className="text-sm text-muted-foreground hover:text-foreground dark:hover:text-muted-foreground" onClick={() => setShowManual(true)}>+ Add a manual order</button>
           ) : (
             <Card>
               <CardContent className="p-4 flex items-center gap-2 flex-wrap">
@@ -455,16 +455,16 @@ export default function Kitchen() {
               {alaCarteColumns.map(col => (
                 <Card key={col.key}>
                   <CardContent className="p-3 space-y-2">
-                    <h3 className="text-sm font-semibold text-gray-500">{col.title} ({alaCarteOrders.filter(o => col.statuses.includes(o.status)).length})</h3>
+                    <h3 className="text-sm font-semibold text-muted-foreground">{col.title} ({alaCarteOrders.filter(o => col.statuses.includes(o.status)).length})</h3>
                     {alaCarteOrders.filter(o => col.statuses.includes(o.status)).map(o => {
                       const { label, overdue } = countdownLabel(o.due_at);
                       const isLate = col.key === 'late';
                       return (
-                        <div key={o.id} className={`rounded-md border p-2 space-y-1 ${isLate ? 'border-red-400 bg-red-50 dark:bg-red-950/20 animate-pulse' : 'border-gray-200 dark:border-gray-700'}`}>
+                        <div key={o.id} className={`rounded-md border p-2 space-y-1 ${isLate ? 'border-red-400 bg-red-50 dark:bg-red-950/20 animate-pulse' : 'border-border'}`}>
                           <p className="font-medium text-sm">{o.menu_item_name || `Item #${o.menu_item_id}`}</p>
-                          <p className="text-xs text-gray-500">{o.consumer_name || 'Unknown'} · qty {o.quantity_ordered}</p>
+                          <p className="text-xs text-muted-foreground">{o.consumer_name || 'Unknown'} · qty {o.quantity_ordered}</p>
                           {col.key !== 'completed' && (
-                            <p className={`text-xs font-mono ${overdue ? 'text-red-600' : 'text-gray-500'}`}>{label}</p>
+                            <p className={`text-xs font-mono ${overdue ? 'text-red-600' : 'text-muted-foreground'}`}>{label}</p>
                           )}
                           {col.key === 'pending' && <Button size="sm" className="w-full bg-orange-600 hover:bg-orange-700" onClick={() => handleStartCooking(o.id)}><Flame size={14} className="mr-1" /> Start Cooking</Button>}
                           {col.key === 'cooking' && <Button size="sm" className="w-full bg-green-600 hover:bg-green-700" onClick={() => handleCompleteAlaCarte(o.id)}>Complete</Button>}
@@ -481,7 +481,7 @@ export default function Kitchen() {
                         </div>
                       );
                     })}
-                    {alaCarteOrders.filter(o => col.statuses.includes(o.status)).length === 0 && <p className="text-xs text-gray-400">None</p>}
+                    {alaCarteOrders.filter(o => col.statuses.includes(o.status)).length === 0 && <p className="text-xs text-muted-foreground">None</p>}
                   </CardContent>
                 </Card>
               ))}
@@ -497,7 +497,7 @@ export default function Kitchen() {
                   <Flame size={18} className="text-orange-600" />
                   <p className="text-sm font-medium">Gas Charge Rate</p>
                 </div>
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-muted-foreground">
                   Extra Messing is always computed from what a member/guest actually ordered - there's nothing to set for it.
                   Sui Gas Charges on Messing is this percentage of that computed total (still overridable per checkout).
                 </p>
@@ -507,7 +507,7 @@ export default function Kitchen() {
                     <Input type="number" min={0} max={100} disabled={!canEditRates} value={gasRateInput} onChange={e => setGasRateInput(e.target.value)} />
                     {canEditRates && <Button size="sm" onClick={handleSaveGasRate}>Save</Button>}
                   </div>
-                  <p className="text-xs text-gray-400 mt-1">Current: {gasRate.percentage}%</p>
+                  <p className="text-xs text-muted-foreground mt-1">Current: {gasRate.percentage}%</p>
                 </div>
               </CardContent>
             </Card>
@@ -523,7 +523,7 @@ export default function Kitchen() {
                 <div className="flex rounded-md border overflow-hidden text-xs">
                   {([['all', 'All'], ['member', 'Members'], ['guest', 'Guests']] as const).map(([val, label]) => (
                     <button key={val} type="button"
-                      className={`px-3 py-1.5 ${overviewFilter === val ? 'bg-primary text-primary-foreground font-medium' : 'bg-transparent text-gray-500 hover:text-gray-700'}`}
+                      className={`px-3 py-1.5 ${overviewFilter === val ? 'bg-primary text-primary-foreground font-medium' : 'bg-transparent text-muted-foreground hover:text-foreground'}`}
                       onClick={() => setOverviewFilter(val)}>
                       {label}
                     </button>
@@ -538,19 +538,19 @@ export default function Kitchen() {
               <Table>
                 <TableHeader><TableRow><TableHead>Type</TableHead><TableHead>Name</TableHead><TableHead>Room/Unit</TableHead><TableHead className="text-right">Unbilled Mess Charge</TableHead><TableHead className="w-32">Action</TableHead></TableRow></TableHeader>
                 <TableBody>
-                  {overviewLoading && <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500">Loading…</TableCell></TableRow>}
+                  {overviewLoading && <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Loading…</TableCell></TableRow>}
                   {!overviewLoading && overviewRows.map(r => (
                     <TableRow key={`${r.consumer_type}-${r.consumer_id}`}>
                       <TableCell className="capitalize">{r.consumer_type}</TableCell>
                       <TableCell className="font-medium">{r.name}</TableCell>
-                      <TableCell className="text-sm text-gray-500">{r.sub_label || '-'}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{r.sub_label || '-'}</TableCell>
                       <TableCell className="text-right font-mono">{formatCurrency(r.unbilled_mess_total)}</TableCell>
                       <TableCell>
                         <Button size="sm" variant="ghost" onClick={() => setHistoryTarget(r)}>View History</Button>
                       </TableCell>
                     </TableRow>
                   ))}
-                  {!overviewLoading && overviewRows.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500">Nothing to show</TableCell></TableRow>}
+                  {!overviewLoading && overviewRows.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Nothing to show</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </CardContent>
@@ -613,9 +613,9 @@ export default function Kitchen() {
               <Table>
                 <TableHeader><TableRow><TableHead>Day</TableHead><TableHead>Meal</TableHead><TableHead>Name</TableHead><TableHead>Price</TableHead>{canProposeMenu && <TableHead className="w-24">Actions</TableHead>}</TableRow></TableHeader>
                 <TableBody>
-                  {loading && <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500">Loading...</TableCell></TableRow>}
+                  {loading && <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Loading...</TableCell></TableRow>}
                   {!loading && menuItems.map(m => (
-                    <TableRow key={m.id} className={canProposeMenu ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900' : ''} onClick={() => canProposeMenu && openProposeEdit(m)}>
+                    <TableRow key={m.id} className={canProposeMenu ? 'cursor-pointer hover:bg-accent' : ''} onClick={() => canProposeMenu && openProposeEdit(m)}>
                       <TableCell className="capitalize">{m.day_of_week || '-'}</TableCell>
                       <TableCell className="capitalize">{m.meal_type}</TableCell>
                       <TableCell className="font-medium">{m.name}</TableCell>
@@ -623,7 +623,7 @@ export default function Kitchen() {
                       {canProposeMenu && <TableCell><Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); openProposeEdit(m); }}>Edit</Button></TableCell>}
                     </TableRow>
                   ))}
-                  {!loading && menuItems.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500">No menu items yet</TableCell></TableRow>}
+                  {!loading && menuItems.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No menu items yet</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </CardContent>
@@ -644,7 +644,7 @@ export default function Kitchen() {
                 <option value="0">Select item</option>
                 {menuItems.filter(m => m.is_active).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
-              {canProposeMenu && <p className="text-xs text-gray-400 mt-1">Don't see the dish? Propose it in the Menu tab - once a Manager approves it, it'll appear here.</p>}
+              {canProposeMenu && <p className="text-xs text-muted-foreground mt-1">Don't see the dish? Propose it in the Menu tab - once a Manager approves it, it'll appear here.</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-3">

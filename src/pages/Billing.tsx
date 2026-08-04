@@ -97,15 +97,15 @@ export default function Billing() {
   };
 
   const statusBadge = (status: string) => {
-    const colors: Record<string, string> = { draft: 'bg-gray-100 text-gray-800', issued: 'bg-blue-100 text-blue-800', paid: 'bg-green-100 text-green-800', void: 'bg-red-100 text-red-800', overdue: 'bg-amber-100 text-amber-800' };
+    const colors: Record<string, string> = { draft: 'bg-muted text-muted-foreground', issued: 'bg-blue-100 text-blue-800', paid: 'bg-green-100 text-green-800', void: 'bg-red-100 text-red-800', overdue: 'bg-amber-100 text-amber-800' };
     return <Badge className={colors[status] || ''}>{status}</Badge>;
   };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Billing & Invoicing</h1>
-        <p className="text-xs text-gray-500">Bills are generated at guest checkout (Clerk Desk / Bookings) and by the monthly Mess Bill run.</p>
+        <h1 className="text-2xl font-bold text-foreground">Billing & Invoicing</h1>
+        <p className="text-xs text-muted-foreground">Bills are generated at guest checkout (Clerk Desk / Bookings) and by the monthly Mess Bill run.</p>
       </div>
 
       {/* Record payment dialog */}
@@ -114,7 +114,7 @@ export default function Billing() {
           <DialogHeader><DialogTitle>Record Payment - {paymentDialogInvoice?.invoice_number}</DialogTitle></DialogHeader>
           {paymentDialogInvoice && (
             <div className="space-y-3">
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-muted-foreground">
                 Total: {formatCurrency(paymentDialogInvoice.total_amount)} &middot; Paid: {formatCurrency(paymentDialogInvoice.amount_paid)} &middot; Balance due: {formatCurrency(paymentDialogInvoice.total_amount - paymentDialogInvoice.amount_paid)}
               </p>
               <div><Label>Payment Amount</Label><Input type="number" min={0} value={paymentAmount || ''} onChange={e => setPaymentAmount(Number(e.target.value))} /></div>
@@ -130,7 +130,7 @@ export default function Billing() {
           <DialogHeader><DialogTitle>Void Invoice - {voidDialogInvoice?.invoice_number}</DialogTitle></DialogHeader>
           {voidDialogInvoice && (
             <div className="space-y-3">
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-muted-foreground">
                 Voiding cancels this bill permanently ({formatCurrency(voidDialogInvoice.total_amount)} for {voidDialogInvoice.guest_name}).
                 Its charges become billable again at checkout.
               </p>
@@ -148,21 +148,21 @@ export default function Billing() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[{ label: 'Today\'s Revenue', value: formatCurrency(stats.today_revenue), icon: DollarSign, color: 'text-emerald-600' }, { label: 'Invoices Today', value: stats.today_invoice_count, icon: Receipt, color: 'text-blue-600' }, { label: 'Monthly Revenue', value: formatCurrency(stats.month_revenue), icon: Calendar, color: 'text-purple-600' }, { label: 'Overdue', value: stats.overdue_invoices, icon: FileText, color: 'text-red-600' }].map((s, i) => (
             <Card key={i}><CardContent className="p-5 flex items-center gap-4">
-              <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><s.icon size={20} className={s.color} /></div>
-              <div><p className="text-xs text-gray-500">{s.label}</p><p className="text-lg font-bold">{s.value}</p></div>
+              <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center"><s.icon size={20} className={s.color} /></div>
+              <div><p className="text-xs text-muted-foreground">{s.label}</p><p className="text-lg font-bold">{s.value}</p></div>
             </CardContent></Card>
           ))}
         </div>
       )}
 
-      <div className="relative max-w-sm"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} /><Input placeholder="Search invoices..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" /></div>
+      <div className="relative max-w-sm"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} /><Input placeholder="Search invoices..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" /></div>
 
       <Card>
         <CardContent className="p-0">
           <Table>
             <TableHeader><TableRow><TableHead>Invoice #</TableHead><TableHead>Guest</TableHead><TableHead>Room</TableHead><TableHead>Amount</TableHead><TableHead>Paid / Balance</TableHead><TableHead>Status</TableHead><TableHead>Date</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
             <TableBody>
-              {loading && <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">Loading invoices...</TableCell></TableRow>}
+              {loading && <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">Loading invoices...</TableCell></TableRow>}
               {!loading && invoices.map(inv => (
                 <TableRow key={inv.id}>
                   <TableCell className="font-medium">
@@ -179,11 +179,11 @@ export default function Billing() {
                   <TableCell>{inv.guest_name}</TableCell>
                   <TableCell>{inv.room_number}</TableCell>
                   <TableCell className="font-semibold">{formatCurrency(inv.total_amount)}</TableCell>
-                  <TableCell className="text-sm text-gray-500">{formatCurrency(inv.amount_paid)} / {formatCurrency(inv.total_amount - (inv.amount_paid || 0))}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{formatCurrency(inv.amount_paid)} / {formatCurrency(inv.total_amount - (inv.amount_paid || 0))}</TableCell>
                   <TableCell>{statusBadge(inv.status)}</TableCell>
                   <TableCell>{inv.issue_date}</TableCell>
                   <TableCell className="flex gap-1">
-                    <Button size="sm" variant="ghost" title="Print bill" onClick={() => setPrintInvoiceIds([inv.id])}><Printer size={16} className="text-gray-600" /></Button>
+                    <Button size="sm" variant="ghost" title="Print bill" onClick={() => setPrintInvoiceIds([inv.id])}><Printer size={16} className="text-muted-foreground" /></Button>
                     {inv.status !== 'void' && inv.status !== 'paid' && (
                       <Button size="sm" variant="ghost" title="Record payment" onClick={() => { setPaymentDialogInvoice(inv); setPaymentAmount(0); }}><Wallet size={16} className="text-emerald-600" /></Button>
                     )}
@@ -191,7 +191,7 @@ export default function Billing() {
                   </TableCell>
                 </TableRow>
               ))}
-              {!loading && invoices.length === 0 && <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">No invoices found</TableCell></TableRow>}
+              {!loading && invoices.length === 0 && <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">No invoices found</TableCell></TableRow>}
             </TableBody>
           </Table>
         </CardContent>

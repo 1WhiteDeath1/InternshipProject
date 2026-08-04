@@ -130,12 +130,12 @@ export default function Guests() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><UsersIcon size={24} /> Customer Directory</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400">{total} guest{total === 1 ? '' : 's'}</p>
+        <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><UsersIcon size={24} /> Customer Directory</h1>
+        <p className="text-sm text-muted-foreground">{total} guest{total === 1 ? '' : 's'}</p>
       </div>
 
       <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
         <Input placeholder="Search by name, phone, or CNIC..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
       </div>
 
@@ -153,21 +153,21 @@ export default function Guests() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loading && <TableRow><TableCell colSpan={6} className="text-center py-8 text-gray-500">Loading guests...</TableCell></TableRow>}
+              {loading && <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">Loading guests...</TableCell></TableRow>}
               {!loading && guests.map(g => (
-                <TableRow key={g.id} className="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900" onClick={() => openProfile(g.id)}>
+                <TableRow key={g.id} className="cursor-pointer hover:bg-accent" onClick={() => openProfile(g.id)}>
                   <TableCell className="font-medium">#{g.id}</TableCell>
                   <TableCell>{g.full_name}</TableCell>
                   <TableCell>
                     <span className="capitalize">{classificationLabel(g.classification)}</span>
-                    {g.rank && <span className="text-gray-400"> · {g.rank}</span>}
+                    {g.rank && <span className="text-muted-foreground"> · {g.rank}</span>}
                   </TableCell>
                   <TableCell>{g.id_number || '—'}</TableCell>
                   <TableCell>{g.last_arrival_date || '—'}</TableCell>
                   <TableCell><Badge variant="secondary">{g.total_arrivals}</Badge></TableCell>
                 </TableRow>
               ))}
-              {!loading && guests.length === 0 && <TableRow><TableCell colSpan={6} className="text-center py-8 text-gray-500">No guests found</TableCell></TableRow>}
+              {!loading && guests.length === 0 && <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No guests found</TableCell></TableRow>}
             </TableBody>
           </Table>
         </CardContent>
@@ -176,26 +176,26 @@ export default function Guests() {
       <Dialog open={selectedId !== null} onOpenChange={(open) => { if (!open) { setSelectedId(null); setProfile(null); } }}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Guest Profile</DialogTitle></DialogHeader>
-          {profileLoading && <p className="text-center py-8 text-gray-500">Loading...</p>}
+          {profileLoading && <p className="text-center py-8 text-muted-foreground">Loading...</p>}
           {!profileLoading && profile && (
             <div className="space-y-5">
               <div>
                 <h3 className="text-lg font-semibold">{profile.full_name}</h3>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2 text-sm">
-                  <p><span className="text-gray-500">Phone:</span> {profile.phone || '—'}</p>
-                  <p><span className="text-gray-500">ID Type:</span> {profile.id_type || '—'}</p>
-                  <p><span className="text-gray-500">ID Number:</span> {profile.id_number || '—'}</p>
-                  <p><span className="text-gray-500">Unit/Address:</span> {profile.unit_address || '—'}</p>
+                  <p><span className="text-muted-foreground">Phone:</span> {profile.phone || '—'}</p>
+                  <p><span className="text-muted-foreground">ID Type:</span> {profile.id_type || '—'}</p>
+                  <p><span className="text-muted-foreground">ID Number:</span> {profile.id_number || '—'}</p>
+                  <p><span className="text-muted-foreground">Unit/Address:</span> {profile.unit_address || '—'}</p>
                 </div>
               </div>
 
               <div>
-                <h4 className="text-sm font-semibold text-gray-500 mb-2">Stay History ({profile.bookings.length})</h4>
+                <h4 className="text-sm font-semibold text-muted-foreground mb-2">Stay History ({profile.bookings.length})</h4>
                 <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                  {profile.bookings.length === 0 && <p className="text-sm text-gray-400">No stays recorded</p>}
+                  {profile.bookings.length === 0 && <p className="text-sm text-muted-foreground">No stays recorded</p>}
                   {profile.bookings.map(b => (
                     <div key={b.id} className="flex items-center justify-between text-sm border rounded-md px-3 py-2 gap-2">
-                      <span>Room {b.room_number || '—'} <span className="text-gray-400">· {b.check_in} → {b.check_out}</span></span>
+                      <span>Room {b.room_number || '—'} <span className="text-muted-foreground">· {b.check_in} → {b.check_out}</span></span>
                       <span className="flex items-center gap-2">
                         {canOverrideCategory && b.status !== 'checked_out' && b.status !== 'cancelled' && b.status !== 'no_show' ? (
                           <Select value={b.client_category} disabled={updatingCategoryId === b.id}
@@ -208,7 +208,7 @@ export default function Guests() {
                             </SelectContent>
                           </Select>
                         ) : (
-                          <span className="capitalize text-gray-400">{classificationLabel(b.client_category)}</span>
+                          <span className="capitalize text-muted-foreground">{classificationLabel(b.client_category)}</span>
                         )}
                         <Badge variant="outline" className="capitalize">{b.status.replace('_', ' ')}</Badge>
                       </span>
@@ -218,16 +218,16 @@ export default function Guests() {
               </div>
 
               <div>
-                <h4 className="text-sm font-semibold text-gray-500 mb-2">Invoicing & Financial History ({profile.invoices.length})</h4>
+                <h4 className="text-sm font-semibold text-muted-foreground mb-2">Invoicing & Financial History ({profile.invoices.length})</h4>
                 <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                  {profile.invoices.length === 0 && <p className="text-sm text-gray-400">No invoices recorded</p>}
+                  {profile.invoices.length === 0 && <p className="text-sm text-muted-foreground">No invoices recorded</p>}
                   {profile.invoices.map(inv => (
                     <button key={inv.id} type="button"
                       className="w-full flex items-center justify-between text-sm border rounded-md px-3 py-2 hover:border-blue-400 transition-colors text-left"
                       onClick={() => setPreviewInvoiceIds([inv.id])} title="Preview this invoice">
                       <span className="flex items-center gap-1.5">
-                        <Eye size={13} className="text-gray-400" />
-                        {inv.invoice_number} <span className="text-gray-400 capitalize">· {inv.bill_type}</span>
+                        <Eye size={13} className="text-muted-foreground" />
+                        {inv.invoice_number} <span className="text-muted-foreground capitalize">· {inv.bill_type}</span>
                       </span>
                       <span className="flex items-center gap-2">
                         {inv.is_complimentary && <Badge className="bg-emerald-100 text-emerald-800">Complimentary</Badge>}

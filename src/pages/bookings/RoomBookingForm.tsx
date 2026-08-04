@@ -81,13 +81,13 @@ export function RoomBookingForm({
     <div className="rounded-lg border-2 border-primary/20 shadow-sm p-4 space-y-3.5">
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold">New Booking</p>
-        <button type="button" className="text-gray-400 hover:text-gray-600" onClick={onCancel}><X size={16} /></button>
+        <button type="button" className="text-muted-foreground hover:text-muted-foreground" onClick={onCancel}><X size={16} /></button>
       </div>
 
       <div className="flex rounded-md border overflow-hidden text-xs">
         {([['walk_in', 'Walk-in / Desk'], ['online', 'Online Portal']] as const).map(([val, label], i) => (
           <button key={val} type="button" ref={i === 0 ? firstFieldRef : undefined}
-            className={`flex-1 py-1.5 ${form.source === val ? 'bg-primary text-primary-foreground font-medium' : 'bg-transparent text-gray-500 hover:text-gray-700'}`}
+            className={`flex-1 py-1.5 ${form.source === val ? 'bg-primary text-primary-foreground font-medium' : 'bg-transparent text-muted-foreground hover:text-foreground'}`}
             onClick={() => setForm({ ...form, source: val })}>
             {label}
           </button>
@@ -97,7 +97,7 @@ export function RoomBookingForm({
         <div className="space-y-2">
           <Input placeholder="Online V/No *" value={form.online_voucher_no}
             onChange={e => setForm({ ...form, online_voucher_no: e.target.value })} />
-          <p className="text-xs text-gray-500">Online bookings are paid in full, in advance, for the room — record what was actually received outside SAM (bank transfer/agent).</p>
+          <p className="text-xs text-muted-foreground">Online bookings are paid in full, in advance, for the room — record what was actually received outside SAM (bank transfer/agent).</p>
           <div className="grid grid-cols-2 gap-2">
             <div>
               <Label className="text-xs">Advance Received (Rs) *</Label>
@@ -113,12 +113,12 @@ export function RoomBookingForm({
         </div>
       )}
 
-      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Stay Dates</p>
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Stay Dates</p>
       {form.nature_of_duty === 'hra' ? (
         <div>
           <Label className="text-xs">Move-in date</Label>
           <Input type="date" value={form.check_in} min={today} onChange={e => setForm({ ...form, check_in: e.target.value, check_out: addDays(e.target.value, 1) })} />
-          <p className="text-xs text-gray-500 mt-1">Ongoing residency — renews automatically each time a mess bill is generated for this member, no fixed checkout needed.</p>
+          <p className="text-xs text-muted-foreground mt-1">Ongoing residency — renews automatically each time a mess bill is generated for this member, no fixed checkout needed.</p>
         </div>
       ) : (
         <div className="space-y-1.5">
@@ -131,17 +131,17 @@ export function RoomBookingForm({
                 onChange={e => setForm({ ...form, check_out: e.target.value })} />
             </div>
           </div>
-          <label className="text-xs flex items-center gap-1.5 text-gray-700 dark:text-gray-200">
+          <label className="text-xs flex items-center gap-1.5 text-foreground">
             <input type="checkbox" checked={form.is_indefinite}
               onChange={e => setForm({ ...form, is_indefinite: e.target.checked, check_out: addDays(form.check_in, 1) })} />
             Indefinite stay — departure date not yet known
           </label>
           {form.is_indefinite && (
-            <p className="text-xs text-gray-500">Open-ended — the room stays reserved until checkout; actual nights are billed then. Rate shown below is the nightly rate.</p>
+            <p className="text-xs text-muted-foreground">Open-ended — the room stays reserved until checkout; actual nights are billed then. Rate shown below is the nightly rate.</p>
           )}
         </div>
       )}
-      <label className={`text-xs flex items-center gap-1.5 ${form.check_in === today && roomFreeToday && roomReady ? 'text-gray-700 dark:text-gray-200' : 'text-gray-400'}`}>
+      <label className={`text-xs flex items-center gap-1.5 ${form.check_in === today && roomFreeToday && roomReady ? 'text-foreground' : 'text-muted-foreground'}`}>
         <input type="checkbox" checked={effectiveCheckInNow} disabled={!(form.check_in === today && roomFreeToday && roomReady)}
           onChange={e => setForm({ ...form, check_in_now: e.target.checked })} />
         Check in now (walk-in){form.check_in === today && roomFreeToday && !roomReady ? ' — room not ready' : ''}
@@ -166,7 +166,7 @@ export function RoomBookingForm({
         </div>
       )}
 
-      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 pt-1">Guest Classification</p>
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground pt-1">Guest Classification</p>
       <div className="grid grid-cols-2 gap-2">
         <div>
           <Label className="text-xs">Guest Category</Label>
@@ -205,7 +205,7 @@ export function RoomBookingForm({
       </div>
 
       <div className="pt-1">
-        <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Guest Details</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Guest Details</p>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div className="relative">
@@ -213,13 +213,13 @@ export function RoomBookingForm({
             onChange={e => setForm({ ...form, guest_name: e.target.value })}
             onBlur={() => setTimeout(onClearGuestSuggestions, 150)} />
           {guestSuggestions.length > 0 && (
-            <div className="absolute z-10 mt-1 w-full max-h-48 overflow-y-auto rounded-md border bg-white dark:bg-gray-900 shadow-lg text-sm">
+            <div className="absolute z-10 mt-1 w-full max-h-48 overflow-y-auto rounded-md border bg-card shadow-lg text-sm">
               {guestSuggestions.map(g => (
                 <button type="button" key={g.id}
-                  className="block w-full text-left px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  className="block w-full text-left px-2 py-1.5 hover:bg-accent"
                   onMouseDown={e => e.preventDefault()} onClick={() => onSelectGuestSuggestion(g)}>
                   <div className="font-medium">{g.full_name}</div>
-                  <div className="text-xs text-gray-500">
+                  <div className="text-xs text-muted-foreground">
                     {[g.phone, g.id_number].filter(Boolean).join(' · ') || 'No contact on file'}
                   </div>
                 </button>
@@ -274,7 +274,7 @@ export function RoomBookingForm({
             </div>
             {newMemberOpen && (
               <div className="rounded-md border p-2.5 space-y-1.5">
-                <p className="text-xs font-semibold text-gray-500">Register new HRA member</p>
+                <p className="text-xs font-semibold text-muted-foreground">Register new HRA member</p>
                 <div className="grid grid-cols-2 gap-1.5">
                   <Input placeholder="Service number *" value={newMember.service_number}
                     onChange={e => setNewMember({ ...newMember, service_number: e.target.value })} />
@@ -302,12 +302,12 @@ export function RoomBookingForm({
 
       <div className="border-t pt-2 flex items-center justify-between gap-2">
         <p className="text-sm">
-          {quoteLoading ? <span className="text-gray-400">Pricing…</span>
+          {quoteLoading ? <span className="text-muted-foreground">Pricing…</span>
             : quote?.available === false ? <span className="text-red-600 text-xs">{quote.unavailable_reason}</span>
               : quote ? (quote.pricing.pricing_mode === 'hra_monthly'
                 ? (quote.pricing.monthly_total ? <><b>{formatCurrency(quote.pricing.monthly_total)}</b>/month</> : <span className="text-amber-600 text-xs">{quote.pricing.note}</span>)
                 : <>{quote.pricing.nights} night{quote.pricing.nights > 1 ? 's' : ''} · <b>{formatCurrency(quote.pricing.total)}</b></>)
-                : <span className="text-gray-400">Pick dates</span>}
+                : <span className="text-muted-foreground">Pick dates</span>}
         </p>
         <Button size="sm" onClick={onSubmit} disabled={saving || (quote ? quote.available === false : false) || (form.nature_of_duty === 'hra' && !form.member_id)}>
           {effectiveCheckInNow ? <><LogIn size={14} className="mr-1" /> Book & Check In</> : 'Confirm'}

@@ -12,7 +12,7 @@ export function ChargeSplitBar({ segments, className = '' }: { segments: SplitSe
   return (
     <div className={className}>
       {drawn.length > 0 && (
-        <div className="flex h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+        <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
           {drawn.map(s => (
             <div key={s.label} className={s.colorClass}
               style={{ width: `${total > 0 ? Math.max((s.amount / total) * 100, 4) : 0}%` }}
@@ -20,10 +20,10 @@ export function ChargeSplitBar({ segments, className = '' }: { segments: SplitSe
           ))}
         </div>
       )}
-      <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-[11px] text-gray-600 dark:text-gray-400">
+      <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-[11px] text-muted-foreground">
         {segments.map(s => (
           <span key={s.label} className="inline-flex items-center gap-1">
-            <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${s.amount > 0 ? s.colorClass : 'bg-gray-300 dark:bg-gray-700'}`} />
+            <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${s.amount > 0 ? s.colorClass : 'bg-muted'}`} />
             {s.label} <span className="font-mono font-medium">{s.amount > 0 ? formatCurrency(s.amount) : '—'}</span>
           </span>
         ))}

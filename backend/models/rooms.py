@@ -56,6 +56,19 @@ class Attendant(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class AttendantDutyLog(Base):
+    """One row per clock-in/clock-out session, so total hours and shift
+    counts can be aggregated per attendant - Attendant.on_duty/on_duty_since
+    only track the *current* session and get overwritten on every toggle."""
+    __tablename__ = "attendant_duty_logs"
+
+    id = Column(Integer, primary_key=True)
+    attendant_id = Column(Integer, ForeignKey("attendants.id"), nullable=False, index=True)
+    clock_in = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    clock_out = Column(DateTime, nullable=True)
+    duration_minutes = Column(Integer, nullable=True)  # set on clock-out
+
+
 class RoomPhoto(Base):
     __tablename__ = "room_photos"
 

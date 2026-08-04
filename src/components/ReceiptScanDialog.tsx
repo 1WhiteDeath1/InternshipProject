@@ -217,7 +217,7 @@ export function ReceiptScanDialog({
 
         {stage === 'upload' && (
           <div className="space-y-4">
-            <p className="text-sm text-gray-500 dark:text-gray-400">
+            <p className="text-sm text-muted-foreground">
               Photograph a long or multi-page receipt in several shots — each photo is parsed and combined into one list below. Headers, footers, and totals are filtered out automatically.
             </p>
 
@@ -231,20 +231,20 @@ export function ReceiptScanDialog({
               onChange={e => { handleFilesSelected(e.target.files); e.target.value = ''; }}
             />
             <div
-              className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-8 text-center cursor-pointer hover:border-blue-400 transition-colors"
+              className="border-2 border-dashed border-border rounded-lg p-8 text-center cursor-pointer hover:border-blue-400 transition-colors"
               onClick={() => fileInputRef.current?.click()}
             >
-              <Camera className="mx-auto mb-2 text-gray-400" size={32} />
+              <Camera className="mx-auto mb-2 text-muted-foreground" size={32} />
               <p className="text-sm font-medium">Tap to add receipt photo(s)</p>
-              <p className="text-xs text-gray-400 mt-1">JPEG, PNG, or WEBP — up to {MAX_PAGES} pages</p>
+              <p className="text-xs text-muted-foreground mt-1">JPEG, PNG, or WEBP — up to {MAX_PAGES} pages</p>
             </div>
 
             {selectedFiles.length > 0 && (
               <div className="space-y-2">
                 {selectedFiles.map((f, i) => (
-                  <div key={i} className="flex items-center justify-between text-sm bg-gray-50 dark:bg-gray-900 rounded px-3 py-2">
+                  <div key={i} className="flex items-center justify-between text-sm bg-muted rounded px-3 py-2">
                     <span>Page {i + 1}: {f.name}</span>
-                    <button onClick={() => removeFile(i)} className="text-gray-400 hover:text-red-500">
+                    <button onClick={() => removeFile(i)} className="text-muted-foreground hover:text-red-500">
                       <X size={16} />
                     </button>
                   </div>
@@ -259,7 +259,7 @@ export function ReceiptScanDialog({
         )}
 
         {stage === 'parsing' && (
-          <div className="py-16 flex flex-col items-center justify-center text-gray-500">
+          <div className="py-16 flex flex-col items-center justify-center text-muted-foreground">
             <Loader2 className="animate-spin mb-3" size={32} />
             <p>Reading receipt text and matching against inventory...</p>
           </div>
@@ -268,7 +268,7 @@ export function ReceiptScanDialog({
         {stage === 'review' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-muted-foreground">
                 {lines.filter(l => l.status === 'matched').length} matched, {lines.filter(l => l.status === 'unmapped').length} need mapping, {lines.filter(l => l.status === 'illegible').length} illegible.
                 {incompleteCount > 0 && <span className="text-amber-600"> {incompleteCount} row(s) incomplete and won't be saved.</span>}
               </p>
@@ -277,7 +277,7 @@ export function ReceiptScanDialog({
 
             <div className="space-y-2">
               {lines.length === 0 && (
-                <p className="text-center text-gray-400 py-8">No line items detected. Try a clearer photo.</p>
+                <p className="text-center text-muted-foreground py-8">No line items detected. Try a clearer photo.</p>
               )}
               {lines.map(line => {
                 const meta = statusMeta[line.status];
@@ -290,19 +290,19 @@ export function ReceiptScanDialog({
                         <Badge variant="outline" className={meta.className}>
                           <Icon size={12} className="mr-1" /> {meta.label}
                         </Badge>
-                        <span className="text-xs text-gray-400">Page {line.source_page}</span>
+                        <span className="text-xs text-muted-foreground">Page {line.source_page}</span>
                       </div>
-                      <button onClick={() => removeLine(line.localId)} className="text-gray-400 hover:text-red-500" title="Exclude this line">
+                      <button onClick={() => removeLine(line.localId)} className="text-muted-foreground hover:text-red-500" title="Exclude this line">
                         <X size={16} />
                       </button>
                     </div>
-                    <p className="text-xs text-gray-400 mb-2 font-mono truncate">"{line.raw_text}"</p>
+                    <p className="text-xs text-muted-foreground mb-2 font-mono truncate">"{line.raw_text}"</p>
 
                     {isCreatingItem ? (
-                      <div className="space-y-2 bg-gray-50 dark:bg-gray-900 rounded-md p-3">
+                      <div className="space-y-2 bg-muted rounded-md p-3">
                         <div className="flex items-center justify-between">
                           <Label className="text-xs">New Inventory Item</Label>
-                          <button type="button" className="text-xs text-gray-500 hover:underline" onClick={() => setCreatingItemFor(null)}>Cancel</button>
+                          <button type="button" className="text-xs text-muted-foreground hover:underline" onClick={() => setCreatingItemFor(null)}>Cancel</button>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <Input placeholder="Name" value={newItemForm.name} onChange={e => setNewItemForm({ ...newItemForm, name: e.target.value })} />

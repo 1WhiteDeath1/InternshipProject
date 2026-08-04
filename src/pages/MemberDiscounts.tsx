@@ -70,10 +70,10 @@ export default function MemberDiscounts() {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        <Percent size={24} className="text-gray-700 dark:text-gray-300" />
+        <Percent size={24} className="text-muted-foreground" />
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Member Discounts</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Standing discount rate for mess members - applied automatically to every future monthly bill.</p>
+          <h1 className="text-2xl font-bold text-foreground">Member Discounts</h1>
+          <p className="text-sm text-muted-foreground">Standing discount rate for mess members - applied automatically to every future monthly bill.</p>
         </div>
       </div>
 
@@ -98,7 +98,7 @@ export default function MemberDiscounts() {
                       {m.rank} {m.full_name}
                       {m.is_womens_bloc && <Badge variant="secondary" className="ml-2">Women's Bloc</Badge>}
                     </TableCell>
-                    <TableCell className="text-sm text-gray-500">{m.service_number}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{m.service_number}</TableCell>
                     <TableCell>{MESS_CATEGORY_LABELS[m.mess_category] || m.mess_category}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -119,7 +119,7 @@ export default function MemberDiscounts() {
                 );
               })}
               {!loading && members.length === 0 && (
-                <TableRow><TableCell colSpan={4} className="text-center py-10 text-gray-500">
+                <TableRow><TableCell colSpan={4} className="text-center py-10 text-muted-foreground">
                   No active members.
                 </TableCell></TableRow>
               )}

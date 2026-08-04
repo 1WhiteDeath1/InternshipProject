@@ -37,9 +37,9 @@ export default function Checkout() {
       <div>
         <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
           <Wallet size={18} /> Bills to settle
-          <span className="text-xs font-normal text-gray-500">{settleGroups.length} guest{settleGroups.length === 1 ? '' : 's'} with payment due</span>
+          <span className="text-xs font-normal text-muted-foreground">{settleGroups.length} guest{settleGroups.length === 1 ? '' : 's'} with payment due</span>
         </h2>
-        {settleGroups.length === 0 && <p className="text-sm text-gray-500">Nothing waiting on payment right now.</p>}
+        {settleGroups.length === 0 && <p className="text-sm text-muted-foreground">Nothing waiting on payment right now.</p>}
         <div className="space-y-2">
           {settleGroups.map(group => {
             const first = group[0];
@@ -55,7 +55,7 @@ export default function Checkout() {
                       {first.rank ? `${first.rank} ` : ''}{first.guest_name || '—'}
                       <BillStatusBadge input={first} />
                     </p>
-                    <p className="text-xs text-gray-500">Room {first.room_number || '—'} · {group.map(i => i.invoice_number).join(' · ')}</p>
+                    <p className="text-xs text-muted-foreground">Room {first.room_number || '—'} · {group.map(i => i.invoice_number).join(' · ')}</p>
                   </div>
                   <div className="flex gap-1.5 text-xs">
                     {group.map(i => {

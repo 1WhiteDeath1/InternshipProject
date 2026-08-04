@@ -71,13 +71,13 @@ export function RoomLeaseDispatchView({ month, year, onClose }: { month: number 
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <style>{PRINT_STYLE}</style>
         <DialogHeader><DialogTitle>Room-Lease Dispatch</DialogTitle></DialogHeader>
-        {loading && <p className="text-sm text-gray-500">Loading…</p>}
+        {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
         {data && (
           <PrintArea>
-            <div className="bill-page border border-gray-400 rounded-sm p-4 text-[13px] text-gray-900 bg-white space-y-2.5">
+            <div className="bill-page border border-gray-400 rounded-sm p-4 text-[13px] text-foreground bg-white space-y-2.5">
               <div className="flex justify-between items-start">
                 <div className="flex-1">
-                  <p className="text-[11px] text-gray-600">{data.mess.name} · {data.mess.address} · {data.mess.phone}</p>
+                  <p className="text-[11px] text-muted-foreground">{data.mess.name} · {data.mess.address} · {data.mess.phone}</p>
                   <p className="text-center font-bold underline decoration-2 text-sm mt-1">MONTHLY ROOM-LEASE DISPATCH — {data.period.label}</p>
                 </div>
                 <div className="w-16 h-16 shrink-0 ml-2 [&>svg]:w-full [&>svg]:h-full" dangerouslySetInnerHTML={{ __html: data.qr_svg }} />
@@ -96,8 +96,8 @@ export function RoomLeaseDispatchView({ month, year, onClose }: { month: number 
                   {data.members.map((m, i) => (
                     <tr key={i}>
                       <td className="border border-gray-500 px-2 py-1">{i + 1}</td>
-                      <td className="border border-gray-500 px-2 py-1">{m.member_name} <span className="text-gray-400">({m.service_number})</span></td>
-                      <td className="border border-gray-500 px-2 py-1 text-[11px] text-gray-500">{m.is_womens_bloc ? "Women's Bloc" : 'HRA'}</td>
+                      <td className="border border-gray-500 px-2 py-1">{m.member_name} <span className="text-muted-foreground">({m.service_number})</span></td>
+                      <td className="border border-gray-500 px-2 py-1 text-[11px] text-muted-foreground">{m.is_womens_bloc ? "Women's Bloc" : 'HRA'}</td>
                       <td className="border border-gray-500 px-2 py-1 text-right font-mono whitespace-nowrap">{formatCurrency(m.stay_amount)}</td>
                     </tr>
                   ))}
@@ -118,7 +118,7 @@ export function RoomLeaseDispatchView({ month, year, onClose }: { month: number 
                 </tfoot>
               </table>
 
-              <p className="text-[11px] text-gray-500">Verify: {data.verify_hash}</p>
+              <p className="text-[11px] text-muted-foreground">Verify: {data.verify_hash}</p>
             </div>
           </PrintArea>
         )}
@@ -163,19 +163,19 @@ export function DietInvoiceView({ billId, onClose }: { billId: number | null; on
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <style>{PRINT_STYLE}</style>
         <DialogHeader><DialogTitle>Diet Invoice</DialogTitle></DialogHeader>
-        {loading && <p className="text-sm text-gray-500">Loading…</p>}
+        {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
         {data && (
           <PrintArea>
-            <div className="bill-page border border-gray-400 rounded-sm p-4 text-[13px] text-gray-900 bg-white space-y-2.5">
+            <div className="bill-page border border-gray-400 rounded-sm p-4 text-[13px] text-foreground bg-white space-y-2.5">
               <div className="flex justify-between items-start">
                 <div className="flex-1">
-                  <p className="text-[11px] text-gray-600">{data.mess.name} · {data.mess.address} · {data.mess.phone}</p>
+                  <p className="text-[11px] text-muted-foreground">{data.mess.name} · {data.mess.address} · {data.mess.phone}</p>
                   <p className="text-center font-bold underline decoration-2 text-sm mt-1">PERSONAL DIET INVOICE — {data.period.label}</p>
                 </div>
                 <div className="w-16 h-16 shrink-0 ml-2 [&>svg]:w-full [&>svg]:h-full" dangerouslySetInnerHTML={{ __html: data.qr_svg }} />
               </div>
 
-              <p className="text-sm">{data.member.full_name} <span className="text-gray-400">({data.member.service_number})</span></p>
+              <p className="text-sm">{data.member.full_name} <span className="text-muted-foreground">({data.member.service_number})</span></p>
 
               <table className="w-full border-collapse mt-1">
                 <thead>
@@ -200,8 +200,8 @@ export function DietInvoiceView({ billId, onClose }: { billId: number | null; on
                 </tfoot>
               </table>
 
-              <p className="text-[11px] text-gray-500 capitalize">Status: {data.status} · Verify: {data.verify_hash}</p>
-              <p className="text-[10px] text-gray-400">Room/HRA charges are dispatched separately and not included here.</p>
+              <p className="text-[11px] text-muted-foreground capitalize">Status: {data.status} · Verify: {data.verify_hash}</p>
+              <p className="text-[10px] text-muted-foreground">Room/HRA charges are dispatched separately and not included here.</p>
             </div>
           </PrintArea>
         )}

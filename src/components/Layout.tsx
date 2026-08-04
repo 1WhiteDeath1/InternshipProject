@@ -5,15 +5,19 @@ import { hasPermission, getHomePath } from '@/contexts/auth-context';
 import { useTheme } from '@/contexts/useTheme';
 import { useFeatures } from '@/contexts/useFeatures';
 import api from '@/lib/api';
+import { navItems } from '@/lib/navConfig';
 import {
-  LayoutDashboard, Package, BedDouble, Receipt,
-  Shield, Users, UserCog, ClipboardList, Bell, BarChart3,
-  Settings, FileUp, LogOut, Sun, Moon, ChevronLeft, ChevronRight,
-  IdCard, UtensilsCrossed, Wallet, ChefHat, LayoutGrid, Menu, X, Contact, UserCircle2, TrendingUp, ClipboardCheck,
-  Plus, Receipt as ReceiptIcon, Camera, ShieldAlert, RefreshCw, UtensilsCrossed as OrderIcon, CalendarDays, Scale,
-  MessageSquare, Percent,
+  Bell, LogOut, Sun, Moon, MoreHorizontal,
+  Plus, Receipt as ReceiptIcon, Camera, ShieldAlert, RefreshCw, UtensilsCrossed as OrderIcon, UserCircle2, IdCard,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  SidebarProvider, Sidebar, SidebarHeader, SidebarContent, SidebarFooter,
+  SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarMenuBadge, SidebarTrigger, SidebarInset,
+} from '@/components/ui/sidebar';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { QuickBookingModal } from '@/components/QuickBookingModal';
 import { QuickChargeModal } from '@/components/QuickChargeModal';
 import { QuickAddAttendantModal } from '@/components/QuickAddAttendantModal';
@@ -26,96 +30,54 @@ import { QuickIncidentModal } from '@/components/QuickIncidentModal';
 // Security, and vice versa. `variant` defaults to 'default'.
 const quickActionDefs: {
   key: string; label: string; icon: typeof Plus; match: (path: string) => boolean; variant?: 'default' | 'secondary';
+  permission?: { module: string; action: string };
 }[] = [
   { key: 'booking', label: 'New Booking', icon: Plus, match: p => p.startsWith('/bookings') },
   { key: 'charge', label: 'Log Charge', icon: ReceiptIcon, match: p => p.startsWith('/billing'), variant: 'secondary' },
   { key: 'scan', label: 'Scan Receipt', icon: Camera, match: p => p.startsWith('/stock') },
-  { key: 'attendant', label: 'Add Attendant', icon: UserCircle2, match: p => p.startsWith('/attendants') },
+  // Manager can view the Attendants directory (attendants:view, for the
+  // Activity History leaderboard) without roster CRUD - that stays Booking
+  // NCO's job, so this shortcut needs its own explicit permission check
+  // rather than just the path match every other quick action relies on.
+  { key: 'attendant', label: 'Add Attendant', icon: UserCircle2, match: p => p.startsWith('/attendants'), permission: { module: 'attendants', action: 'create' } },
   { key: 'member', label: 'Add Member', icon: IdCard, match: p => p.startsWith('/members') },
   { key: 'incident', label: 'Report Incident', icon: ShieldAlert, match: p => p.startsWith('/security') },
   { key: 'alacarte', label: 'New À La Carte', icon: OrderIcon, match: p => p.startsWith('/kitchen') },
   { key: 'generate', label: 'Generate Bills', icon: RefreshCw, match: p => p.startsWith('/mess-billing') },
 ];
 
-const navItems = [
-  { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { path: '/stock', label: 'Inventory & Procurement', icon: Package, feature: null, requiredPermission: { module: 'inventory', action: 'view' } },
-  { path: '/bookings', label: 'Bookings', icon: BedDouble, feature: null, requiredPermission: { module: 'bookings', action: 'view' } },
-  { path: '/billing', label: 'Billing', icon: Receipt, feature: null, requiredPermission: { module: 'billing', action: 'view' } },
-  { path: '/clerk-desk', label: 'Clerk Desk', icon: LayoutGrid, feature: 'clerk_desk', requiredPermission: { module: 'clerk_desk', action: 'view' } },
-  { path: '/billing-reports', label: 'Income & Cost', icon: Scale, feature: null, requiredPermission: { module: 'billing', action: 'view' } },
-  { path: '/guests', label: 'Guests', icon: Contact, feature: null, requiredPermission: { module: 'guests', action: 'view' } },
-  { path: '/attendants', label: 'Attendants', icon: UserCircle2, feature: null, requiredPermission: { module: 'attendants', action: 'view' } },
-  { path: '/members', label: 'Members', icon: IdCard, feature: 'mess_members', requiredPermission: { module: 'members', action: 'view' } },
-  { path: '/attendance', label: 'Attendance', icon: UtensilsCrossed, feature: 'mess_attendance', requiredPermission: { module: 'attendance', action: 'view' } },
-  // Clerk owns mess_billing end-to-end now (generate, issue, collect) - this
-  // standalone page is their entry point for generating the period's bills
-  // and logging guest meal charges; Clerk Desk's Members tab is where they
-  // issue/collect/discount/print what gets generated here.
-  { path: '/mess-billing', label: 'Mess Billing', icon: Wallet, feature: 'mess_billing', requiredPermission: { module: 'mess_billing', action: 'view' } },
-  { path: '/kitchen', label: 'Kitchen', icon: ChefHat, feature: 'kitchen_module', requiredPermission: { module: 'kitchen', action: 'view' } },
-  { path: '/events', label: 'Events', icon: CalendarDays, requiredPermission: { module: 'events', action: 'view' } },
-  { path: '/security', label: 'Security', icon: Shield, feature: null, requiredPermission: { module: 'security', action: 'view' } },
-  // Manager's direct discount/category authority over in-house guests -
-  // reuses the existing bookings:approve permission (the same lever the
-  // category override already used), no new RBAC permission needed.
-  { path: '/guest-discounts', label: 'Guest Discounts', icon: Percent, requiredPermission: { module: 'bookings', action: 'approve' } },
-  // Standing HRA/mess-member discount rate - members:edit is shared with
-  // Kitchen NCO, so this also requires bookings:approve (Manager-only
-  // today) to keep it off Kitchen NCO's nav.
-  { path: '/member-discounts', label: 'Member Discounts', icon: Percent, requiredPermissionAll: [{ module: 'bookings', action: 'approve' }, { module: 'members', action: 'edit' }] },
-  // No procurement approval anymore (the mess buys and restocks itself,
-  // no PO to sign off on) - gated instead on the two things that actually
-  // land here: bill corrections (Manager) and menu changes (Manager/Deputy).
-  { path: '/approvals', label: 'Approvals', icon: ClipboardCheck, requiredPermissionAny: [{ module: 'billing', action: 'approve' }, { module: 'menu', action: 'approve' }] },
-  { path: '/users', label: 'Users', icon: Users, requiredPermission: { module: 'users', action: 'view' } },
-  { path: '/roles', label: 'Roles', icon: UserCog, requiredPermission: { module: 'roles', action: 'view' } },
-  { path: '/audit-log', label: 'Audit Log', icon: ClipboardList, requiredPermission: { module: 'audit', action: 'view' } },
-  { path: '/alerts', label: 'Alerts', icon: Bell, badge: 'alertCount', requiredPermission: { module: 'alerts', action: 'view' } },
-  { path: '/directives', label: 'Directives', icon: MessageSquare, badge: 'directiveCount', requiredPermission: { module: 'directives', action: 'view' } },
-  { path: '/tariffs', label: 'Tariffs', icon: TrendingUp, requiredPermission: { module: 'tariffs', action: 'view' } },
-  { path: '/reports', label: 'Reports', icon: BarChart3, requiredPermission: { module: 'reports', action: 'view' } },
-  { path: '/import-export', label: 'Import / Export', icon: FileUp, requiredPermission: { module: 'import_export', action: 'view' } },
-  { path: '/settings', label: 'Settings', icon: Settings, requiredPermission: { module: 'settings', action: 'view' } },
-];
+function QuickActionsDropdown({ actions, onSelect }: {
+  actions: typeof quickActionDefs;
+  onSelect: (key: string) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant="outline" className="sm:hidden">
+          <MoreHorizontal size={16} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {actions.map(action => {
+          const Icon = action.icon;
+          return (
+            <DropdownMenuItem key={action.key} onClick={() => onSelect(action.key)}>
+              <Icon size={15} className="mr-2" /> {action.label}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
-export default function Layout() {
-  const { user, logout, loading } = useAuth();
-  const { darkMode, toggleDarkMode } = useTheme();
+function SidebarNav() {
+  const { user } = useAuth();
   const { isEnabled } = useFeatures();
   const navigate = useNavigate();
   const location = useLocation();
-  const [collapsed, setCollapsed] = useState(false);
-  // Below lg the sidebar becomes an overlay drawer opened from the header's
-  // hamburger button; it closes on navigation or backdrop tap.
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [alertCount, setAlertCount] = useState(0);
   const [directiveCount, setDirectiveCount] = useState(0);
-  const [quickBookingOpen, setQuickBookingOpen] = useState(false);
-  const [quickChargeOpen, setQuickChargeOpen] = useState(false);
-  const [quickAttendantOpen, setQuickAttendantOpen] = useState(false);
-  const [quickMemberOpen, setQuickMemberOpen] = useState(false);
-  const [quickIncidentOpen, setQuickIncidentOpen] = useState(false);
-
-  useEffect(() => {
-    if (!loading && !user) navigate('/login');
-  }, [user, loading, navigate]);
-
-  const homePath = getHomePath(user);
-  const noDashboard = homePath !== '/dashboard';
-
-  // Booking NCO has no Dashboard of its own - bounce back to their real home
-  // if they land on /dashboard anyway (direct URL, stale link, browser back).
-  useEffect(() => {
-    if (!loading && user && noDashboard && location.pathname === '/dashboard') navigate(homePath, { replace: true });
-  }, [user, loading, noDashboard, homePath, location.pathname, navigate]);
-
-  // Close the drawer on navigation (adjust-state-during-render, not an effect)
-  const [prevPath, setPrevPath] = useState(location.pathname);
-  if (location.pathname !== prevPath) {
-    setPrevPath(location.pathname);
-    setDrawerOpen(false);
-  }
 
   useEffect(() => {
     if (!hasPermission(user, 'alerts', 'view')) return;
@@ -143,7 +105,8 @@ export default function Layout() {
     return () => clearInterval(interval);
   }, [user]);
 
-  if (loading || !user) return null;
+  const homePath = getHomePath(user);
+  const noDashboard = homePath !== '/dashboard';
 
   const filteredNav = navItems.filter(item => {
     if (item.path === '/dashboard' && noDashboard) return false;
@@ -153,6 +116,56 @@ export default function Layout() {
     if (item.feature && !isEnabled(item.feature)) return false;
     return true;
   });
+
+  return (
+    <SidebarMenu>
+      {filteredNav.map(item => {
+        const isActive = location.pathname === item.path;
+        const Icon = item.icon;
+        const badgeCount = item.badge === 'alertCount' ? alertCount : item.badge === 'directiveCount' ? directiveCount : 0;
+        return (
+          <SidebarMenuItem key={item.path}>
+            <SidebarMenuButton isActive={isActive} tooltip={item.label} onClick={() => navigate(item.path)}>
+              <Icon />
+              <span>{item.label}</span>
+            </SidebarMenuButton>
+            {badgeCount > 0 && (
+              <SidebarMenuBadge className={item.badge === 'alertCount' ? 'bg-red-500 text-white' : 'bg-violet-500 text-white'}>
+                {badgeCount}
+              </SidebarMenuBadge>
+            )}
+          </SidebarMenuItem>
+        );
+      })}
+    </SidebarMenu>
+  );
+}
+
+export default function Layout() {
+  const { user, logout, loading } = useAuth();
+  const { darkMode, toggleDarkMode } = useTheme();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [quickBookingOpen, setQuickBookingOpen] = useState(false);
+  const [quickChargeOpen, setQuickChargeOpen] = useState(false);
+  const [quickAttendantOpen, setQuickAttendantOpen] = useState(false);
+  const [quickMemberOpen, setQuickMemberOpen] = useState(false);
+  const [quickIncidentOpen, setQuickIncidentOpen] = useState(false);
+
+  useEffect(() => {
+    if (!loading && !user) navigate('/login');
+  }, [user, loading, navigate]);
+
+  const homePath = getHomePath(user);
+  const noDashboard = homePath !== '/dashboard';
+
+  // Booking NCO has no Dashboard of its own - bounce back to their real home
+  // if they land on /dashboard anyway (direct URL, stale link, browser back).
+  useEffect(() => {
+    if (!loading && user && noDashboard && location.pathname === '/dashboard') navigate(homePath, { replace: true });
+  }, [user, loading, noDashboard, homePath, location.pathname, navigate]);
+
+  if (loading || !user) return null;
 
   const quickActionHandlers: Record<string, () => void> = {
     booking: () => setQuickBookingOpen(true),
@@ -164,106 +177,48 @@ export default function Layout() {
     alacarte: () => navigate('/kitchen', { state: { openAlaCarte: true } }),
     generate: () => navigate('/mess-billing', { state: { autoGenerate: true } }),
   };
-  const activeQuickActions = quickActionDefs.filter(a => a.match(location.pathname));
+  const activeQuickActions = quickActionDefs.filter(a =>
+    a.match(location.pathname) && (!a.permission || hasPermission(user, a.permission.module, a.permission.action)));
 
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-950">
-      {/* Backdrop for the mobile drawer */}
-      {drawerOpen && (
-        <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setDrawerOpen(false)} />
-      )}
+    <SidebarProvider>
+      <Sidebar collapsible="icon">
+        <SidebarHeader className="h-16 flex-row items-center justify-center px-4 group-data-[collapsible=icon]:px-0">
+          <span className="text-xl font-bold tracking-tight text-sidebar-foreground group-data-[collapsible=icon]:hidden">EME MESS</span>
+          <span className="hidden text-lg font-bold text-sidebar-foreground group-data-[collapsible=icon]:!block">E</span>
+        </SidebarHeader>
+        <SidebarContent className="px-2 py-2">
+          <SidebarNav />
+        </SidebarContent>
+        <SidebarFooter>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton tooltip={darkMode ? 'Light Mode' : 'Dark Mode'} onClick={toggleDarkMode}>
+                {darkMode ? <Sun /> : <Moon />}
+                <span>{darkMode ? 'Light Mode' : 'Dark Mode'}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton tooltip="Logout" onClick={logout} className="text-destructive hover:bg-destructive/10 hover:text-destructive">
+                <LogOut />
+                <span>Logout</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
+      </Sidebar>
 
-      {/* Sidebar: static on desktop, slide-in drawer below lg */}
-      <aside className={`
-        ${collapsed ? 'lg:w-16' : 'lg:w-64'} w-72 max-w-[85vw]
-        bg-slate-900 text-white flex flex-col transition-all duration-300 flex-shrink-0
-        fixed inset-y-0 left-0 z-50 transform lg:transform-none lg:static
-        ${drawerOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-      `}>
-        <div className="h-16 flex items-center px-4 border-b border-slate-700">
-          {!collapsed && <span className="text-xl font-bold tracking-tight">EME MESS</span>}
-          <button onClick={() => setCollapsed(!collapsed)} className="ml-auto p-1.5 rounded hover:bg-slate-700 transition-colors hidden lg:block">
-            {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
-          </button>
-          <button onClick={() => setDrawerOpen(false)} className="ml-auto p-1.5 rounded hover:bg-slate-700 transition-colors lg:hidden">
-            <X size={20} />
-          </button>
-        </div>
-
-        <nav className="flex-1 py-4 overflow-y-auto">
-          {filteredNav.map(item => {
-            const isActive = location.pathname === item.path;
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.path}
-                onClick={() => navigate(item.path)}
-                className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-all duration-200 relative
-                  ${isActive
-                    ? 'bg-blue-600/20 text-blue-400 border-l-3 border-blue-500'
-                    : 'text-slate-300 hover:bg-slate-800 hover:text-white border-l-3 border-transparent'
-                  }`}
-                title={collapsed ? item.label : undefined}
-              >
-                <Icon size={20} />
-                {(!collapsed || drawerOpen) && (
-                  <>
-                    <span className="text-base">{item.label}</span>
-                    {item.badge === 'alertCount' && alertCount > 0 && (
-                      <span className="ml-auto bg-red-500 text-white text-sm font-bold rounded-full h-6 min-w-6 flex items-center justify-center px-1.5 animate-pulse">
-                        {alertCount}
-                      </span>
-                    )}
-                    {item.badge === 'directiveCount' && directiveCount > 0 && (
-                      <span className="ml-auto bg-violet-500 text-white text-sm font-bold rounded-full h-6 min-w-6 flex items-center justify-center px-1.5 animate-pulse">
-                        {directiveCount}
-                      </span>
-                    )}
-                  </>
-                )}
-                {collapsed && !drawerOpen && item.badge === 'alertCount' && alertCount > 0 && (
-                  <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-red-500 rounded-full" />
-                )}
-                {collapsed && !drawerOpen && item.badge === 'directiveCount' && directiveCount > 0 && (
-                  <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-violet-500 rounded-full" />
-                )}
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className="border-t border-slate-700 p-3">
-          <button
-            onClick={toggleDarkMode}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
-          >
-            {darkMode ? <Sun size={18} /> : <Moon size={18} />}
-            {(!collapsed || drawerOpen) && <span className="text-base">{darkMode ? 'Light Mode' : 'Dark Mode'}</span>}
-          </button>
-          <button
-            onClick={logout}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-300 hover:bg-red-900/40 hover:text-red-400 transition-colors mt-1"
-          >
-            <LogOut size={18} />
-            {(!collapsed || drawerOpen) && <span className="text-base">Logout</span>}
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <SidebarInset>
         {/* Top Bar */}
-        <header className="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center px-4 sm:px-6 justify-between flex-shrink-0 gap-3">
+        <header className="h-16 bg-card border-b border-border flex items-center px-4 sm:px-6 justify-between flex-shrink-0 gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <button onClick={() => setDrawerOpen(true)} className="p-2 -ml-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors lg:hidden">
-              <Menu size={22} className="text-gray-700 dark:text-gray-300" />
-            </button>
-            <div className="flex items-center gap-2 text-base text-gray-500 dark:text-gray-400 min-w-0">
+            <SidebarTrigger />
+            <div className="flex items-center gap-2 text-base text-muted-foreground min-w-0">
               {location.pathname !== homePath && (
                 <>
-                  <button onClick={() => navigate(homePath)} className="hover:text-blue-600 transition-colors hidden sm:block">Home</button>
+                  <button onClick={() => navigate(homePath)} className="hover:text-primary transition-colors hidden sm:block">Home</button>
                   <span className="hidden sm:block">/</span>
-                  <span className="text-gray-700 dark:text-gray-300 font-medium capitalize truncate">
+                  <span className="text-foreground font-medium capitalize truncate">
                     {location.pathname.slice(1).replace(/-/g, ' ')}
                   </span>
                 </>
@@ -273,37 +228,37 @@ export default function Layout() {
 
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
             {activeQuickActions.length > 0 && (
-              <div className="hidden sm:flex items-center gap-2">
+              <div className="flex items-center gap-2">
                 {activeQuickActions.map(action => {
                   const Icon = action.icon;
                   return (
-                    <Button key={action.key} size="sm" variant={action.variant || 'default'} onClick={quickActionHandlers[action.key]}>
+                    <Button key={action.key} size="sm" variant={action.variant || 'default'} onClick={quickActionHandlers[action.key]}
+                      className="hidden sm:inline-flex">
                       <Icon size={15} className="mr-1" /> {action.label}
                     </Button>
                   );
                 })}
+                {/* Below sm, quick actions collapse into a dropdown instead of
+                    disappearing entirely - a phone-carrying front desk is
+                    exactly where a fast "New Booking" button matters most. */}
+                <QuickActionsDropdown actions={activeQuickActions} onSelect={key => quickActionHandlers[key]()} />
               </div>
             )}
             {hasPermission(user, 'alerts', 'view') && (
               <button
                 onClick={() => navigate('/alerts')}
-                className="relative p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                className="relative p-2 rounded-lg hover:bg-accent transition-colors"
               >
-                <Bell size={22} className="text-gray-600 dark:text-gray-400" />
-                {alertCount > 0 && (
-                  <span className="absolute top-0.5 right-0.5 h-5 min-w-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center px-1">
-                    {alertCount}
-                  </span>
-                )}
+                <Bell size={22} className="text-muted-foreground" />
               </button>
             )}
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-800">
-              <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-bold">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted">
+              <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-sm font-bold">
                 {user.full_name?.charAt(0)?.toUpperCase() || 'U'}
               </div>
               <div className="hidden md:block">
-                <p className="text-base font-medium text-gray-900 dark:text-gray-100 leading-tight">{user.full_name}</p>
-                <p className="text-sm text-gray-500 dark:text-gray-400 leading-tight">{user.role_name}</p>
+                <p className="text-base font-medium text-foreground leading-tight">{user.full_name}</p>
+                <p className="text-sm text-muted-foreground leading-tight">{user.role_name}</p>
               </div>
             </div>
           </div>
@@ -313,13 +268,13 @@ export default function Layout() {
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">
           <Outlet />
         </main>
-      </div>
+      </SidebarInset>
 
       <QuickBookingModal open={quickBookingOpen} onOpenChange={setQuickBookingOpen} />
       <QuickChargeModal open={quickChargeOpen} onOpenChange={setQuickChargeOpen} />
       <QuickAddAttendantModal open={quickAttendantOpen} onOpenChange={setQuickAttendantOpen} />
       <QuickAddMemberModal open={quickMemberOpen} onOpenChange={setQuickMemberOpen} />
       <QuickIncidentModal open={quickIncidentOpen} onOpenChange={setQuickIncidentOpen} />
-    </div>
+    </SidebarProvider>
   );
 }

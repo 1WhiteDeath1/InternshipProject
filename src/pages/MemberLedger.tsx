@@ -30,12 +30,12 @@ interface MessBill {
 const monthLabel = (m: number) => new Date(2000, m - 1).toLocaleString('default', { month: 'short' });
 
 const statusBadge = (status: string) => {
-  const colors: Record<string, string> = { active: 'bg-green-100 text-green-800', transferred: 'bg-amber-100 text-amber-800', left: 'bg-gray-100 text-gray-800' };
+  const colors: Record<string, string> = { active: 'bg-green-100 text-green-800', transferred: 'bg-amber-100 text-amber-800', left: 'bg-muted text-muted-foreground' };
   return <Badge className={colors[status] || ''}>{status}</Badge>;
 };
 
 const billStatusBadge = (status: string) => {
-  const colors: Record<string, string> = { draft: 'bg-gray-100 text-gray-800', issued: 'bg-blue-100 text-blue-800', paid: 'bg-green-100 text-green-800' };
+  const colors: Record<string, string> = { draft: 'bg-muted text-muted-foreground', issued: 'bg-blue-100 text-blue-800', paid: 'bg-green-100 text-green-800' };
   return <Badge className={colors[status] || ''}>{status}</Badge>;
 };
 
@@ -70,7 +70,7 @@ export default function MemberLedger() {
   }, [memberId]);
 
   if (!Number.isFinite(memberId)) {
-    return <p className="text-gray-500">Invalid member.</p>;
+    return <p className="text-muted-foreground">Invalid member.</p>;
   }
 
   return (
@@ -79,12 +79,12 @@ export default function MemberLedger() {
 
       <Card>
         <CardContent className="p-5">
-          {loading && !member && <p className="text-gray-500">Loading...</p>}
+          {loading && !member && <p className="text-muted-foreground">Loading...</p>}
           {member && (
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div>
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><IdCard size={22} /> {member.full_name}</h1>
-                <p className="text-sm text-gray-500">{member.rank} · {member.service_number} · {member.unit || 'No unit'}</p>
+                <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><IdCard size={22} /> {member.full_name}</h1>
+                <p className="text-sm text-muted-foreground">{member.rank} · {member.service_number} · {member.unit || 'No unit'}</p>
               </div>
               <div className="flex items-center gap-2">
                 <Badge className="capitalize bg-blue-100 text-blue-800">{member.mess_category}</Badge>
@@ -117,7 +117,7 @@ export default function MemberLedger() {
                       <TableCell className="capitalize">{r.status.replace('_', ' ')}</TableCell>
                     </TableRow>
                   ))}
-                  {!loading && residencies.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-500">No HRA residency on record</TableCell></TableRow>}
+                  {!loading && residencies.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No HRA residency on record</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </CardContent>
@@ -134,7 +134,7 @@ export default function MemberLedger() {
                       <TableCell>{billStatusBadge(b.status)}</TableCell>
                     </TableRow>
                   ))}
-                  {!loading && bills.length === 0 && <TableRow><TableCell colSpan={3} className="text-center py-8 text-gray-500">No mess bills yet</TableCell></TableRow>}
+                  {!loading && bills.length === 0 && <TableRow><TableCell colSpan={3} className="text-center py-8 text-muted-foreground">No mess bills yet</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </CardContent>
@@ -153,12 +153,12 @@ export default function MemberLedger() {
                       <TableCell>{formatCurrency(b.base_menu_amount)}</TableCell>
                       <TableCell>{formatCurrency(b.extra_meals_amount)}</TableCell>
                       <TableCell>{formatCurrency(b.ala_carte_amount)}</TableCell>
-                      <TableCell className="text-gray-500">{formatCurrency(b.discount_amount)}</TableCell>
+                      <TableCell className="text-muted-foreground">{formatCurrency(b.discount_amount)}</TableCell>
                       <TableCell className="font-semibold">{formatCurrency(b.total_amount)}</TableCell>
                       <TableCell>{billStatusBadge(b.status)}</TableCell>
                     </TableRow>
                   ))}
-                  {!loading && bills.length === 0 && <TableRow><TableCell colSpan={7} className="text-center py-8 text-gray-500">No mess bills yet</TableCell></TableRow>}
+                  {!loading && bills.length === 0 && <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No mess bills yet</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </CardContent>

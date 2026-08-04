@@ -18,7 +18,7 @@ from backend.models.inventory import (
 )
 from backend.models.kitchen import MenuItem, MenuItemEditRequest, GasChargeRate, GasChargeRateHistory, KitchenOrder
 from backend.models.procurement import Vendor
-from backend.models.rooms import Room, Attendant, RoomPhoto
+from backend.models.rooms import Room, Attendant, RoomPhoto, AttendantDutyLog
 from backend.models.rates import (
     RoomRate, DutyRate, HraRankRate, WomensBlocRankRate, HraUtilityRate, TariffRate,
 )
@@ -45,7 +45,7 @@ __all__ = [
     "InventoryCategory", "InventoryItem", "StockBatch", "StockMovement", "WasteLog", "CycleCount",
     "MenuItem", "MenuItemEditRequest", "GasChargeRate", "GasChargeRateHistory", "KitchenOrder",
     "Vendor",
-    "Room", "Attendant", "RoomPhoto",
+    "Room", "Attendant", "RoomPhoto", "AttendantDutyLog",
     "RoomRate", "DutyRate", "HraRankRate", "WomensBlocRankRate", "HraUtilityRate", "TariffRate",
     "Guest",
     "Booking", "BookingCharge", "SmsMessage", "GuestMovement",

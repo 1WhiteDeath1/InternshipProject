@@ -45,7 +45,7 @@ export function OrderHistoryDialog({ open, onOpenChange, memberId, bookingId, gu
               <TableRow><TableHead>Date</TableHead><TableHead>Meal</TableHead><TableHead>Item</TableHead><TableHead className="text-right">Price</TableHead></TableRow>
             </TableHeader>
             <TableBody>
-              {loading && <TableRow><TableCell colSpan={4} className="text-center py-8 text-gray-500">Loading…</TableCell></TableRow>}
+              {loading && <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">Loading…</TableCell></TableRow>}
               {!loading && rows.map((r, i) => (
                 <TableRow key={i}>
                   <TableCell>{new Date(r.date).toLocaleDateString()}</TableCell>
@@ -54,7 +54,7 @@ export function OrderHistoryDialog({ open, onOpenChange, memberId, bookingId, gu
                   <TableCell className="text-right font-mono">{formatCurrency(r.price)}</TableCell>
                 </TableRow>
               ))}
-              {!loading && rows.length === 0 && <TableRow><TableCell colSpan={4} className="text-center py-8 text-gray-500">No orders on record</TableCell></TableRow>}
+              {!loading && rows.length === 0 && <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">No orders on record</TableCell></TableRow>}
             </TableBody>
           </Table>
         </div>

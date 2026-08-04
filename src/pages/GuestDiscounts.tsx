@@ -79,10 +79,10 @@ export default function GuestDiscounts() {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        <Percent size={24} className="text-gray-700 dark:text-gray-300" />
+        <Percent size={24} className="text-muted-foreground" />
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Guest Discounts</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Every currently checked-in guest - adjust category or discount directly, no approval needed.</p>
+          <h1 className="text-2xl font-bold text-foreground">Guest Discounts</h1>
+          <p className="text-sm text-muted-foreground">Every currently checked-in guest - adjust category or discount directly, no approval needed.</p>
         </div>
       </div>
 
@@ -138,7 +138,7 @@ export default function GuestDiscounts() {
                 );
               })}
               {!loading && guests.length === 0 && (
-                <TableRow><TableCell colSpan={5} className="text-center py-10 text-gray-500">
+                <TableRow><TableCell colSpan={5} className="text-center py-10 text-muted-foreground">
                   No guests currently checked in.
                 </TableCell></TableRow>
               )}

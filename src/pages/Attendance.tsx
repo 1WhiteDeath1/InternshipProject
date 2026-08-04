@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { UtensilsCrossed, XCircle, Lock } from 'lucide-react';
 import { MealAttendanceOmnibar } from '@/components/MealAttendanceOmnibar';
+import { ConfirmDialog, type ConfirmRequest } from '@/components/ConfirmDialog';
 
 interface AttendeeRow {
   attendance_id: number;
@@ -46,6 +47,7 @@ export default function Attendance() {
   const [loading, setLoading] = useState(true);
   const [menuItems, setMenuItems] = useState<MenuItemOption[]>([]);
   const [selectedMenuItemId, setSelectedMenuItemId] = useState(0);
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
 
   const isPast = new Date(date) < new Date(new Date().toDateString());
 
@@ -83,17 +85,29 @@ export default function Attendance() {
     queueMicrotask(() => { setSelectedMenuItemId(0); fetchMenuItems(); });
   }, [mealType, fetchMenuItems]);
 
-  const handleRemove = async (row: AttendeeRow) => {
-    let reason: string | undefined;
-    if (isPast) {
-      reason = prompt('This is a past date — enter a reason for this correction:') || undefined;
-      if (!reason) return;
-    }
+  const removeAttendee = async (row: AttendeeRow, reason?: string) => {
     try {
       await api.post(`/attendance/${row.attendance_id}/mark`, { status: 'cancelled', reason });
       toast.success(`Removed ${row.name}`);
       fetchAttendees();
     } catch (err) { toast.error(getErrorMessage(err, 'Failed to remove')); }
+  };
+
+  const handleRemove = (row: AttendeeRow) => {
+    if (!isPast) {
+      removeAttendee(row);
+      return;
+    }
+    setConfirmRequest({
+      title: 'Remove past attendance record?',
+      description: `${row.name} — ${date}`,
+      confirmLabel: 'Remove',
+      destructive: true,
+      reasonLabel: 'Reason for this correction',
+      reasonRequired: true,
+      reasonMinLength: 10,
+      onConfirm: (reason) => removeAttendee(row, reason),
+    });
   };
 
   const currentAttendees = attendeesByMeal[mealType] ?? [];
@@ -107,9 +121,9 @@ export default function Attendance() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><UtensilsCrossed size={24} /> Meal Attendance</h1>
+        <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><UtensilsCrossed size={24} /> Meal Attendance</h1>
         <div className="flex items-center gap-2">
-          <Label className="text-sm text-gray-500 whitespace-nowrap">Date</Label>
+          <Label className="text-sm text-muted-foreground whitespace-nowrap">Date</Label>
           <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-40" />
         </div>
       </div>
@@ -133,13 +147,13 @@ export default function Attendance() {
                   <p className="font-semibold text-sm">{MEAL_LABELS[mt]}</p>
                   <Badge className="bg-green-100 text-green-800">{loading ? '…' : names.length}</Badge>
                 </div>
-                <p className="text-xs text-gray-500 leading-relaxed min-h-8">
+                <p className="text-xs text-muted-foreground leading-relaxed min-h-8">
                   {loading ? 'Loading…' : names.length === 0 ? 'No one confirmed yet' : (
                     names.length <= 4 ? names.join(', ') : `${names.slice(0, 4).join(', ')} +${names.length - 4} more`
                   )}
                 </p>
                 {cutoff && (
-                  <p className={`text-xs mt-2 flex items-center gap-1 ${locked ? 'text-amber-600 font-medium' : 'text-gray-400'}`}>
+                  <p className={`text-xs mt-2 flex items-center gap-1 ${locked ? 'text-amber-600 font-medium' : 'text-muted-foreground'}`}>
                     {locked ? <><Lock size={11} /> Final — closed at {formatTime12h(cutoff)}</> : `Closes at ${formatTime12h(cutoff)}`}
                   </p>
                 )}
@@ -154,7 +168,7 @@ export default function Attendance() {
         <CardContent className="p-4 space-y-3">
           <div className="flex items-end gap-3 flex-wrap">
             <div className="min-w-52 max-w-xs">
-              <Label className="text-xs text-gray-500">Today's menu item <span className="text-gray-400">(optional)</span></Label>
+              <Label className="text-xs text-muted-foreground">Today's menu item <span className="text-muted-foreground">(optional)</span></Label>
               <select className="mt-1 w-full h-10 rounded-md border border-input bg-background px-3 text-sm" value={selectedMenuItemId} onChange={e => setSelectedMenuItemId(Number(e.target.value))}>
                 <option value="0">Not specified</option>
                 {menuItems.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -175,24 +189,24 @@ export default function Attendance() {
       {/* Attendees */}
       <Card>
         <CardContent className="p-0">
-          {loading && <p className="text-center py-8 text-gray-500">Loading…</p>}
+          {loading && <p className="text-center py-8 text-muted-foreground">Loading…</p>}
           {!loading && currentAttendees.length === 0 && (
-            <p className="text-center py-8 text-gray-500">No one confirmed for {MEAL_LABELS[mealType]} yet — add someone above.</p>
+            <p className="text-center py-8 text-muted-foreground">No one confirmed for {MEAL_LABELS[mealType]} yet — add someone above.</p>
           )}
           {!loading && currentAttendees.map(row => (
-            <div key={row.attendance_id} className="flex items-center justify-between gap-3 px-4 py-3 border-b last:border-0 border-gray-100 dark:border-gray-800">
+            <div key={row.attendance_id} className="flex items-center justify-between gap-3 px-4 py-3 border-b last:border-0 border-border">
               <div>
-                <p className="font-medium text-sm">{row.name} <span className="text-xs text-gray-400">({KIND_LABEL[row.kind]})</span></p>
-                <p className="text-xs text-gray-500">{row.sub_label}{row.menu_item_name ? ` · ${row.menu_item_name}` : ''}</p>
+                <p className="font-medium text-sm">{row.name} <span className="text-xs text-muted-foreground">({KIND_LABEL[row.kind]})</span></p>
+                <p className="text-xs text-muted-foreground">{row.sub_label}{row.menu_item_name ? ` · ${row.menu_item_name}` : ''}</p>
               </div>
               <div className="flex items-center gap-2">
                 <Badge className={row.status === 'attended' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}>{row.status}</Badge>
                 {currentLocked ? (
-                  <span title="Final — this meal's booking window is closed" className="text-gray-300 dark:text-gray-600">
+                  <span title="Final — this meal's booking window is closed" className="text-muted-foreground">
                     <Lock size={16} />
                   </span>
                 ) : (
-                  <button onClick={() => handleRemove(row)} className="text-gray-400 hover:text-red-500" title="Remove">
+                  <button onClick={() => handleRemove(row)} className="text-muted-foreground hover:text-red-500" title="Remove">
                     <XCircle size={18} />
                   </button>
                 )}
@@ -201,6 +215,8 @@ export default function Attendance() {
           ))}
         </CardContent>
       </Card>
+
+      <ConfirmDialog request={confirmRequest} onClose={() => setConfirmRequest(null)} />
     </div>
   );
 }

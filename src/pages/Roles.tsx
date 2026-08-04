@@ -61,7 +61,7 @@ export default function Roles() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Role Management</h1>
+        <h1 className="text-2xl font-bold text-foreground">Role Management</h1>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild><Button><Plus size={16} className="mr-1" /> Create Role</Button></DialogTrigger>
           <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
@@ -105,7 +105,7 @@ export default function Roles() {
                   <TableCell>{r.permissions?.length || 0} permissions</TableCell>
                 </TableRow>
               ))}
-              {roles.length === 0 && <TableRow><TableCell colSpan={4} className="text-center py-8 text-gray-500">No roles defined</TableCell></TableRow>}
+              {roles.length === 0 && <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">No roles defined</TableCell></TableRow>}
             </TableBody>
           </Table>
         </CardContent>

@@ -15,13 +15,13 @@ const BOOKING_STATUS_META: Record<string, Meta> = {
   pending: { label: 'Pending', bg: 'bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-300', dot: 'bg-amber-500' },
   confirmed: { label: 'Confirmed', bg: 'bg-blue-50 text-blue-800 dark:bg-blue-950 dark:text-blue-300', dot: 'bg-blue-500' },
   checked_in: { label: 'Checked In', bg: 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300', dot: 'bg-emerald-500' },
-  checked_out: { label: 'Checked Out', bg: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300', dot: 'bg-gray-400' },
+  checked_out: { label: 'Checked Out', bg: 'bg-muted text-muted-foreground', dot: 'bg-muted-foreground' },
   cancelled: { label: 'Cancelled', bg: 'bg-red-50 text-red-800 dark:bg-red-950 dark:text-red-300', dot: 'bg-red-500' },
   no_show: { label: 'No Show', bg: 'bg-orange-50 text-orange-800 dark:bg-orange-950 dark:text-orange-300', dot: 'bg-orange-500' },
 };
 
 export function StatusBadge({ status }: { status: string }) {
-  const meta = BOOKING_STATUS_META[status] || { label: status.replace(/_/g, ' '), bg: 'bg-gray-100 text-gray-700', dot: 'bg-gray-400' };
+  const meta = BOOKING_STATUS_META[status] || { label: status.replace(/_/g, ' '), bg: 'bg-muted text-muted-foreground', dot: 'bg-gray-400' };
   return <Pill meta={meta} />;
 }
 

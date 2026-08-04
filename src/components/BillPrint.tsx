@@ -141,10 +141,10 @@ function DraftBill({ data }: { data: PrintData }) {
   const usePaperForm = inv.bill_type !== 'mess';
   const { fixed, extra } = usePaperForm ? paperRows(inv.items) : { fixed: [], extra: inv.items };
   return (
-    <div className="bill-page border border-gray-400 rounded-sm p-4 text-[13px] text-gray-900 bg-white space-y-2.5">
+    <div className="bill-page border border-gray-400 rounded-sm p-4 text-[13px] text-foreground bg-white space-y-2.5">
       <div className="flex justify-between items-start">
         <div className="flex-1">
-          <p className="text-[11px] text-gray-600">{data.mess.name} · {data.mess.address} · {data.mess.phone}</p>
+          <p className="text-[11px] text-muted-foreground">{data.mess.name} · {data.mess.address} · {data.mess.phone}</p>
           <p className="text-center font-bold underline decoration-2 text-sm mt-1">
             DRAFT BILL (For Office Use Only) — {BILL_LABELS[inv.bill_type] || 'BILL'}
           </p>
@@ -215,7 +215,7 @@ function DraftBill({ data }: { data: PrintData }) {
         </tfoot>
       </table>
 
-      <p className="text-[11px] text-gray-500">
+      <p className="text-[11px] text-muted-foreground">
         {b ? `Stay: ${fmtD(b.check_in)} to ${fmtD(b.check_out)} · Ref ${b.booking_reference} · ` : ''}
         Issued {fmtD(inv.issue_date)}
         {data.verify_hash ? ` · Verify: ${data.verify_hash}` : ''}
@@ -481,7 +481,7 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
         <DialogHeader>
           <DialogTitle>{showTabs ? titles[viewMode] : 'Bill'}</DialogTitle>
         </DialogHeader>
-        {loading && <p className="text-sm text-gray-500">Loading bill…</p>}
+        {loading && <p className="text-sm text-muted-foreground">Loading bill…</p>}
         {/* Three views over the same stay: Room-only and Mess-only keep
             each invoice's own detailed rows; Combined row-merges both via
             the master-invoice endpoint. Always shown once bookingId is
@@ -498,10 +498,10 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
         <PrintArea>
           {showTabs
             ? viewMode === 'combined'
-              ? (masterData ? <MergedBill data={masterData} /> : <p className="text-sm text-gray-500">Loading…</p>)
+              ? (masterData ? <MergedBill data={masterData} /> : <p className="text-sm text-muted-foreground">Loading…</p>)
               : ((viewMode === 'room' ? roomBill : messBill)
                   ? <DraftBill data={(viewMode === 'room' ? roomBill : messBill) as PrintData} />
-                  : <p className="text-sm text-gray-500">Loading…</p>)
+                  : <p className="text-sm text-muted-foreground">Loading…</p>)
             : bills.map(bd => <DraftBill key={bd.invoice.id} data={bd} />)}
         </PrintArea>
 
@@ -545,7 +545,7 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
                 </Button>
               ))}
             </div>
-            {unpaid.length > 1 && <p className="text-[11px] text-gray-500">"Pay Together" settles both bills in one action; the individual buttons clear each bill separately.</p>}
+            {unpaid.length > 1 && <p className="text-[11px] text-muted-foreground">"Pay Together" settles both bills in one action; the individual buttons clear each bill separately.</p>}
           </div>
         )}
         {allowPayments && !loading && bills.length > 0 && unpaid.length === 0 && (
@@ -599,10 +599,10 @@ function masterPaperRows(items: MasterInvoiceItem[]) {
 function MergedBill({ data }: { data: MasterInvoiceData }) {
   const { fixed, extra } = masterPaperRows(data.items);
   return (
-    <div className="bill-page border border-gray-400 rounded-sm p-4 text-[13px] text-gray-900 bg-white space-y-2.5">
+    <div className="bill-page border border-gray-400 rounded-sm p-4 text-[13px] text-foreground bg-white space-y-2.5">
       <div className="flex justify-between items-start">
         <div className="flex-1">
-          <p className="text-[11px] text-gray-600">{data.mess.name} · {data.mess.address} · {data.mess.phone}</p>
+          <p className="text-[11px] text-muted-foreground">{data.mess.name} · {data.mess.address} · {data.mess.phone}</p>
           <p className="text-center font-bold underline decoration-2 text-sm mt-1">MASTER INVOICE (Room + Mess Combined)</p>
           {data.is_complimentary && <p className="text-center font-bold text-emerald-700 text-xs mt-0.5">★ COMPLIMENTARY — NO CHARGE ★</p>}
         </div>
@@ -632,7 +632,7 @@ function MergedBill({ data }: { data: MasterInvoiceData }) {
             <tr key={head}>
               <td className="border border-gray-500 px-2 py-1">{i + 1}</td>
               <td className="border border-gray-500 px-2 py-1">{item ? item.description : head}</td>
-              <td className="border border-gray-500 px-2 py-1 text-[11px] text-gray-500">{item ? item.source_label : '—'}</td>
+              <td className="border border-gray-500 px-2 py-1 text-[11px] text-muted-foreground">{item ? item.source_label : '—'}</td>
               <td className="border border-gray-500 px-2 py-1 text-right font-mono whitespace-nowrap">{item ? formatCurrency(item.total_price) : '—'}</td>
             </tr>
           ))}
@@ -640,7 +640,7 @@ function MergedBill({ data }: { data: MasterInvoiceData }) {
             <tr key={`x${i}`}>
               <td className="border border-gray-500 px-2 py-1">{fixed.length + i + 1}</td>
               <td className="border border-gray-500 px-2 py-1">{it.description}{it.quantity > 1 ? ` × ${it.quantity}` : ''}</td>
-              <td className="border border-gray-500 px-2 py-1 text-[11px] text-gray-500">{it.source_label}</td>
+              <td className="border border-gray-500 px-2 py-1 text-[11px] text-muted-foreground">{it.source_label}</td>
               <td className="border border-gray-500 px-2 py-1 text-right font-mono whitespace-nowrap">{formatCurrency(it.total_price)}</td>
             </tr>
           ))}
@@ -665,7 +665,7 @@ function MergedBill({ data }: { data: MasterInvoiceData }) {
         </tfoot>
       </table>
 
-      <p className="text-[11px] text-gray-500">
+      <p className="text-[11px] text-muted-foreground">
         Ref {data.booking.booking_reference} · Verify: {data.verify_hash}
       </p>
 
@@ -707,11 +707,11 @@ export function PaymentReceiptView({ paymentId, onClose }: { paymentId: number |
         <DialogHeader><DialogTitle>Payment Receipt</DialogTitle></DialogHeader>
         {data && (
           <PrintArea>
-            <div className="bill-page border border-gray-400 rounded-sm p-5 text-[13px] text-gray-900 bg-white space-y-3">
-              <p className="text-right text-[11px] text-gray-600">{data.mess.phone}</p>
+            <div className="bill-page border border-gray-400 rounded-sm p-5 text-[13px] text-foreground bg-white space-y-3">
+              <p className="text-right text-[11px] text-muted-foreground">{data.mess.phone}</p>
               <div className="text-center">
                 <p className="font-bold text-lg tracking-wide uppercase">{data.mess.name}</p>
-                <p className="text-[11px] text-gray-600">{data.mess.address}</p>
+                <p className="text-[11px] text-muted-foreground">{data.mess.address}</p>
               </div>
               <div className="flex justify-between items-end gap-4">
                 <DottedField label="No." value={data.receipt_no} />
