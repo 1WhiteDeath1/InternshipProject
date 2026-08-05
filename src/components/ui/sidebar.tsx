@@ -372,7 +372,18 @@ function SidebarGroup({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="sidebar-group"
       data-sidebar="group"
-      className={cn("relative flex w-full min-w-0 flex-col p-2", className)}
+      className={cn(
+        "relative flex w-full min-w-0 flex-col p-2",
+        // Collapsed-to-icon rail: this group's own p-2 was stacking on top of
+        // SidebarContent's px-2, indenting every grouped nav icon (Rooms,
+        // Members, Events...) 8.5px further right than the ungrouped ones
+        // (Dashboard, footer items), which sit directly in SidebarContent
+        // with no extra wrapper. Zeroing it here re-aligns them all flush,
+        // matching the group-data-[collapsible=icon] pattern SidebarGroupLabel
+        // and SidebarGroupAction already use.
+        "group-data-[collapsible=icon]:p-0",
+        className
+      )}
       {...props}
     />
   )
