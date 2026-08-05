@@ -4,7 +4,7 @@
 ; PyInstaller onedir build to already exist at packaging\_build\dist\EME-MESS.
 
 #define MyAppName "EME MESS"
-#define MyAppVersion "1.4.0"
+#define MyAppVersion "1.5.0"
 #define MyAppExeName "EME-MESS.exe"
 #define MyBuildDir "_build\dist\EME-MESS"
 
@@ -34,6 +34,13 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 
 [Files]
 Source: "{#MyBuildDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; The real JWT signing key for this deployment - generated once, kept out of
+; git (see .gitignore: packaging/prod.env), installed as {app}\.env so
+; backend/config.py's pydantic-settings picks it up at runtime (its
+; env_file=".env" resolves relative to the exe's own working directory,
+; which Windows sets to {app} for a double-clicked exe). Without this file
+; the app silently falls back to the public default key in config.py.
+Source: "prod.env"; DestDir: "{app}"; DestName: ".env"; Flags: onlyifdoesntexist
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

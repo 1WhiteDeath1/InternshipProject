@@ -7,14 +7,16 @@ import { useFeatures } from '@/contexts/useFeatures';
 import api from '@/lib/api';
 import { navItems } from '@/lib/navConfig';
 import {
-  Bell, LogOut, Sun, Moon, MoreHorizontal,
+  Bell, LogOut, Sun, Moon, MoreHorizontal, MessageSquare,
   Plus, Receipt as ReceiptIcon, Camera, ShieldAlert, RefreshCw, UtensilsCrossed as OrderIcon, UserCircle2, IdCard,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   SidebarProvider, Sidebar, SidebarHeader, SidebarContent, SidebarFooter,
   SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarMenuBadge, SidebarTrigger, SidebarInset,
+  SidebarGroup, SidebarGroupLabel, SidebarGroupContent,
 } from '@/components/ui/sidebar';
+import type { NavItem } from '@/lib/navConfig';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -80,15 +82,27 @@ function SidebarNav() {
   const [directiveCount, setDirectiveCount] = useState(0);
 
   useEffect(() => {
-    if (!hasPermission(user, 'alerts', 'view')) return;
-    const fetchAlerts = async () => {
+    // Alerts and Approvals share one nav item/badge now (Alerts.tsx, tabbed)
+    // - sum unread alerts with pending approvals so the sidebar badge still
+    // reflects everything that nav item's badge historically covered across
+    // both former pages, gated on whichever of the three permissions the
+    // user actually has (mirrors navConfig's requiredPermissionAny there).
+    const canAlerts = hasPermission(user, 'alerts', 'view');
+    const canBillingApprove = hasPermission(user, 'billing', 'approve');
+    const canMenuApprove = hasPermission(user, 'menu', 'approve');
+    if (!canAlerts && !canBillingApprove && !canMenuApprove) return;
+    const fetchCount = async () => {
       try {
-        const res = await api.get('/alerts/unread-count');
-        setAlertCount(res.data.count);
-      } catch { /* silent - alert badge just stays at its last known value */ }
+        const [alertsRes, billRes, menuRes] = await Promise.all([
+          canAlerts ? api.get('/alerts/unread-count') : Promise.resolve({ data: { count: 0 } }),
+          canBillingApprove ? api.get('/billing/edit-requests?status=pending') : Promise.resolve({ data: [] }),
+          canMenuApprove ? api.get('/kitchen/menu/edit-requests?status=pending') : Promise.resolve({ data: [] }),
+        ]);
+        setAlertCount(alertsRes.data.count + (billRes.data?.length || 0) + (menuRes.data?.length || 0));
+      } catch { /* silent - badge just stays at its last known value */ }
     };
-    fetchAlerts();
-    const interval = setInterval(fetchAlerts, 30000);
+    fetchCount();
+    const interval = setInterval(fetchCount, 30000);
     return () => clearInterval(interval);
   }, [user]);
 
@@ -117,27 +131,54 @@ function SidebarNav() {
     return true;
   });
 
+  const renderItem = (item: NavItem) => {
+    const isActive = location.pathname === item.path;
+    const Icon = item.icon;
+    const badgeCount = item.badge === 'alertCount' ? alertCount : item.badge === 'directiveCount' ? directiveCount : 0;
+    return (
+      <SidebarMenuItem key={item.path}>
+        <SidebarMenuButton isActive={isActive} tooltip={item.label} onClick={() => navigate(item.path)}>
+          <Icon />
+          <span>{item.label}</span>
+        </SidebarMenuButton>
+        {badgeCount > 0 && (
+          <SidebarMenuBadge className={item.badge === 'alertCount' ? 'bg-red-500 text-white' : 'bg-violet-500 text-white'}>
+            {badgeCount}
+          </SidebarMenuBadge>
+        )}
+      </SidebarMenuItem>
+    );
+  };
+
+  // Fold the flat, already-ordered filteredNav into contiguous runs sharing
+  // the same NavItem.group (shadcn's SidebarGroup pattern) - Dashboard has
+  // no group and renders as a bare, unlabeled SidebarMenu above the rest.
+  // Runs stay contiguous because navConfig.tsx's array order already keeps
+  // each group's items together; filtering only ever removes items, it
+  // never reorders them.
+  const groups: { label: string | null; items: NavItem[] }[] = [];
+  for (const item of filteredNav) {
+    const label = item.group ?? null;
+    const last = groups[groups.length - 1];
+    if (last && last.label === label) last.items.push(item);
+    else groups.push({ label, items: [item] });
+  }
+
   return (
-    <SidebarMenu>
-      {filteredNav.map(item => {
-        const isActive = location.pathname === item.path;
-        const Icon = item.icon;
-        const badgeCount = item.badge === 'alertCount' ? alertCount : item.badge === 'directiveCount' ? directiveCount : 0;
-        return (
-          <SidebarMenuItem key={item.path}>
-            <SidebarMenuButton isActive={isActive} tooltip={item.label} onClick={() => navigate(item.path)}>
-              <Icon />
-              <span>{item.label}</span>
-            </SidebarMenuButton>
-            {badgeCount > 0 && (
-              <SidebarMenuBadge className={item.badge === 'alertCount' ? 'bg-red-500 text-white' : 'bg-violet-500 text-white'}>
-                {badgeCount}
-              </SidebarMenuBadge>
-            )}
-          </SidebarMenuItem>
-        );
-      })}
-    </SidebarMenu>
+    <>
+      {groups.map((g, i) =>
+        g.label === null ? (
+          <SidebarMenu key={`ungrouped-${i}`}>{g.items.map(renderItem)}</SidebarMenu>
+        ) : (
+          <SidebarGroup key={g.label}>
+            <SidebarGroupLabel>{g.label}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>{g.items.map(renderItem)}</SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )
+      )}
+    </>
   );
 }
 
@@ -243,6 +284,11 @@ export default function Layout() {
                     exactly where a fast "New Booking" button matters most. */}
                 <QuickActionsDropdown actions={activeQuickActions} onSelect={key => quickActionHandlers[key]()} />
               </div>
+            )}
+            {hasPermission(user, 'directives', 'view') && (
+              <Button size="sm" variant="outline" onClick={() => navigate('/directives')} className="hidden sm:inline-flex">
+                <MessageSquare size={15} className="mr-1" /> Directives
+              </Button>
             )}
             {hasPermission(user, 'alerts', 'view') && (
               <button

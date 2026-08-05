@@ -375,10 +375,10 @@ export default function Reports() {
                   icon={Ban} alert={exceptions.void_count > 0} />
                 <ExceptionTile label="Bill Corrections Pending" value={exceptions.corrections_pending}
                   icon={FileEdit} alert={exceptions.corrections_pending > 0}
-                  onClick={exceptions.corrections_pending > 0 ? () => navigate('/approvals') : undefined} />
+                  onClick={exceptions.corrections_pending > 0 ? () => navigate('/alerts?tab=approvals') : undefined} />
                 <ExceptionTile label="Menu Changes Pending" value={exceptions.menu_changes_pending}
                   icon={UtensilsCrossed} alert={exceptions.menu_changes_pending > 0}
-                  onClick={exceptions.menu_changes_pending > 0 ? () => navigate('/approvals') : undefined} />
+                  onClick={exceptions.menu_changes_pending > 0 ? () => navigate('/alerts?tab=approvals') : undefined} />
                 <ExceptionTile label="Guests Overdue to Leave" value={exceptions.overdue_departures}
                   icon={Clock} alert={exceptions.overdue_departures > 0} />
                 <ExceptionTile label="Overdue Invoices" value={exceptions.overdue_invoices_count}

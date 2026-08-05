@@ -26,6 +26,11 @@ class Event(Base):
     arrangement = Column(Text)
     billing_type = Column(Enum(EventBillingType), default=EventBillingType.SPLIT)
     status = Column(Enum(EventStatus), default=EventStatus.BOOKED)
+    # What the event actually cost to put on (food, hall setup, etc.) -
+    # logged by Clerk (clerk_desk:edit) separately from the menu's
+    # estimated_price total, so the invoice (billed to the guest) can be
+    # compared against actual spend to see the event's real margin.
+    actual_cost = Column(Numeric(10, 2))
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

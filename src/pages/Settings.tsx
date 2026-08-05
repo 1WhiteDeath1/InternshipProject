@@ -108,6 +108,7 @@ export default function Settings() {
                 <p className="text-xs text-muted-foreground">{s.description}</p>
               </div>
               <Input
+                type={/key|token|secret|password/i.test(s.key) ? 'password' : 'text'}
                 value={editing[s.key] ?? s.value ?? ''}
                 onChange={e => setEditing({...editing, [s.key]: e.target.value})}
                 className="w-48"

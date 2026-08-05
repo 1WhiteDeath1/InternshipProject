@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { ResizableDialog } from '@/components/dashboard/ResizableDialog';
-import { BedDouble, ChevronDown, ChevronUp } from 'lucide-react';
+import { BedDouble, CalendarDays, ChevronDown, ChevronUp } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { ROOM_STATE_COLORS } from '@/components/RoomStatusDonut';
 import { RoomStatusPill, HousekeepingBadge } from '@/pages/bookings/badges';
@@ -57,6 +58,7 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 function OccupancyDetailDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const navigate = useNavigate();
   const [detail, setDetail] = useState<OccupancyDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [showRooms, setShowRooms] = useState(false);
@@ -179,6 +181,10 @@ function OccupancyDetailDialog({ open, onClose }: { open: boolean; onClose: () =
                 <p className="text-xs text-muted-foreground text-center">
                   Last week this time: {detail.last_week_occupancy_rate}% occupied
                 </p>
+
+                <Button className="w-full" onClick={() => navigate('/rooms-overview')}>
+                  <CalendarDays size={15} className="mr-1" /> Open Rooms &amp; Calendar
+                </Button>
 
                 <Button variant="outline" size="sm" className="w-full" onClick={() => setShowRooms(v => !v)}>
                   {showRooms ? <ChevronUp size={15} className="mr-1" /> : <ChevronDown size={15} className="mr-1" />}

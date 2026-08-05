@@ -17,6 +17,10 @@ interface RoomGridTabProps {
   rooms: Room[];
   onOpenRoom: (roomId: number, initialBooking?: InitialBooking) => void;
   onChanged?: () => void;
+  /** View-only surfaces (Manager/Deputy Manager's Rooms page): no Future
+      Booking mode (that's a booking-planning tool) and no attendant
+      reassignment control - just today's room/housekeeping status. */
+  readOnly?: boolean;
 }
 
 type SortBy = 'smart' | 'availability' | 'room_number' | 'room_type' | 'price' | 'capacity';
@@ -71,7 +75,7 @@ const FUTURE_CHIPS: { value: StatusFilter; label: string }[] = [
   { value: 'unavailable', label: 'Unavailable' },
 ];
 
-export default function RoomGridTab({ rooms, onOpenRoom, onChanged }: RoomGridTabProps) {
+export default function RoomGridTab({ rooms, onOpenRoom, onChanged, readOnly }: RoomGridTabProps) {
   const [mode, setMode] = useState<'instant' | 'future'>('instant');
   const [attendants, setAttendants] = useState<AttendantOption[]>([]);
   const [futureIn, setFutureIn] = useState(addDays(todayISO(), 1));
@@ -103,9 +107,12 @@ export default function RoomGridTab({ rooms, onOpenRoom, onChanged }: RoomGridTa
     finally { setFutureLoading(false); }
   }, [futureIn, futureOut, futureValid]);
 
-  useEffect(() => { queueMicrotask(() => {
-    api.get('/attendants').then(res => setAttendants(res.data.filter((a: AttendantOption) => a.is_active))).catch(() => {});
-  }); }, []);
+  useEffect(() => {
+    if (readOnly) return;
+    queueMicrotask(() => {
+      api.get('/attendants').then(res => setAttendants(res.data.filter((a: AttendantOption) => a.is_active))).catch(() => {});
+    });
+  }, [readOnly]);
 
   const reassignAttendant = async (roomId: number, attendantId: string) => {
     setOpenAttendantPopoverId(null);
@@ -232,7 +239,7 @@ export default function RoomGridTab({ rooms, onOpenRoom, onChanged }: RoomGridTa
               {mode === 'instant' && card.housekeeping_status !== 'clean' && (
                 <span title={`Housekeeping: ${card.housekeeping_status}`}><Sparkles size={14} className="text-amber-500" /></span>
               )}
-              {mode === 'instant' && (
+              {mode === 'instant' && !readOnly && (
                 <Popover open={openAttendantPopoverId === card.id} onOpenChange={v => setOpenAttendantPopoverId(v ? card.id : null)}>
                   <PopoverTrigger asChild>
                     <button type="button"
@@ -291,6 +298,7 @@ export default function RoomGridTab({ rooms, onOpenRoom, onChanged }: RoomGridTa
       <Card>
         <CardContent className="p-4 space-y-3">
           <div className="flex flex-wrap items-center gap-3">
+            {!readOnly && (
             <div className="inline-flex rounded-md border overflow-hidden">
               <button type="button" onClick={() => setMode('instant')}
                 className={`px-4 py-2 text-sm flex items-center gap-1.5 ${mode === 'instant' ? 'bg-blue-100 text-blue-800 font-medium dark:bg-blue-900 dark:text-blue-100' : 'text-muted-foreground'}`}>
@@ -301,6 +309,7 @@ export default function RoomGridTab({ rooms, onOpenRoom, onChanged }: RoomGridTa
                 <CalendarDays size={14} /> Future Booking
               </button>
             </div>
+            )}
             {mode === 'future' && (
               <div className="flex items-center gap-2">
                 <Input type="date" className="w-36" value={futureIn} min={todayISO()} onChange={e => { setFutureIn(e.target.value); if (futureOut <= e.target.value) setFutureOut(addDays(e.target.value, 1)); }} />

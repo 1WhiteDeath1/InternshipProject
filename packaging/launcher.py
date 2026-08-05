@@ -1,11 +1,15 @@
 """Entry point for the packaged EME-MESS.exe (built via PyInstaller).
 
-Boots the same FastAPI app used in dev (backend.main:app) on the loopback
-interface only - this build is a single-machine local server for one client
-to bug-test on their own PC, not something exposed to the network - then
-opens the default browser once the server is accepting connections. Kept as
-a console app (not windowed) on purpose: a tester hitting an error should see
-the traceback instead of a silently-dead process.
+Boots the same FastAPI app used in dev (backend.main:app), listening on
+every network interface (BIND_HOST) so other PCs/tablets on the same LAN
+(Booking desk, Kitchen, Clerk desk, etc.) can reach it at
+http://<this-PC's-LAN-IP>:8000 - not just the machine it's installed on.
+Windows Firewall will likely prompt to allow this the first time it runs;
+that prompt must be accepted (Allow on Private networks) for other devices
+to connect. Opens the local machine's own browser to localhost once the
+server is accepting connections. Kept as a console app (not windowed) on
+purpose: a tester hitting an error should see the traceback instead of a
+silently-dead process.
 """
 import shutil
 import socket
@@ -17,13 +21,26 @@ from pathlib import Path
 
 import uvicorn
 
-HOST = "127.0.0.1"
+BIND_HOST = "0.0.0.0"  # listen on every interface, so other LAN devices can connect
+LOCAL_HOST = "127.0.0.1"  # for this machine's own port-check / browser tab
 PORT = 8000
 
 
 def _port_is_free(host: str, port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         return s.connect_ex((host, port)) != 0
+
+
+def _local_lan_ip() -> str | None:
+    """Best-effort LAN IP for this machine, so the console can print the URL
+    other devices should use. No packet is actually sent - connect() on a UDP
+    socket just picks the outbound interface/address for that route."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except OSError:
+        return None
 
 
 def _seed_database_if_missing() -> None:
@@ -50,8 +67,11 @@ def _pause() -> None:
 
 def _open_browser_when_ready() -> None:
     for _ in range(120):
-        if not _port_is_free(HOST, PORT):
-            webbrowser.open(f"http://{HOST}:{PORT}")
+        if not _port_is_free(LOCAL_HOST, PORT):
+            webbrowser.open(f"http://{LOCAL_HOST}:{PORT}")
+            lan_ip = _local_lan_ip()
+            if lan_ip:
+                print(f"\nOther devices on this network can connect at: http://{lan_ip}:{PORT}")
             return
         time.sleep(0.5)
 
@@ -59,7 +79,7 @@ def _open_browser_when_ready() -> None:
 def main() -> None:
     print("EME MESS - starting up...")
 
-    if not _port_is_free(HOST, PORT):
+    if not _port_is_free(LOCAL_HOST, PORT):
         print(f"\nPort {PORT} is already in use.")
         print("EME MESS may already be running - check your taskbar, or close")
         print("whatever else is using that port, then try again.")
@@ -73,7 +93,7 @@ def main() -> None:
     from backend.main import app
 
     try:
-        uvicorn.run(app, host=HOST, port=PORT, log_level="info")
+        uvicorn.run(app, host=BIND_HOST, port=PORT, log_level="info")
     except Exception:
         import traceback
 

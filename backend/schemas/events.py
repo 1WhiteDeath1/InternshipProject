@@ -41,3 +41,7 @@ class EventStatusUpdate(BaseModel):
 class EventPostponeRequest(BaseModel):
     new_date: date
     reason: str = Field(..., min_length=1)
+
+
+class EventActualCostUpdate(BaseModel):
+    actual_cost: float = Field(..., ge=0)

@@ -11,6 +11,7 @@ import Layout from '@/components/Layout';
 import Dashboard from '@/pages/Dashboard';
 import StockManagement from '@/pages/StockManagement';
 import Bookings from '@/pages/Bookings';
+import RoomsOverview from '@/pages/RoomsOverview';
 import Billing from '@/pages/Billing';
 import ClerkDeskLayout from '@/pages/clerk-desk/ClerkDeskLayout';
 import ClerkLiveGuests from '@/pages/clerk-desk/LiveGuests';
@@ -31,14 +32,11 @@ import Users from '@/pages/Users';
 import Roles from '@/pages/Roles';
 import AuditLog from '@/pages/AuditLog';
 import Alerts from '@/pages/Alerts';
-import Approvals from '@/pages/Approvals';
 import Reports from '@/pages/Reports';
 import Settings from '@/pages/Settings';
 import ImportExport from '@/pages/ImportExport';
 import Events from '@/pages/Events';
 import Directives from '@/pages/Directives';
-import GuestDiscounts from '@/pages/GuestDiscounts';
-import MemberDiscounts from '@/pages/MemberDiscounts';
 import NotFound from '@/pages/NotFound';
 
 function App() {
@@ -54,6 +52,7 @@ function App() {
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/stock" element={<RequirePermission item={navItemByPath('/stock')}><StockManagement /></RequirePermission>} />
                 <Route path="/bookings" element={<RequirePermission item={navItemByPath('/bookings')}><Bookings /></RequirePermission>} />
+                <Route path="/rooms-overview" element={<RequirePermission item={navItemByPath('/rooms-overview')}><RoomsOverview /></RequirePermission>} />
                 <Route path="/billing" element={<RequirePermission item={navItemByPath('/billing')}><Billing /></RequirePermission>} />
                 <Route path="/clerk-desk" element={<RequirePermission item={navItemByPath('/clerk-desk')}><ClerkDeskLayout /></RequirePermission>}>
                   <Route index element={<Navigate to="live" replace />} />
@@ -77,13 +76,10 @@ function App() {
                 <Route path="/audit-log" element={<RequirePermission item={navItemByPath('/audit-log')}><AuditLog /></RequirePermission>} />
                 <Route path="/alerts" element={<RequirePermission item={navItemByPath('/alerts')}><Alerts /></RequirePermission>} />
                 <Route path="/directives" element={<RequirePermission item={navItemByPath('/directives')}><Directives /></RequirePermission>} />
-                <Route path="/approvals" element={<RequirePermission item={navItemByPath('/approvals')}><Approvals /></RequirePermission>} />
                 <Route path="/reports" element={<RequirePermission item={navItemByPath('/reports')}><Reports /></RequirePermission>} />
                 <Route path="/settings" element={<RequirePermission item={navItemByPath('/settings')}><Settings /></RequirePermission>} />
                 <Route path="/import-export" element={<RequirePermission item={navItemByPath('/import-export')}><ImportExport /></RequirePermission>} />
                 <Route path="/events" element={<RequirePermission item={navItemByPath('/events')}><Events /></RequirePermission>} />
-                <Route path="/guest-discounts" element={<RequirePermission item={navItemByPath('/guest-discounts')}><GuestDiscounts /></RequirePermission>} />
-                <Route path="/member-discounts" element={<RequirePermission item={navItemByPath('/member-discounts')}><MemberDiscounts /></RequirePermission>} />
               </Route>
               <Route path="*" element={<NotFound />} />
             </Routes>

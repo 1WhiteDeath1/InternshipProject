@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { toast } from 'sonner';
-import { Percent } from 'lucide-react';
 
 interface MemberRow {
   id: number;
@@ -23,11 +22,11 @@ const MESS_CATEGORY_LABELS: Record<string, string> = { officers: 'Officers', jco
 
 // Manager's standing discount rate for mess members - Member.custom_discount_rate
 // is already applied automatically to every future monthly bill by
-// mess-billing's generate step; this page is just a dedicated, focused
+// mess-billing's generate step; this tab is just a dedicated, focused
 // place to see and set it, instead of it being buried in the general
 // Members roster edit form. Kept separate from Guest Discounts because HRA/
 // mess members bill monthly, not per-stay.
-export default function MemberDiscounts() {
+export default function MemberDiscountsPanel() {
   const [members, setMembers] = useState<MemberRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState<Record<number, string>>({});
@@ -69,13 +68,9 @@ export default function MemberDiscounts() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <Percent size={24} className="text-muted-foreground" />
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Member Discounts</h1>
-          <p className="text-sm text-muted-foreground">Standing discount rate for mess members - applied automatically to every future monthly bill.</p>
-        </div>
-      </div>
+      <p className="text-sm text-muted-foreground">
+        Standing discount rate for mess members - applied automatically to every future monthly bill.
+      </p>
 
       <Card>
         <CardContent className="p-0">

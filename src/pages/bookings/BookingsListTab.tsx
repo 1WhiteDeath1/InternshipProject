@@ -14,9 +14,12 @@ import { StatusBadge } from './badges';
 
 interface BookingsListTabProps {
   onChanged: () => void;
+  /** View-only surfaces (Manager/Deputy Manager's Rooms page): booking
+      history with no check-in/cancel/no-show/void actions. */
+  readOnly?: boolean;
 }
 
-export default function BookingsListTab({ onChanged }: BookingsListTabProps) {
+export default function BookingsListTab({ onChanged, readOnly }: BookingsListTabProps) {
   const navigate = useNavigate();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [search, setSearch] = useState('');
@@ -79,9 +82,9 @@ export default function BookingsListTab({ onChanged }: BookingsListTabProps) {
       <Card>
         <CardContent className="p-0">
           <Table>
-            <TableHeader><TableRow><TableHead>Reference</TableHead><TableHead>Guest</TableHead><TableHead>Duty</TableHead><TableHead>Room</TableHead><TableHead>Check In</TableHead><TableHead>Check Out</TableHead><TableHead>Amount</TableHead><TableHead>Status</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead>Reference</TableHead><TableHead>Guest</TableHead><TableHead>Duty</TableHead><TableHead>Room</TableHead><TableHead>Check In</TableHead><TableHead>Check Out</TableHead><TableHead>Amount</TableHead><TableHead>Status</TableHead>{!readOnly && <TableHead>Actions</TableHead>}</TableRow></TableHeader>
             <TableBody>
-              {loading && <TableRow><TableCell colSpan={9} className="text-center py-8 text-muted-foreground">Loading bookings...</TableCell></TableRow>}
+              {loading && <TableRow><TableCell colSpan={readOnly ? 8 : 9} className="text-center py-8 text-muted-foreground">Loading bookings...</TableCell></TableRow>}
               {!loading && bookings.map(b => (
                 <TableRow key={b.id}>
                   <TableCell className="font-medium">{b.booking_reference}</TableCell>
@@ -110,23 +113,25 @@ export default function BookingsListTab({ onChanged }: BookingsListTabProps) {
                   <TableCell>{b.check_out}</TableCell>
                   <TableCell>{b.nature_of_duty === 'hra' ? <span className="text-xs text-purple-600">HRA monthly</span> : (b.total_amount != null ? formatCurrency(b.total_amount) : '-')}</TableCell>
                   <TableCell><StatusBadge status={b.status} /></TableCell>
-                  <TableCell>
-                    <div className="flex gap-0.5">
-                      {b.status === 'confirmed' && <Button size="sm" variant="ghost" title="Check in" onClick={() => handleCheckIn(b.id)}><LogIn size={16} className="text-green-600" /></Button>}
-                      {b.status === 'checked_in' && b.nature_of_duty !== 'hra' && (
-                        <Button size="sm" variant="ghost" title="Send to Clerk Desk to bill"
-                          onClick={() => navigate('/clerk-desk')}>
-                          <LogOut size={16} className="text-blue-600" />
-                        </Button>
-                      )}
-                      {b.arrival_overdue && <Button size="sm" variant="ghost" title="Void — guest did not arrive by deadline" onClick={() => handleVoidExpired(b.id, b.guest_name)}><TimerOff size={16} className="text-red-500" /></Button>}
-                      {(b.status === 'confirmed' || b.status === 'pending') && <Button size="sm" variant="ghost" title="Cancel booking" onClick={() => handleCancel(b)}><Ban size={16} className="text-red-500" /></Button>}
-                      {b.status === 'confirmed' && b.check_in < today && <Button size="sm" variant="ghost" title="Mark no-show" onClick={() => handleNoShow(b)}><UserX size={16} className="text-orange-500" /></Button>}
-                    </div>
-                  </TableCell>
+                  {!readOnly && (
+                    <TableCell>
+                      <div className="flex gap-0.5">
+                        {b.status === 'confirmed' && <Button size="sm" variant="ghost" title="Check in" onClick={() => handleCheckIn(b.id)}><LogIn size={16} className="text-green-600" /></Button>}
+                        {b.status === 'checked_in' && b.nature_of_duty !== 'hra' && (
+                          <Button size="sm" variant="ghost" title="Send to Clerk Desk to bill"
+                            onClick={() => navigate('/clerk-desk')}>
+                            <LogOut size={16} className="text-blue-600" />
+                          </Button>
+                        )}
+                        {b.arrival_overdue && <Button size="sm" variant="ghost" title="Void — guest did not arrive by deadline" onClick={() => handleVoidExpired(b.id, b.guest_name)}><TimerOff size={16} className="text-red-500" /></Button>}
+                        {(b.status === 'confirmed' || b.status === 'pending') && <Button size="sm" variant="ghost" title="Cancel booking" onClick={() => handleCancel(b)}><Ban size={16} className="text-red-500" /></Button>}
+                        {b.status === 'confirmed' && b.check_in < today && <Button size="sm" variant="ghost" title="Mark no-show" onClick={() => handleNoShow(b)}><UserX size={16} className="text-orange-500" /></Button>}
+                      </div>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
-              {!loading && bookings.length === 0 && <TableRow><TableCell colSpan={9} className="text-center py-8 text-muted-foreground">No bookings found</TableCell></TableRow>}
+              {!loading && bookings.length === 0 && <TableRow><TableCell colSpan={readOnly ? 8 : 9} className="text-center py-8 text-muted-foreground">No bookings found</TableCell></TableRow>}
             </TableBody>
           </Table>
         </CardContent>

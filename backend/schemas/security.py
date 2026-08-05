@@ -1,7 +1,8 @@
 """Security domain schemas: security logs and incident reports."""
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
+from backend.models.enums import AlertSeverity
 
 
 class SecurityLogCreate(BaseModel):
@@ -23,6 +24,17 @@ class IncidentReportBase(BaseModel):
     location: Optional[str] = None
     category: Optional[str] = None
     severity: str = "low"
+
+    # The IncidentReport.severity column is a strict Enum(AlertSeverity) - an
+    # out-of-enum string used to pass this bare str field and crash uncaught
+    # at the DB layer instead of returning a clean validation error.
+    @field_validator("severity")
+    @classmethod
+    def _validate_severity(cls, v: str) -> str:
+        valid = [e.value for e in AlertSeverity]
+        if v not in valid:
+            raise ValueError(f"severity must be one of {valid}")
+        return v
 
 class IncidentReportCreate(IncidentReportBase):
     pass

@@ -16,6 +16,11 @@ class Alert(Base):
     module = Column(String(50), nullable=False)
     entity_type = Column(String(50))
     entity_id = Column(Integer)
+    # Optional JSON blob (value/mean/stdev/z/series) for anomaly-engine alerts,
+    # so the frontend can render a small chart alongside the prose `message`
+    # instead of re-deriving numbers from the text. Null for every other
+    # alert type (low stock, expiry, etc.) - those stay message-only.
+    detail = Column(Text, nullable=True)
     acknowledged_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     acknowledged_at = Column(DateTime)
     resolved_by = Column(Integer, ForeignKey("users.id"), nullable=True)

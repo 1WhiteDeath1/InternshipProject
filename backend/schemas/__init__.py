@@ -69,7 +69,7 @@ from backend.schemas.mess_billing import (
     DiscountApplyRequest,
 )
 from backend.schemas.events import (
-    EventMenuItemCreate, EventCreate, EventUpdate, EventStatusUpdate, EventPostponeRequest,
+    EventMenuItemCreate, EventCreate, EventUpdate, EventStatusUpdate, EventPostponeRequest, EventActualCostUpdate,
 )
 from backend.schemas.directives import DirectiveCreate, DirectiveOut
 
@@ -112,6 +112,6 @@ __all__ = [
     "ServeAttendanceRequest", "NoShowSweepResult",
     "MessBillOut", "GuestMealChargeCreate", "GuestMealChargeOut",
     "DiscountApplyRequest",
-    "EventMenuItemCreate", "EventCreate", "EventUpdate", "EventStatusUpdate", "EventPostponeRequest",
+    "EventMenuItemCreate", "EventCreate", "EventUpdate", "EventStatusUpdate", "EventPostponeRequest", "EventActualCostUpdate",
     "DirectiveCreate", "DirectiveOut",
 ]

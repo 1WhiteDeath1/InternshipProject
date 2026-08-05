@@ -46,6 +46,13 @@ ACTIVE_STATUSES = ("confirmed", "checked_in")
 HOUSEKEEPING_STATES = ("clean", "dirty", "cleaning")
 
 
+def _can_view_rooms(user) -> bool:
+    """Read access to room/booking data: either Booking NCO's full bookings:view,
+    or the narrower read-only rooms_overview:view (Manager/Deputy Manager's Rooms
+    page - status, calendar, booking history, no write affordances)."""
+    return check_permission(user, "bookings", "view") or check_permission(user, "rooms_overview", "view")
+
+
 def _derived_states(db: Session, rooms, today: date):
     """Compute each room's live status for *today* from its bookings.
 
@@ -90,6 +97,12 @@ async def list_rooms(
     page: int = Query(1, ge=1), page_size: int = Query(50, ge=1),
     db: Session = Depends(get_db), current_user=Depends(get_current_user),
 ):
+    # billing:create is an extra allowance beyond _can_view_rooms: the global
+    # "Log Charge" shortcut (QuickChargeModal, Clerk-only) searches this list
+    # for the occupied room/guest to charge against - Clerk has no
+    # bookings:view or rooms_overview:view, only billing itself.
+    if not (_can_view_rooms(current_user) or check_permission(current_user, "billing", "create")):
+        raise HTTPException(status_code=403, detail="Permission denied")
     query = db.query(Room).filter(Room.is_active == True)
     if floor:
         query = query.filter(Room.floor == floor)
@@ -273,7 +286,7 @@ async def room_calendar(
 ):
     """A month of stays for one room - feeds the room detail panel. Returns
     guest name/phone/rank - PII, gated the same as the rest of Bookings."""
-    if not check_permission(current_user, "bookings", "view"):
+    if not _can_view_rooms(current_user):
         raise HTTPException(status_code=403, detail="Permission denied")
     room = db.query(Room).filter(Room.id == room_id).first()
     if not room:
@@ -438,7 +451,7 @@ async def calendar_summary(
 
     Day cells embed guest names/ranks - PII, gated the same as the rest of
     Bookings."""
-    if not check_permission(current_user, "bookings", "view"):
+    if not _can_view_rooms(current_user):
         raise HTTPException(status_code=403, detail="Permission denied")
     if end <= start:
         raise HTTPException(status_code=400, detail="end must be after start")
@@ -558,6 +571,8 @@ async def room_week(
     guest who has since checked out still shows correctly on their
     historical dates instead of the cell reverting to vacant. Maintenance is
     a persistent room flag (not date-ranged), so it applies uniformly."""
+    if not _can_view_rooms(current_user):
+        raise HTTPException(status_code=403, detail="Permission denied")
     start = start or date.today()
     window_end = start + timedelta(days=7)
     date_list = [start + timedelta(days=i) for i in range(7)]
@@ -599,6 +614,8 @@ async def room_month(
     bird's-eye room-by-room month view. Same cell/status logic as
     /room-week (occupied covers both checked_in and checked_out so a stay
     still shows correctly on its past dates after the guest checks out)."""
+    if not _can_view_rooms(current_user):
+        raise HTTPException(status_code=403, detail="Permission denied")
     today = date.today()
     year = year or today.year
     month = month or today.month
@@ -706,7 +723,7 @@ async def list_bookings(
     page: int = Query(1, ge=1), page_size: int = Query(25, ge=1),
     db: Session = Depends(get_db), current_user=Depends(get_current_user),
 ):
-    if not check_permission(current_user, "bookings", "view"):
+    if not _can_view_rooms(current_user):
         raise HTTPException(status_code=403, detail="Permission denied")
     query = db.query(Booking)
     if status:

@@ -42,10 +42,18 @@ _ROLE_PERMISSIONS = {
         # "A" only: lets Manager override a booking's client_category (and the
         # bill total that flows from it) via a dedicated endpoint, without
         # granting general bookings:view/edit - that stays Booking NCO's
-        # module. Manager's room/occupancy visibility is a Dashboard widget
-        # (RoomOverviewWidget, reports:view-gated) instead - deliberately not
-        # the full Bookings nav item, which was explicitly walked back.
+        # module. A full bookings:view was explicitly walked back before (see
+        # git history) because it would surface Booking NCO's operational
+        # Bookings page (create/check-in/cancel/etc). rooms_overview below is
+        # the narrower thing that was actually wanted: read-only room status,
+        # calendar and booking history, with zero write affordances.
         "bookings": "A",
+        # View-only oversight: room status/housekeeping, the property
+        # calendar, and booking history - the Rooms page (src/pages/
+        # RoomsOverview.tsx). Deliberately a separate module from "bookings"
+        # so granting it can never also unlock Booking NCO's write-capable
+        # Bookings page (see the comment above).
+        "rooms_overview": "V",
         # Policy: rate cards are a management decision; menu changes are
         # Kitchen NCO-proposed but Manager approves ("A" only, same narrow-
         # slice pattern as billing corrections above). Mess/Gas charge rates
@@ -70,6 +78,8 @@ _ROLE_PERMISSIONS = {
     "Deputy Manager": {
         "reports": "V",
         "procurement": "V",
+        # Same read-only Rooms page as Manager - see that role's comment.
+        "rooms_overview": "V",
         "tariffs": "V", "womens_bloc_rates": "VE", "menu": "A", "mess_rates": "V",
         "settings": "VE", "features": "VE", "backup": "VC", "branding": "VE",
         # Owns hall/function event bookings end-to-end: creates them, sets
@@ -110,6 +120,10 @@ _ROLE_PERMISSIONS = {
         # Sets the event's menu and advances it through the prep lifecycle
         # (menu_set -> preparing -> completed) - not the booking itself.
         "events": "VE", "directives": "V",
+        # Create-only: the meal-attendance omnibar needs to register a
+        # walk-in guest's identity on the spot (no room booking involved) -
+        # not the full Customer Directory, which stays Booking NCO/Manager's.
+        "guests": "C",
     },
     # Front desk only - no billing/mess_billing (Clerk owns money end-to-end)
     # and no guests:view (the Customer Directory is dropped for this role too;
@@ -127,7 +141,10 @@ _ROLE_PERMISSIONS = {
     # this role needs (check-in/out log, incident reports) lives inside the
     # security module itself.
     "Security Guard": {
-        "security": "VC",
+        # "E" added so a guard can actually move their own incident reports
+        # through investigating/resolved - previously no seeded role held
+        # security:edit at all, so a filed incident could never be closed.
+        "security": "VCE",
     },
 }
 _ROLE_DESCRIPTIONS = {

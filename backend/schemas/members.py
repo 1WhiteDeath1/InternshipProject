@@ -1,7 +1,8 @@
 """Members domain schemas: the resident officer/member roster and leave."""
 from datetime import datetime, date
 from typing import Optional
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
+from backend.models.enums import MessCategory, DiningStatus
 
 
 class MemberBase(BaseModel):
@@ -15,6 +16,25 @@ class MemberBase(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     custom_discount_rate: float = Field(0, ge=0, le=100)
+
+    # Both columns are strict SQLAlchemy Enums (Member.mess_category,
+    # Member.dining_status) - an out-of-enum string used to pass these bare
+    # str fields and crash uncaught at the DB layer instead of a clean 422.
+    @field_validator("mess_category")
+    @classmethod
+    def _validate_mess_category(cls, v: str) -> str:
+        valid = [e.value for e in MessCategory]
+        if v not in valid:
+            raise ValueError(f"mess_category must be one of {valid}")
+        return v
+
+    @field_validator("dining_status")
+    @classmethod
+    def _validate_dining_status(cls, v: str) -> str:
+        valid = [e.value for e in DiningStatus]
+        if v not in valid:
+            raise ValueError(f"dining_status must be one of {valid}")
+        return v
 
 class MemberCreate(MemberBase):
     pass

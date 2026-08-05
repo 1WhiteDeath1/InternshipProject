@@ -30,7 +30,7 @@ async def list_backups(current_user=Depends(PermissionChecker("backup", "view"))
 
 
 @router.post("/create")
-async def create_backup(current_user=Depends(PermissionChecker("backup", "create"))):
+async def create_backup(db: Session = Depends(get_db), current_user=Depends(PermissionChecker("backup", "create"))):
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     filename = f"backup_{timestamp}.zip"
     filepath = BACKUP_DIR / filename
@@ -43,7 +43,7 @@ async def create_backup(current_user=Depends(PermissionChecker("backup", "create
             for log_file in LOGS_DIR.glob("*.log"):
                 zf.write(log_file, arcname=f"logs/{log_file.name}")
 
-    log_audit(None, current_user.id, current_user.full_name, AuditAction.CREATE, "backups", reason=f"Manual backup: {filename}")
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "backups", reason=f"Manual backup: {filename}")
     logger.info(f"Backup created: {filename}")
     return {"message": "Backup created", "filename": filename}
 

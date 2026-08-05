@@ -37,6 +37,8 @@ DEFAULT_SETTINGS = [
     ("default_member_discount_rate", "0.00", "Institution-wide baseline member discount percentage, used when a member has no custom rate set"),
     ("ala_carte_default_sla_minutes", "45", "Default countdown timer (minutes) for a new a la carte kitchen order before it flips Late, if not manually overridden"),
     ("ala_carte_escalation_minutes", "15", "Additional minutes overdue past the SLA deadline before a Late order escalates to a CRITICAL admin alert"),
+    ("sms_gateway_url", "", "SMS gateway endpoint template, e.g. https://api.provider.com/send?to={phone}&text={message}&key={api_key}. Use {phone}, {message} and (if the provider wants the key in the URL) {api_key} as placeholders. Leave blank to keep SMS in manual-send mode (staff copy the text to a phone from the Bookings dashboard)."),
+    ("sms_api_key", "", "API key/token for the SMS gateway above, if the provider requires one. Sent as an Authorization: Bearer header on every request, and also substituted into {api_key} in the gateway URL if that placeholder is present."),
 ]
 
 

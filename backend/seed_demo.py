@@ -137,6 +137,18 @@ rooms.append(Room(room_number="DG-Suite-2", room_type=RoomType.DG_SUITE, ac_coun
 db.add_all(rooms)
 db.commit()
 
+# --- Attendants (check-in hard-requires one assigned to the room - without
+# these, a fresh install can create a booking but can't check anyone in) ---
+attendants = [
+    Attendant(full_name="Rashid Ali", phone="0300-1000001", shift="morning", is_active=True),
+    Attendant(full_name="Bilal Ahmed", phone="0300-1000002", shift="evening", is_active=True),
+]
+db.add_all(attendants)
+db.commit()
+for i, room in enumerate(rooms):
+    room.attendant_id = attendants[i % len(attendants)].id
+db.commit()
+
 # --- Rate card (room class x guest category, itemized) ---
 from backend.services.room_pricing import (
     DEFAULT_ROOM_RATES, DEFAULT_DUTY_RATES, RATE_COMPONENTS,
@@ -293,6 +305,7 @@ print(f"  - {db.query(Role).count()} roles")
 print(f"  - {db.query(User).count()} users (manager/deputy/clerk/kitchen/booking/security, password 123456)")
 print(f"  - {db.query(InventoryItem).count()} inventory items")
 print(f"  - {db.query(Room).count()} rooms")
+print(f"  - {db.query(Attendant).count()} attendants")
 print(f"  - {db.query(Booking).count()} bookings")
 print(f"  - {db.query(Member).count()} members ({db.query(Booking).filter(Booking.nature_of_duty == 'hra').count()} HRA resident)")
 print(f"  - {db.query(Vendor).count()} vendors")

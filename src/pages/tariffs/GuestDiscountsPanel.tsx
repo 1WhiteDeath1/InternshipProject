@@ -6,9 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { Percent } from 'lucide-react';
 import { formatCurrency } from '@/lib/currency';
-import { RATE_CARD_CATEGORY_LABELS } from './bookings/shared';
+import { RATE_CARD_CATEGORY_LABELS } from '../bookings/shared';
 
 interface GuestRow {
   id: number;
@@ -25,8 +24,8 @@ interface GuestRow {
 // Manager's direct discount/category authority over every currently
 // checked-in (non-HRA) guest - no approval step, one small audit log entry
 // per change. HRA/mess members have their own separate standing-discount
-// table (Member Discounts) since they bill monthly, not per-stay.
-export default function GuestDiscounts() {
+// tab (Member Discounts) since they bill monthly, not per-stay.
+export default function GuestDiscountsPanel() {
   const [guests, setGuests] = useState<GuestRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [draftDiscount, setDraftDiscount] = useState<Record<number, string>>({});
@@ -78,13 +77,9 @@ export default function GuestDiscounts() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <Percent size={24} className="text-muted-foreground" />
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Guest Discounts</h1>
-          <p className="text-sm text-muted-foreground">Every currently checked-in guest - adjust category or discount directly, no approval needed.</p>
-        </div>
-      </div>
+      <p className="text-sm text-muted-foreground">
+        Every currently checked-in guest - adjust category or discount directly, no approval needed.
+      </p>
 
       <Card>
         <CardContent className="p-0">

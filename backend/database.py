@@ -12,11 +12,23 @@ engine = create_engine(
     pool_pre_ping=True,
 )
 
-# Enable foreign key support for SQLite
+# Enable foreign key support for SQLite, and make concurrent writes queue
+# instead of instantly failing. WAL (Write-Ahead Logging) lets readers and a
+# writer run without blocking each other - the default rollback-journal mode
+# takes a brief exclusive lock on every commit that blocks reads too. A
+# second writer that arrives while another commit is in flight still has to
+# wait its turn (SQLite only ever has one writer at a time, WAL or not), but
+# busy_timeout makes it retry for up to 5s instead of failing immediately
+# with "database is locked" - comfortable headroom for the up to ~15
+# concurrent connections this app's pool allows (pool_size=5 + max_overflow=10,
+# SQLAlchemy's default), let alone 5 real simultaneous users, since a single
+# SQLite commit on local disk normally takes low single-digit milliseconds.
 @event.listens_for(engine, "connect")
 def set_sqlite_pragma(dbapi_conn, connection_record):
     cursor = dbapi_conn.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
     cursor.close()
 
 # expire_on_commit=False: keep ORM instances populated after commit. Without

@@ -1,4 +1,5 @@
 """Alerts router."""
+import json
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from backend.database import get_db
@@ -27,7 +28,11 @@ async def list_alerts(
     return {"items": [
         {"id": a.id, "title": a.title, "message": a.message,
          "severity": a.severity.value, "status": a.status.value,
-         "module": a.module, "created_at": a.created_at} for a in alerts], "total": total}
+         "module": a.module, "entity_type": a.entity_type,
+         # detail is opaque JSON produced by anomaly_engine.py (value/mean/stdev/z/series) -
+         # None for every non-anomaly alert (low stock, expiry...), which never set it.
+         "detail": json.loads(a.detail) if a.detail else None,
+         "created_at": a.created_at} for a in alerts], "total": total}
 
 
 @router.get("/unread-count")

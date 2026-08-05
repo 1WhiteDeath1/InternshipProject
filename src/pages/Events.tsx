@@ -25,7 +25,8 @@ interface EventItem {
   event_date: string; requirements: string | null; arrangement: string | null;
   billing_type: 'split' | 'single_payer'; status: string;
   total_estimated_amount: number; menu_items: MenuItem[];
-  invoice_id: number | null; invoice_number: string | null;
+  invoice_id: number | null; invoice_number: string | null; invoice_amount: number | null;
+  actual_cost: number | null; margin: number | null;
   created_at: string;
 }
 
@@ -138,6 +139,7 @@ function EventDetailDialog({ event, onClose, onChanged }: { event: EventItem | n
   const canManageBooking = hasPermission(user, 'events', 'create');
   const canManageKitchen = hasPermission(user, 'events', 'edit') && !canManageBooking;
   const canInvoice = hasPermission(user, 'clerk_desk', 'create');
+  const canLogCost = hasPermission(user, 'clerk_desk', 'edit');
 
   const [dishName, setDishName] = useState('');
   const [dishPrice, setDishPrice] = useState('');
@@ -145,6 +147,7 @@ function EventDetailDialog({ event, onClose, onChanged }: { event: EventItem | n
   // whenever the selected event changes, so this naturally resets per event
   // without needing an effect to re-sync it.
   const [dishQty, setDishQty] = useState(() => event ? String(event.headcount) : '');
+  const [costInput, setCostInput] = useState(() => event?.actual_cost != null ? String(event.actual_cost) : '');
   const [busy, setBusy] = useState(false);
   const [postponing, setPostponing] = useState(false);
 
@@ -187,6 +190,17 @@ function EventDetailDialog({ event, onClose, onChanged }: { event: EventItem | n
       toast.success(`Invoice ${res.data.invoice_number} generated — ${formatCurrency(res.data.total_amount)}`);
       onChanged();
     } catch (err) { toast.error(getErrorMessage(err, 'Failed to generate invoice')); }
+    finally { setBusy(false); }
+  };
+
+  const saveActualCost = async () => {
+    if (!costInput || Number(costInput) < 0) { toast.error('Enter the actual cost'); return; }
+    setBusy(true);
+    try {
+      await api.put(`/events/${event.id}/actual-cost`, { actual_cost: Number(costInput) });
+      toast.success('Actual cost logged');
+      onChanged();
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to log actual cost')); }
     finally { setBusy(false); }
   };
 
@@ -271,6 +285,35 @@ function EventDetailDialog({ event, onClose, onChanged }: { event: EventItem | n
               <span className="text-xs text-emerald-600 flex items-center gap-1"><CheckCircle2 size={13} /> Invoiced — {event.invoice_number}</span>
             )}
           </div>
+
+          {(canLogCost || event.actual_cost != null) && (
+            <div className="rounded-lg border p-3 space-y-2">
+              <p className="text-sm font-semibold flex items-center gap-1.5"><Wallet size={15} /> Cost &amp; Margin</p>
+              {event.invoice_id && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Invoiced (billed to guest)</span>
+                  <span className="font-mono">{formatCurrency(event.invoice_amount ?? 0)}</span>
+                </div>
+              )}
+              {canLogCost ? (
+                <div className="flex items-center gap-1.5">
+                  <Input type="number" placeholder="Actual cost (Rs)" className="h-9 text-xs flex-1" value={costInput} onChange={e => setCostInput(e.target.value)} />
+                  <Button size="sm" className="h-9" disabled={busy} onClick={saveActualCost}>{event.actual_cost != null ? 'Update' : 'Log Cost'}</Button>
+                </div>
+              ) : event.actual_cost != null && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Actual cost</span>
+                  <span className="font-mono">{formatCurrency(event.actual_cost)}</span>
+                </div>
+              )}
+              {event.margin != null && (
+                <div className={`flex justify-between border-t pt-1.5 text-sm font-bold ${event.margin >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                  <span>{event.margin >= 0 ? 'Profit' : 'Loss'}</span>
+                  <span className="font-mono">{formatCurrency(Math.abs(event.margin))}</span>
+                </div>
+              )}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
       <PostponeDialog event={postponing ? event : null} onClose={() => setPostponing(false)} onDone={onChanged} />

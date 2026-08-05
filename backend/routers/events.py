@@ -13,7 +13,7 @@ from backend.database import get_db
 from backend.models import (
     Event, EventMenuItem, EventStatus, EventBillingType, Guest, Invoice, InvoiceItem, InvoiceStatus,
 )
-from backend.schemas import EventCreate, EventUpdate, EventStatusUpdate, EventPostponeRequest, EventMenuItemCreate
+from backend.schemas import EventCreate, EventUpdate, EventStatusUpdate, EventPostponeRequest, EventMenuItemCreate, EventActualCostUpdate
 from backend.auth import get_current_user, check_permission
 from backend.audit import log_audit, serialize_model, AuditAction
 
@@ -56,6 +56,12 @@ def _event_out(db: Session, ev: Event) -> dict:
                          "quantity": mi.quantity} for mi in ev.menu_items],
         "invoice_id": invoiced.id if invoiced else None,
         "invoice_number": invoiced.invoice_number if invoiced else None,
+        "invoice_amount": float(invoiced.total_amount) if invoiced else None,
+        "actual_cost": float(ev.actual_cost) if ev.actual_cost is not None else None,
+        # Margin = what was billed minus what it actually cost to put on -
+        # only meaningful once both figures exist.
+        "margin": (round(float(invoiced.total_amount) - float(ev.actual_cost), 2)
+                   if invoiced and ev.actual_cost is not None else None),
         "created_at": ev.created_at,
     }
 
@@ -300,3 +306,24 @@ async def generate_event_invoice(event_id: int, request: Request, db: Session = 
     log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "invoices", invoice.id,
               after_state=serialize_model(invoice), reason=f"Event invoice: {ev.title}", ip_address=request.client.host)
     return {"invoice_id": invoice.id, "invoice_number": invoice.invoice_number, "total_amount": float(invoice.total_amount)}
+
+
+@router.put("/{event_id}/actual-cost")
+async def set_event_actual_cost(event_id: int, data: EventActualCostUpdate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """What the event actually cost to run - logged by Clerk (clerk_desk:edit,
+    same money-facing permission that gates everything else Clerk does) so it
+    can be compared against what was billed on the invoice. Deliberately not
+    gated on events:edit - Clerk shouldn't be able to touch the hall/menu/
+    requirements, only record actual spend."""
+    if not check_permission(current_user, "clerk_desk", "edit"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    ev = db.query(Event).filter(Event.id == event_id).first()
+    if not ev:
+        raise HTTPException(status_code=404, detail="Event not found")
+    before = serialize_model(ev)
+    ev.actual_cost = data.actual_cost
+    db.commit()
+    db.refresh(ev)
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "events", ev.id,
+              before_state=before, after_state=serialize_model(ev), reason="Logged actual event cost", ip_address=request.client.host)
+    return _event_out(db, ev)

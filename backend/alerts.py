@@ -1,4 +1,5 @@
 """Real-time alert engine."""
+import json
 from datetime import datetime, timedelta
 from typing import Optional
 from sqlalchemy.orm import Session
@@ -21,6 +22,7 @@ def create_alert(
     module: str,
     entity_type: Optional[str] = None,
     entity_id: Optional[int] = None,
+    detail: Optional[dict] = None,
 ) -> Alert:
     alert = Alert(
         title=title,
@@ -29,6 +31,7 @@ def create_alert(
         module=module,
         entity_type=entity_type,
         entity_id=entity_id,
+        detail=json.dumps(detail) if detail is not None else None,
     )
     db.add(alert)
     db.commit()

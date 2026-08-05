@@ -13,6 +13,8 @@ import { toast } from 'sonner';
 import { Plus, Trash2, TrendingUp } from 'lucide-react';
 import { formatCurrency } from '@/lib/currency';
 import { RANKS, ROOM_TYPE_LABELS, RATE_CARD_CATEGORY_LABELS, selectClass } from './bookings/shared';
+import GuestDiscountsPanel from './tariffs/GuestDiscountsPanel';
+import MemberDiscountsPanel from './tariffs/MemberDiscountsPanel';
 
 interface TariffRate {
   id: number;
@@ -49,6 +51,13 @@ const roomRateKey = (r: { room_type: string; guest_category: string }) => `${r.r
 export default function Tariffs() {
   const { user } = useAuth();
   const canEditRates = hasPermission(user, 'tariffs', 'edit');
+  // Guest/Member Discounts folded in as tabs here (same pricing-policy
+  // authority, same people who touch it) to declutter the sidebar - each
+  // tab keeps its own original permission gate rather than inheriting
+  // tariffs:view, so who sees what is unchanged from when they were
+  // separate pages.
+  const canGuestDiscounts = hasPermission(user, 'bookings', 'approve');
+  const canMemberDiscounts = canGuestDiscounts && hasPermission(user, 'members', 'edit');
 
   const [rows, setRows] = useState<TariffRate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -144,6 +153,8 @@ export default function Tariffs() {
         <TabsList>
           <TabsTrigger value="rate-card">Rate Card</TabsTrigger>
           <TabsTrigger value="overrides">Custom Overrides</TabsTrigger>
+          {canGuestDiscounts && <TabsTrigger value="guest-discounts">Guest Discounts</TabsTrigger>}
+          {canMemberDiscounts && <TabsTrigger value="member-discounts">Member Discounts</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="rate-card" className="space-y-6">
@@ -368,6 +379,17 @@ export default function Tariffs() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {canGuestDiscounts && (
+          <TabsContent value="guest-discounts">
+            <GuestDiscountsPanel />
+          </TabsContent>
+        )}
+        {canMemberDiscounts && (
+          <TabsContent value="member-discounts">
+            <MemberDiscountsPanel />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );
