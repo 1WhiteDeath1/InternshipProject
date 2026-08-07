@@ -25,3 +25,4 @@ from backend.routers.womens_bloc_rates import router as womens_bloc_rates_router
 from backend.routers.events import router as events_router
 from backend.routers.rate_card import router as rate_card_router
 from backend.routers.directives import router as directives_router
+from backend.routers.expenses import router as expenses_router

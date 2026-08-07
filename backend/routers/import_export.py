@@ -1,6 +1,16 @@
-"""Excel import/export router."""
+"""Excel import/export router.
+
+Permission model: every action here (template download, import, export) is
+gated uniformly on the `import_export` permission - NOT on the target data
+module's own permission (inventory/vendors/rooms/bookings). That used to be
+the case, but "vendors"/"rooms"/"opening_stock" were never real RBAC modules
+anywhere in access.py, so those cards silently 403'd for every role,
+including Manager (the only role that even holds import_export and can see
+this page's nav item at all). Gating on import_export throughout means: if
+you can see this page, every card on it actually works."""
 import io
-from datetime import datetime
+import uuid
+from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -8,7 +18,7 @@ from openpyxl import Workbook, load_workbook
 from backend.database import get_db
 from backend.models import (
     InventoryItem, InventoryCategory, Vendor, Room,
-    Booking, StockBatch,
+    Booking, BookingStatus, StockBatch,
 )
 from backend.auth import get_current_user, check_permission
 from backend.audit import log_audit, AuditAction
@@ -27,8 +37,20 @@ TEMPLATES = {
 }
 
 
+def _parse_date(value) -> date:
+    """openpyxl hands back a datetime/date object for a real Excel date cell,
+    or a plain string if the column was typed as text - accept either."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return datetime.strptime(str(value).strip(), "%Y-%m-%d").date()
+
+
 @router.get("/template/{module}")
-async def get_template(module: str, current_user=Depends(get_current_user)):
+async def get_template(module: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "import_export", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
     if module not in TEMPLATES:
         raise HTTPException(status_code=400, detail="Unknown module")
 
@@ -47,7 +69,7 @@ async def get_template(module: str, current_user=Depends(get_current_user)):
 
 @router.post("/import/{module}")
 async def import_data(module: str, file: UploadFile = File(...), request: Request = None, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    if not check_permission(current_user, module, "create"):
+    if not check_permission(current_user, "import_export", "create"):
         raise HTTPException(status_code=403, detail="Permission denied")
     if module not in TEMPLATES:
         raise HTTPException(status_code=400, detail="Unknown module")
@@ -59,6 +81,7 @@ async def import_data(module: str, file: UploadFile = File(...), request: Reques
     headers = [cell.value for cell in ws[1]]
     errors = []
     imported = 0
+    skipped = 0
 
     for idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
         try:
@@ -70,33 +93,93 @@ async def import_data(module: str, file: UploadFile = File(...), request: Reques
                     db.add(cat)
                     db.commit()
                     db.refresh(cat)
-                if not db.query(InventoryItem).filter(InventoryItem.sku == data["sku"]).first():
-                    item = InventoryItem(sku=data["sku"], name=data["name"], category_id=cat.id, unit=data.get("unit", "pcs"),
-                                        reorder_level=float(data.get("reorder_level", 0) or 0), reorder_quantity=float(data.get("reorder_quantity", 0) or 0))
-                    db.add(item)
-                    imported += 1
+                if db.query(InventoryItem).filter(InventoryItem.sku == data["sku"]).first():
+                    skipped += 1
+                    continue
+                item = InventoryItem(sku=data["sku"], name=data["name"], category_id=cat.id, unit=data.get("unit", "pcs"),
+                                    reorder_level=float(data.get("reorder_level", 0) or 0), reorder_quantity=float(data.get("reorder_quantity", 0) or 0))
+                db.add(item)
+                imported += 1
+
             elif module == "vendors":
-                if not db.query(Vendor).filter(Vendor.name == data["name"]).first():
-                    v = Vendor(**{k: v for k, v in data.items() if v})
-                    db.add(v)
-                    imported += 1
+                if db.query(Vendor).filter(Vendor.name == data["name"]).first():
+                    skipped += 1
+                    continue
+                v = Vendor(**{k: v for k, v in data.items() if v})
+                db.add(v)
+                imported += 1
+
             elif module == "rooms":
-                if not db.query(Room).filter(Room.room_number == data["room_number"]).first():
-                    r = Room(room_number=data["room_number"], room_type=data.get("room_type", "single"), floor=int(data.get("floor", 1)),
-                            capacity=int(data.get("capacity", 2)), base_price=float(data["base_price"]), amenities=data.get("amenities"))
-                    db.add(r)
-                    imported += 1
+                if db.query(Room).filter(Room.room_number == data["room_number"]).first():
+                    skipped += 1
+                    continue
+                r = Room(room_number=data["room_number"], room_type=data.get("room_type", "standard"), floor=int(data.get("floor", 1)),
+                        capacity=int(data.get("capacity", 2)), base_price=float(data["base_price"]), amenities=data.get("amenities"))
+                db.add(r)
+                imported += 1
+
+            elif module == "bookings":
+                room = db.query(Room).filter(Room.room_number == data["room_number"]).first()
+                if not room:
+                    raise ValueError(f"Room {data.get('room_number')} not found")
+                check_in = _parse_date(data["check_in"])
+                check_out = _parse_date(data["check_out"])
+                # Natural-key dedup: same guest, same room, same arrival date
+                # already on file - re-running the same sheet shouldn't
+                # duplicate bookings.
+                if db.query(Booking).filter(Booking.guest_name == data["guest_name"], Booking.room_id == room.id, Booking.check_in == check_in).first():
+                    skipped += 1
+                    continue
+                booking = Booking(
+                    booking_reference=f"TMP-{uuid.uuid4().hex}", guest_name=data["guest_name"],
+                    guest_phone=data.get("guest_phone"), guest_email=data.get("guest_email"),
+                    room_id=room.id, check_in=check_in, check_out=check_out,
+                    adults=int(data.get("adults") or 1), children=int(data.get("children") or 0),
+                    status=BookingStatus.CONFIRMED, processed_by=current_user.id,
+                )
+                db.add(booking)
+                db.commit()
+                db.refresh(booking)
+                # Bulk-imported records land as CONFIRMED, not CHECKED_IN - a
+                # real check-in (attendant assignment, room-readiness gate)
+                # still has to happen through the normal Bookings flow;
+                # importing is for getting historical/paper records into the
+                # system, not for skipping that gate.
+                booking.booking_reference = f"BK-{datetime.utcnow().strftime('%Y%m%d')}-{booking.id:04d}"
+                db.commit()
+                imported += 1
+
+            elif module == "opening_stock":
+                item = db.query(InventoryItem).filter(InventoryItem.sku == data["sku"]).first()
+                if not item:
+                    raise ValueError(f"Inventory item with SKU {data.get('sku')} not found - import Inventory first")
+                if db.query(StockBatch).filter(StockBatch.item_id == item.id, StockBatch.batch_number == data["batch_number"]).first():
+                    skipped += 1
+                    continue
+                batch = StockBatch(
+                    item_id=item.id, batch_number=data["batch_number"], quantity=float(data.get("quantity", 0) or 0),
+                    bin_location=data.get("bin_location"),
+                    expiry_date=_parse_date(data["expiry_date"]) if data.get("expiry_date") else None,
+                    unit_cost=float(data.get("unit_cost", 0) or 0),
+                )
+                db.add(batch)
+                imported += 1
         except Exception as e:
             errors.append(f"Row {idx}: {str(e)}")
 
     db.commit()
-    log_audit(db, current_user.id, current_user.full_name, AuditAction.IMPORT, module, reason=f"Imported {imported} rows", after_state={"imported": imported, "errors": len(errors)})
-    return {"imported": imported, "errors": len(errors), "error_details": errors[:10]}
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.IMPORT, module,
+              reason=f"Imported {imported}, skipped {skipped}, {len(errors)} errors",
+              after_state={"imported": imported, "skipped": skipped, "errors": len(errors)})
+    return {
+        "imported": imported, "skipped": skipped, "errors": len(errors), "error_details": errors[:10],
+        "message": f"Imported {imported} new row(s), skipped {skipped} existing row(s), {len(errors)} error(s)",
+    }
 
 
 @router.get("/export/{module}")
 async def export_data(module: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    if not check_permission(current_user, module, "view"):
+    if not check_permission(current_user, "import_export", "view"):
         raise HTTPException(status_code=403, detail="Permission denied")
     wb = Workbook()
     ws = wb.active
@@ -118,6 +201,16 @@ async def export_data(module: str, db: Session = Depends(get_db), current_user=D
         vendors = db.query(Vendor).filter(Vendor.is_active == True).all()
         for v in vendors:
             ws.append([v.id, v.name, v.contact_person, v.phone, v.email, v.address, v.tax_id])
+    elif module == "rooms":
+        ws.append(["ID", "Room Number", "Type", "Floor", "Capacity", "Base Price", "Amenities", "Status"])
+        rooms = db.query(Room).filter(Room.is_active == True).order_by(Room.room_number).all()
+        for r in rooms:
+            ws.append([r.id, r.room_number, getattr(r.room_type, "value", r.room_type), r.floor, r.capacity, float(r.base_price), r.amenities, getattr(r.status, "value", r.status)])
+    elif module == "opening_stock":
+        ws.append(["ID", "SKU", "Item Name", "Batch Number", "Quantity", "Bin Location", "Expiry Date", "Unit Cost"])
+        batches = db.query(StockBatch).filter(StockBatch.is_active == True).order_by(StockBatch.received_date.desc()).all()
+        for b in batches:
+            ws.append([b.id, b.item.sku if b.item else "", b.item.name if b.item else "", b.batch_number, b.quantity, b.bin_location, b.expiry_date, float(b.unit_cost or 0)])
     elif module == "audit":
         from sqlalchemy import desc
         from backend.models import AuditLog

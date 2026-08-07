@@ -53,9 +53,13 @@ export function RoomOccupantCard({
   reloadCalendar, onChanged,
 }: RoomOccupantCardProps) {
   const { user } = useAuth();
-  // Charge logging is Clerk's domain now, not Booking NCO's - only render the
-  // panel (which reads/writes via the billing module) for whoever can use it.
-  const canLogRoomCharges = hasPermission(user, 'billing', 'view');
+  // Room-side ad-hoc charges (Dhobi/Breakage/Wages of Servants/Heater-AC/
+  // etc.) are owned end-to-end by either Clerk (billing:view) or Booking NCO
+  // (bookings:view, which they already hold for the room/stay itself) - see
+  // add_booking_charge's permission check in billing.py. Mess-side charges
+  // (Extra Messing/Sui Gas) stay off this panel entirely (isMess={false}
+  // below) - those are Kitchen NCO's, logged through kitchen orders instead.
+  const canLogRoomCharges = hasPermission(user, 'billing', 'view') || hasPermission(user, 'bookings', 'view');
   return (
     <>
       {current && (

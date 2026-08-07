@@ -17,13 +17,14 @@ from backend.config import UPLOADS_DIR
 from backend.models import (
     Room, Booking, GuestMovement, RoomStatus, BookingStatus,
     RoomRate, DutyRate, RoomPhoto, Member, MemberStatus, SmsMessage, Guest,
-    Invoice, BookingCharge, Attendant,
+    Invoice, BookingCharge, Attendant, AlertSeverity,
 )
 from backend.services import sms as sms_service
 from backend.schemas import BookingCreate, BookingUpdate
 from backend.auth import get_current_user, check_permission, require_supervisor
 from backend.audit import log_audit, serialize_model, AuditAction
 from backend.logging_config import get_logger
+from backend.alerts import create_alert
 from backend.services.mess_billing_calc import get_setting_float
 from backend.services.room_pricing import (
     compute_booking_price, reprice_for_departure, get_room_rate, get_duty_rate,
@@ -390,9 +391,15 @@ async def availability(
     conflicts = {}
     next_start = {}
     if room_ids:
+        # A CHECKED_IN booking's recorded check_out is only a plan - the
+        # guest may be overstaying past it and hasn't actually left, so its
+        # occupancy is treated as open-ended for conflict purposes (same
+        # status-based reasoning /rooms already uses) rather than trusting
+        # Booking.check_out to have closed the window.
         overlapping = db.query(Booking).filter(
             Booking.room_id.in_(room_ids), Booking.status.in_(ACTIVE_STATUSES),
-            Booking.check_in < check_out, Booking.check_out > check_in,
+            Booking.check_in < check_out,
+            or_(Booking.check_out > check_in, Booking.status == BookingStatus.CHECKED_IN),
         ).order_by(Booking.check_in.asc()).all()
         for b in overlapping:
             conflicts.setdefault(b.room_id, b)
@@ -425,8 +432,11 @@ async def availability(
             "housekeeping_status": r.housekeeping_status or "clean",
             "available": is_available,
             "unavailable_reason": "maintenance" if in_maintenance else (
-                f"Booked {conflict.check_in.strftime('%d %b')}-{conflict.check_out.strftime('%d %b')} "
-                f"({conflict.guest_name}, {conflict.booking_reference})" if conflict else None),
+                (f"Occupied - overstaying past {conflict.check_out.strftime('%d %b')} checkout "
+                 f"({conflict.guest_name}, {conflict.booking_reference})"
+                 if conflict.status == BookingStatus.CHECKED_IN and conflict.check_out <= date.today() else
+                 f"Booked {conflict.check_in.strftime('%d %b')}-{conflict.check_out.strftime('%d %b')} "
+                 f"({conflict.guest_name}, {conflict.booking_reference})") if conflict else None),
             "next_booking_start": next_start.get(r.id),
             "pricing": pricing,
         })
@@ -1535,6 +1545,11 @@ async def get_occupancy(db: Session = Depends(get_db), current_user=Depends(get_
         for r in rooms if (r.housekeeping_status or "clean") != "clean"
     ]
 
+    from backend.models import User
+    finalizer_ids = {b.kitchen_finalized_by for b in departure_bookings if b.kitchen_finalized_by} | \
+        {b.booking_finalized_by for b in departure_bookings if b.booking_finalized_by}
+    names_by_id = {u.id: u.full_name for u in db.query(User).filter(User.id.in_(finalizer_ids)).all()} if finalizer_ids else {}
+
     return {
         "total_rooms": total_rooms, "occupied": counts["occupied"], "reserved": counts["reserved"],
         "vacant": counts["vacant"], "maintenance": counts["maintenance"],
@@ -1548,6 +1563,41 @@ async def get_occupancy(db: Session = Depends(get_db), current_user=Depends(get_
         "departures": [{"booking_id": b.id, "guest_name": b.guest_name, "room_id": b.room_id,
                          "room_number": room_number_by_id.get(b.room_id), "booking_reference": b.booking_reference,
                          "overdue": b.check_out < today,
-                         "days_overdue": (today - b.check_out).days} for b in departure_bookings],
+                         "days_overdue": (today - b.check_out).days,
+                         "kitchen_finalized_at": b.kitchen_finalized_at, "kitchen_finalized_by_name": names_by_id.get(b.kitchen_finalized_by),
+                         "booking_finalized_at": b.booking_finalized_at, "booking_finalized_by_name": names_by_id.get(b.booking_finalized_by),
+                         } for b in departure_bookings],
         "housekeeping_queue": housekeeping_queue,
     }
+
+
+@router.post("/{booking_id}/finalize")
+async def finalize_booking_checkout_readiness(booking_id: int, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Booking NCO's checkout-readiness sign-off - "nothing more to add from
+    the room/attendant side, guest is ready for the Clerk to check out."
+    Mirrors Kitchen NCO's own finalize (backend/routers/kitchen.py's
+    finalize_kitchen_departure) - see Booking.kitchen_finalized_at's model
+    docstring. Neither stamp blocks or triggers checkout."""
+    if not check_permission(current_user, "bookings", "edit"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.status.value != "checked_in":
+        raise HTTPException(status_code=400, detail="Only a checked-in guest can be finalized for checkout")
+
+    before = serialize_model(booking)
+    booking.booking_finalized_at = datetime.utcnow()
+    booking.booking_finalized_by = current_user.id
+    db.commit()
+    db.refresh(booking)
+
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "bookings", booking.id,
+              before_state=before, after_state=serialize_model(booking), ip_address=request.client.host)
+    create_alert(
+        db, f"Room charges finalized: {booking.guest_name}",
+        f"{current_user.full_name} confirmed {booking.guest_name}'s (Room {booking.room.room_number if booking.room else '-'}) "
+        f"room/attendant charges are final - ready to check out.",
+        AlertSeverity.LOW, "bookings", "booking", booking.id,
+    )
+    return {"booking_finalized_at": booking.booking_finalized_at, "booking_finalized_by_name": current_user.full_name}

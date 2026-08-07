@@ -100,7 +100,7 @@ export default function MemberDiscountsPanel() {
                         <Input
                           type="number" min={0} max={100} step="any" className="w-20"
                           value={d !== undefined ? d : String(m.custom_discount_rate)}
-                          onChange={e => setDraft(prev => ({ ...prev, [m.id]: e.target.value }))}
+                          onChange={e => setDraft(prev => ({ ...prev, [m.id]: e.target.value.replace(/^0+(?=\d)/, '') }))}
                           onKeyDown={e => { if (e.key === 'Enter') saveDiscount(m); }}
                         />
                         {dirty && (

@@ -76,6 +76,18 @@ class Booking(Base):
     actual_check_out = Column(DateTime)
     cancel_reason = Column(Text)
     rate_breakdown = Column(Text)  # JSON snapshot of the itemized nightly rate applied
+    # --- Checkout readiness sign-off (two independent one-way stamps) ---
+    # Kitchen NCO confirming this guest's mess/gas charges are final (see
+    # backend/routers/kitchen.py's departures endpoints), and Booking NCO
+    # confirming the room/attendant side has nothing more to add (see
+    # add_booking_charge's bookings:edit path) - both surfaced to the Clerk
+    # at checkout (CheckoutSheet) so they know who's already signed off
+    # before generating the actual invoice. Neither stamp blocks or triggers
+    # checkout - purely informational.
+    kitchen_finalized_at = Column(DateTime, nullable=True)
+    kitchen_finalized_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    booking_finalized_at = Column(DateTime, nullable=True)
+    booking_finalized_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -97,6 +109,10 @@ class BookingCharge(Base):
     head = Column(String(100), nullable=False)
     amount = Column(Numeric(10, 2), nullable=False)
     is_mess_charge = Column(Boolean, default=False)
+    # Mandatory at the API layer (BookingChargeCreate) for every new charge -
+    # nullable here only so the additive migration doesn't have to invent a
+    # reason for rows that predate this requirement.
+    reason = Column(String(255), nullable=True)
     invoiced_at = Column(DateTime)  # set when swept into an invoice at checkout
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)

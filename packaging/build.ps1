@@ -15,7 +15,11 @@ $Venv = Join-Path $RepoRoot "backend\venv\Scripts"
 $BuildDir = Join-Path $PSScriptRoot "_build"
 $Iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 
-Write-Host "==> [1/3] Building frontend (npm run build)" -ForegroundColor Cyan
+Write-Host "==> [1/4] Verifying seed DB demo logins" -ForegroundColor Cyan
+& "$Venv\python.exe" (Join-Path $PSScriptRoot "verify_seed_db.py")
+if ($LASTEXITCODE -ne 0) { throw "Seed DB verification failed - see above. Fix packaging\seed_data\hotel_mess.db before building." }
+
+Write-Host "==> [2/4] Building frontend (npm run build)" -ForegroundColor Cyan
 Push-Location $RepoRoot
 try {
     npm run build
@@ -24,14 +28,14 @@ try {
     Pop-Location
 }
 
-Write-Host "==> [2/3] Building EME-MESS.exe with PyInstaller" -ForegroundColor Cyan
+Write-Host "==> [3/4] Building EME-MESS.exe with PyInstaller" -ForegroundColor Cyan
 & "$Venv\python.exe" -m PyInstaller --noconfirm `
     --distpath "$BuildDir\dist" `
     --workpath "$BuildDir\work" `
     (Join-Path $PSScriptRoot "EME-MESS.spec")
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed" }
 
-Write-Host "==> [3/3] Compiling installer with Inno Setup" -ForegroundColor Cyan
+Write-Host "==> [4/4] Compiling installer with Inno Setup" -ForegroundColor Cyan
 if (-not (Test-Path $Iscc)) { throw "Inno Setup Compiler not found at $Iscc" }
 & $Iscc (Join-Path $PSScriptRoot "installer.iss")
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup compile failed" }

@@ -169,6 +169,60 @@ def check_stock_take_due(db: Session, days: int = 7) -> int:
     return count
 
 
+def _overdue_severity(days: int) -> AlertSeverity:
+    # Escalation thresholds are this app's own default (not specified
+    # upstream) - adjust here if the mess wants different cutoffs.
+    if days >= 7:
+        return AlertSeverity.CRITICAL
+    if days >= 3:
+        return AlertSeverity.HIGH
+    return AlertSeverity.WARNING
+
+
+def check_overdue_checkout(db: Session) -> int:
+    """A guest still physically checked in past their booked check_out date -
+    distinct from check_unbilled_stays (billing-side, fires once a guest has
+    actually left with no invoice). Severity escalates the longer they stay
+    past checkout, and re-escalates an existing open alert in place instead
+    of leaving it stuck at whatever severity it started at."""
+    today = datetime.utcnow().date()
+    bookings = db.query(Booking).filter(
+        Booking.status == "checked_in", Booking.check_out < today,
+    ).all()
+    count = 0
+    for booking in bookings:
+        days_overdue = (today - booking.check_out).days
+        severity = _overdue_severity(days_overdue)
+        message = f"{booking.guest_name} (Room {booking.room.room_number if booking.room else '?'}) is {days_overdue} day(s) past the booked check-out date of {booking.check_out}."
+        detail = {
+            "days_overdue": days_overdue, "room_number": booking.room.room_number if booking.room else None,
+            "guest_name": booking.guest_name, "expected_checkout": booking.check_out.isoformat(),
+        }
+        existing = db.query(Alert).filter(
+            Alert.entity_type == "booking", Alert.entity_id == booking.id,
+            Alert.status.in_([AlertStatus.NEW, AlertStatus.ACKNOWLEDGED]),
+            Alert.module == "bookings", Alert.title.contains("Overdue Checkout"),
+        ).first()
+        if existing:
+            if existing.severity != severity:
+                existing.severity = severity
+                existing.message = message
+                existing.detail = json.dumps(detail)
+                # Escalating (or de-escalating on an early recheck) should
+                # surface again even if staff already acknowledged it at the
+                # old severity - a WARNING someone dismissed shouldn't stay
+                # silently acknowledged once it's become CRITICAL.
+                existing.status = AlertStatus.NEW
+                db.commit()
+            continue
+        create_alert(
+            db, f"Overdue Checkout: {booking.guest_name}", message, severity,
+            "bookings", "booking", booking.id, detail,
+        )
+        count += 1
+    return count
+
+
 def run_all_checks(db: Session) -> dict:
     """Run all alert checks and return summary."""
     return {
@@ -176,4 +230,5 @@ def run_all_checks(db: Session) -> dict:
         "expiring_items": check_expiring_items(db),
         "unbilled_stays": check_unbilled_stays(db),
         "stock_take_due": check_stock_take_due(db),
+        "overdue_checkout": check_overdue_checkout(db),
     }

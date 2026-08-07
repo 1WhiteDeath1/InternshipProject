@@ -51,4 +51,43 @@ def _migrate_members_dining_status(engine):
             logger.info(f"migration: repaired {result.rowcount + result2.rowcount} members.dining_status row(s) with lowercase enum values")
 
 
-MIGRATIONS = [_migrate_members_womens_bloc, _migrate_members_dining_status]
+def _migrate_members_hra_fields(engine):
+    # Member becomes the authoritative source for HRA classification (was
+    # previously derived entirely from an active HRA Booking - see
+    # routers/members.py's current_room_number logic, which is unaffected by
+    # this and still booking-derived).
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(members)")).fetchall()
+        if not cols:
+            return
+        existing = {c[1] for c in cols}
+        if "is_hra" not in existing:
+            conn.execute(text("ALTER TABLE members ADD COLUMN is_hra BOOLEAN DEFAULT 0"))
+            conn.commit()
+            logger.info("migration: added members.is_hra")
+        if "hra_stay_type" not in existing:
+            conn.execute(text("ALTER TABLE members ADD COLUMN hra_stay_type VARCHAR(20)"))
+            conn.commit()
+            logger.info("migration: added members.hra_stay_type")
+        if "dorm_location" not in existing:
+            conn.execute(text("ALTER TABLE members ADD COLUMN dorm_location VARCHAR(255)"))
+            conn.commit()
+            logger.info("migration: added members.dorm_location")
+
+        # Backfill: any member with a currently-active HRA booking predates
+        # this column and was never flagged - without this they'd vanish
+        # from the Booking NCO's now-is_hra-filtered Members view despite
+        # actually occupying an HRA room.
+        result = conn.execute(text(
+            "UPDATE members SET is_hra = 1, hra_stay_type = 'in_mess' "
+            "WHERE is_hra = 0 AND id IN ("
+            "  SELECT DISTINCT member_id FROM bookings "
+            "  WHERE member_id IS NOT NULL AND nature_of_duty = 'hra' AND status = 'checked_in'"
+            ")"
+        ))
+        if result.rowcount:
+            conn.commit()
+            logger.info(f"migration: backfilled is_hra=1 for {result.rowcount} member(s) with an active HRA booking")
+
+
+MIGRATIONS = [_migrate_members_womens_bloc, _migrate_members_dining_status, _migrate_members_hra_fields]

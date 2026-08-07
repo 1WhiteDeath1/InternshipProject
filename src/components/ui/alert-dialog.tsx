@@ -34,7 +34,9 @@ function AlertDialogOverlay({
     <AlertDialogPrimitive.Overlay
       data-slot="alert-dialog-overlay"
       className={cn(
-        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/50",
+        // See AlertDialogContent's data-[state=closed]:hidden comment below -
+        // same stuck-Presence issue applies to the overlay.
+        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:hidden fixed inset-0 z-50 bg-black/50",
         className
       )}
       {...props}
@@ -52,7 +54,17 @@ function AlertDialogContent({
       <AlertDialogPrimitive.Content
         data-slot="alert-dialog-content"
         className={cn(
-          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-6 shadow-lg duration-200 sm:max-w-lg",
+          // data-[state=closed]:hidden is a deliberate belt-and-braces
+          // addition, not the shadcn default: Radix's Presence-driven
+          // unmount (which normally waits for the animate-out/fade-out-0/
+          // zoom-out-95 exit animation to finish before removing the node)
+          // can get stuck with the node stamped data-state="closed" but
+          // still visually displayed - observed with React 19 + this Radix
+          // AlertDialog version. Forcing display:none the instant state
+          // flips to closed trades the exit animation for a guarantee the
+          // dialog (and its full-screen overlay) never sits stuck blocking
+          // clicks after a confirm/cancel action.
+          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:hidden fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-6 shadow-lg duration-200 sm:max-w-lg",
           className
         )}
         {...props}

@@ -18,7 +18,9 @@ import ClerkLiveGuests from '@/pages/clerk-desk/LiveGuests';
 import ClerkCheckout from '@/pages/clerk-desk/Checkout';
 import ClerkMessOnly from '@/pages/clerk-desk/MessOnly';
 import ClerkMembers from '@/pages/clerk-desk/Members';
+import ClerkEvents from '@/pages/clerk-desk/Events';
 import BillingReports from '@/pages/BillingReports';
+import Expenses from '@/pages/Expenses';
 import Guests from '@/pages/Guests';
 import Attendants from '@/pages/Attendants';
 import Tariffs from '@/pages/Tariffs';
@@ -60,8 +62,10 @@ function App() {
                   <Route path="checkout" element={<ClerkCheckout />} />
                   <Route path="mess-only" element={<ClerkMessOnly />} />
                   <Route path="members" element={<ClerkMembers />} />
+                  <Route path="events" element={<ClerkEvents />} />
                 </Route>
                 <Route path="/billing-reports" element={<RequirePermission item={navItemByPath('/billing-reports')}><BillingReports /></RequirePermission>} />
+                <Route path="/expenses" element={<RequirePermission item={navItemByPath('/expenses')}><Expenses /></RequirePermission>} />
                 <Route path="/guests" element={<RequirePermission item={navItemByPath('/guests')}><Guests /></RequirePermission>} />
                 <Route path="/attendants" element={<RequirePermission item={navItemByPath('/attendants')}><Attendants /></RequirePermission>} />
                 <Route path="/tariffs" element={<RequirePermission item={navItemByPath('/tariffs')}><Tariffs /></RequirePermission>} />

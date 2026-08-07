@@ -25,6 +25,16 @@ class Member(Base):
     # Kitchen NCO edits this per member (e.g. an HRA resident who isn't
     # actually eating in the mess). Defaults to DINING for every new member.
     dining_status = Column(Enum(DiningStatus), default=DiningStatus.DINING)
+    # Authoritative HRA classification - NOT derived from Booking (unlike
+    # current_room_number, which still is). A member can be is_hra=True with
+    # no active Booking yet (pending room assignment) or in
+    # hra_stay_type='out_of_mess', which never has a Booking at all.
+    is_hra = Column(Boolean, default=False)
+    hra_stay_type = Column(String(20), nullable=True)  # in_mess | out_of_mess, set only when is_hra
+    # Free-text external housing details - only meaningful when
+    # hra_stay_type='out_of_mess'; an in-mess resident's room comes from
+    # their active HRA Booking instead, so this stays null for them.
+    dorm_location = Column(String(255), nullable=True)
     custom_discount_rate = Column(Numeric(4, 2), default=0.00)  # per-member override, 0-100
     phone = Column(String(50))
     email = Column(String(255))

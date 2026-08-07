@@ -89,10 +89,26 @@ class KitchenOrderOut(BaseModel):
     sla_minutes: Optional[int] = None
     due_at: Optional[datetime] = None
     cooking_started_at: Optional[datetime] = None
+    gas_amount: Optional[float] = None
+    price_override: Optional[float] = None
 
 
 class KitchenOrderPrepareRequest(BaseModel):
     actual_portions: Optional[int] = Field(None, gt=0)
+
+
+class DishPricingSet(BaseModel):
+    """Sets the food price override and/or gas amount for one routine
+    (non-ala-carte) date+meal+dish, finding or creating the matching batch
+    KitchenOrder - see KitchenOrder.gas_amount/price_override's model
+    docstrings. Either field left null reverts that side to its automatic
+    default (menu price / no gas) rather than leaving it unchanged - the
+    dialog that calls this always sends both current values together."""
+    date: date
+    meal_type: str
+    menu_item_id: int
+    price_override: Optional[float] = Field(None, ge=0)
+    gas_amount: Optional[float] = Field(None, ge=0)
 
 
 class GasChargeRateOut(BaseModel):
@@ -118,11 +134,20 @@ class MessChargeOverviewRow(BaseModel):
     name: str
     sub_label: Optional[str] = None  # room number for a guest, rank/unit for a member
     unbilled_mess_total: float
+    unbilled_gas_total: float = 0
+    # Guest rows only - checking-out context, see Booking.kitchen_finalized_at's model docstring.
+    is_departing: bool = False
+    kitchen_finalized_by_name: Optional[str] = None
+    booking_finalized_by_name: Optional[str] = None
 
 
 class OrderHistoryRow(BaseModel):
     date: date
     meal_type: str
+    menu_item_id: Optional[int] = None
     item_name: str
     price: float
+    status: str
+    price_is_override: bool = False
+    gas_amount: Optional[float] = None
     status: str

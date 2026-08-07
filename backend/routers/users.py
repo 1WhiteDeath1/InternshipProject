@@ -130,6 +130,38 @@ async def update_user(
     )
 
 
+@router.delete("/{user_id}")
+async def delete_user(
+    user_id: int,
+    reason: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(PermissionChecker("users", "edit")),
+):
+    """Soft-delete: deactivates the account rather than removing the row.
+    Dozens of tables (audit log, bookings, invoices, kitchen orders...) carry
+    a users.id FK back to whoever performed the action - a hard delete would
+    either violate those FKs or silently orphan the audit trail. Deactivating
+    (same UserStatus.INACTIVE the status dropdown already offers) blocks
+    login via get_current_user's active-status check while keeping history
+    intact, mirroring how Members are "transferred"/"left" rather than
+    physically removed."""
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    before = serialize_model(user)
+    user.status = UserStatus.INACTIVE
+    db.commit()
+
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.SOFT_DELETE, "users", user.id, before_state=before, after_state=serialize_model(user), reason=reason, ip_address=request.client.host)
+    logger.info(f"User deactivated: {user.username} by {current_user.username}")
+
+    return {"message": "User deactivated"}
+
+
 @router.post("/{user_id}/unlock")
 async def unlock_user(
     user_id: int,

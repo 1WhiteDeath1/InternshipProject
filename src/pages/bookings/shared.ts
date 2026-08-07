@@ -144,6 +144,12 @@ export interface ArrivalDeparture {
   // departures only: guest's scheduled check-out has already passed
   overdue?: boolean;
   days_overdue?: number;
+  // departures only: checkout-readiness sign-off, informational only - see
+  // Booking.kitchen_finalized_at's backend model docstring.
+  kitchen_finalized_at?: string | null;
+  kitchen_finalized_by_name?: string | null;
+  booking_finalized_at?: string | null;
+  booking_finalized_by_name?: string | null;
 }
 
 export interface HousekeepingQueueItem {
@@ -296,11 +302,28 @@ export const RANKS = ['Lt', 'Capt', 'Maj', 'Lt Col', 'Col', 'Brig', 'Maj Gen', '
 // heads - they're computed automatically from actual orders at checkout
 // (see backend/services/mess_charge_calc.py), so MESS_CHARGE_HEADS only
 // ever offers "Custom..." for a genuinely separate ad-hoc mess charge.
-export const ROOM_CHARGE_HEADS = ['Dhobi', 'Allied Charges', 'Breakage', 'Dental Kit'];
+// ROOM_CHARGE_HEADS mirrors backend/services/master_bill.py's
+// MASTER_BILL_PRESET_HEADS (every fixed-vocabulary row that isn't
+// auto-computed) so a charge logged under one of these labels always merges
+// into its correct row 2-31 on the printed bill instead of falling through
+// to an appended one-off row. This is the full "everything except Extra
+// Messing/Sui Gas" bucket - both Clerk and Booking NCO log against it (see
+// add_booking_charge's permission check). 'Allied Charges'/'Dental Kit' at
+// the end aren't part of the paper form's vocabulary but are kept for
+// backward compatibility with charges already logged under them.
+export const ROOM_CHARGE_HEADS = [
+  'Dhobi', 'Breakage', 'Wages of Servants', 'Hot Water / Heater / AC Charges',
+  'Generator Charges', 'Sui Gas Bill', 'Cable Fee', 'Normal Electric Charges',
+  'Furniture', 'Sweeper', 'MOQ Charges', 'Table Money', 'Bar', 'Mess Subscription',
+  'Masjid', 'Tea Bar EME Dte', 'Library Subs / News Paper', 'Garden', 'Sport',
+  'Saving', 'Band Fund EME Dte Offrs', 'Trophy Fund EME Dte Offrs',
+  'ACL Subs EME Dte Offrs', 'ACWF EME Dte Offrs', 'Cen Compulsory Gp Insurance',
+  'Ladies Club', 'Allied Charges', 'Dental Kit',
+];
 export const MESS_CHARGE_HEADS: string[] = [];
 export const CUSTOM_CHARGE_HEAD = '__custom__';
 
-export interface BookingCharge { id: number; head: string; amount: number; is_mess_charge: boolean; invoiced: boolean; }
+export interface BookingCharge { id: number; head: string; amount: number; is_mess_charge: boolean; reason?: string | null; invoiced: boolean; }
 
 export const todayISO = () => new Date().toLocaleDateString('en-CA');
 export const addDays = (iso: string, n: number) => {

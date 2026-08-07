@@ -267,6 +267,33 @@ async def delete_menu_item(item_id: int, db: Session = Depends(get_db), current_
     return {"message": "Menu item removed"}
 
 
+@router.post("/{event_id}/billing-items")
+async def add_event_billing_item(event_id: int, data: EventMenuItemCreate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Clerk-side equivalent of add_menu_item, for the Clerk Desk Events tab's
+    Generate Bill step - gated on clerk_desk:create (not events:edit) so
+    Clerk can price a completed event's bill without gaining the ability to
+    touch its hall/requirements/menu at any other stage. Only usable once the
+    event is COMPLETED and not yet invoiced, matching generate-invoice's own
+    preconditions - this exists purely to feed that step."""
+    if not check_permission(current_user, "clerk_desk", "create"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    ev = db.query(Event).filter(Event.id == event_id).first()
+    if not ev:
+        raise HTTPException(status_code=404, detail="Event not found")
+    if ev.status != EventStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail="Only a completed event's bill can be adjusted here")
+    if db.query(Invoice).filter(Invoice.event_id == ev.id, Invoice.status != InvoiceStatus.VOID).first():
+        raise HTTPException(status_code=400, detail="This event has already been invoiced")
+    mi = EventMenuItem(event_id=ev.id, dish_name=data.dish_name.strip(),
+                        estimated_price=data.estimated_price, quantity=data.quantity)
+    db.add(mi)
+    db.commit()
+    db.refresh(mi)
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "event_menu_items", mi.id,
+              after_state=serialize_model(mi), ip_address=request.client.host)
+    return {"id": mi.id, "dish_name": mi.dish_name, "estimated_price": float(mi.estimated_price), "quantity": mi.quantity}
+
+
 @router.post("/{event_id}/generate-invoice")
 async def generate_event_invoice(event_id: int, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """Same gate as every other invoice-creating action (instant-checkout,

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import api from '@/lib/api';
 import { toast } from 'sonner';
-import { LayoutGrid, DoorOpen, LogOut, UtensilsCrossed, IdCard } from 'lucide-react';
+import { LayoutGrid, DoorOpen, LogOut, UtensilsCrossed, IdCard, CalendarDays } from 'lucide-react';
 import type { ClerkDeskContext, DeskFeed, MemberBill } from './context';
 
 // The Clerk Desk is split into purpose-built pages by bill type. This layout
@@ -19,6 +19,7 @@ const TABS = [
   { to: '/clerk-desk/checkout', label: 'Checkout', icon: LogOut },
   { to: '/clerk-desk/mess-only', label: 'Mess-Only', icon: UtensilsCrossed },
   { to: '/clerk-desk/members', label: 'Members', icon: IdCard },
+  { to: '/clerk-desk/events', label: 'Events', icon: CalendarDays },
 ];
 
 export default function ClerkDeskLayout() {

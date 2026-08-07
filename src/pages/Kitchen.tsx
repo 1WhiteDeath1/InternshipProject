@@ -13,11 +13,10 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { ChefHat, Plus, Flame, XCircle, Factory, AlertTriangle, UtensilsCrossed, Receipt, ClipboardList } from 'lucide-react';
+import { ChefHat, Plus, Flame, XCircle, Factory, AlertTriangle, UtensilsCrossed, Receipt, ClipboardList, Fuel, LogOut, CheckCircle2, Circle } from 'lucide-react';
 import { formatCurrency } from '@/lib/currency';
 import { defaultMealForNow } from '@/lib/mealDefaults';
-import { OrderHistoryDialog } from '@/components/OrderHistoryDialog';
-import { MealServiceTab } from '@/pages/kitchen/MealServiceTab';
+import { DishBreakdownDialog } from '@/components/DishBreakdownDialog';
 
 interface MenuItem { id: number; name: string; meal_type: string; day_of_week: string | null; price: number; is_active: boolean; }
 interface MenuEditRequest {
@@ -29,8 +28,11 @@ interface MenuEditRequest {
 interface KitchenOrder {
   id: number; menu_item_id: number; menu_item_name: string | null; quantity_ordered: number;
   actual_portions: number | null; status: string; notes: string | null; created_at: string;
+  meal_date: string | null; meal_type: string | null; source: string | null;
   is_ala_carte: boolean; consumer_type: string | null; member_id: number | null; booking_id: number | null;
   consumer_name: string | null; sla_minutes: number | null; due_at: string | null; cooking_started_at: string | null;
+  gas_amount: number | null;
+  price_override: number | null;
 }
 interface SuggestedOrder { menu_item_id: number; menu_item_name: string | null; suggested_quantity: number; }
 interface MemberOption { id: number; full_name: string; service_number: string; }
@@ -39,7 +41,15 @@ interface LateOrder { id: number; menu_item_name: string | null; consumer_name: 
 interface GasRate { percentage: number; updated_at: string | null; }
 interface MessChargeOverviewRow {
   consumer_type: 'member' | 'guest'; consumer_id: number; name: string;
-  sub_label: string | null; unbilled_mess_total: number;
+  sub_label: string | null; unbilled_mess_total: number; unbilled_gas_total: number;
+  is_departing: boolean; kitchen_finalized_by_name: string | null; booking_finalized_by_name: string | null;
+}
+interface Departure {
+  booking_id: number; guest_name: string; room_number: string | null;
+  overdue: boolean; days_overdue: number;
+  unbilled_mess_total: number; unbilled_gas_total: number;
+  kitchen_finalized_at: string | null; kitchen_finalized_by_name: string | null;
+  booking_finalized_at: string | null; booking_finalized_by_name: string | null;
 }
 
 const MEAL_TYPES = ['breakfast', 'lunch', 'hitea', 'dinner'];
@@ -55,6 +65,7 @@ export default function Kitchen() {
   const canEditRates = hasPermission(user, 'mess_rates', 'edit');
 
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [menuMealFilter, setMenuMealFilter] = useState('all');
   const [myRequests, setMyRequests] = useState<MenuEditRequest[]>([]);
   const [orders, setOrders] = useState<KitchenOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,10 +94,18 @@ export default function Kitchen() {
   const [gasRate, setGasRate] = useState<GasRate>({ percentage: 0, updated_at: null });
   const [gasRateInput, setGasRateInput] = useState('');
 
+  const [pricingDialogOrder, setPricingDialogOrder] = useState<KitchenOrder | null>(null);
+  const [priceInput, setPriceInput] = useState('');
+  const [gasInput, setGasInput] = useState('');
+  const [savingPricing, setSavingPricing] = useState(false);
+
   const [overviewRows, setOverviewRows] = useState<MessChargeOverviewRow[]>([]);
   const [overviewFilter, setOverviewFilter] = useState<'all' | 'member' | 'guest'>('all');
   const [overviewLoading, setOverviewLoading] = useState(true);
-  const [historyTarget, setHistoryTarget] = useState<MessChargeOverviewRow | null>(null);
+  const [breakdownTarget, setBreakdownTarget] = useState<MessChargeOverviewRow | null>(null);
+
+  const [departures, setDepartures] = useState<Departure[]>([]);
+  const [departuresLoading, setDeparturesLoading] = useState(true);
 
   const fetchMenu = async () => {
     try { const res = await api.get('/kitchen/menu'); setMenuItems(res.data); }
@@ -143,10 +162,22 @@ export default function Kitchen() {
     finally { setOverviewLoading(false); }
   };
 
+  const fetchDepartures = async () => {
+    setDeparturesLoading(true);
+    try {
+      // Explicit no-cache: live checkout-readiness data, same reasoning as
+      // Attendance.tsx's identical header on its own frequently-changing GETs.
+      const res = await api.get('/kitchen/departures', { headers: { 'Cache-Control': 'no-cache' } });
+      setDepartures(res.data);
+    } catch { /* permission-gated for some roles, fine to silently show nothing */ }
+    finally { setDeparturesLoading(false); }
+  };
+
   useEffect(() => {
     queueMicrotask(() => {
       setLoading(true);
       Promise.all([fetchMenu(), fetchOrders(), fetchMembers(), fetchBookings(), fetchLateSummary(), fetchMyRequests(), fetchGasRate()]).finally(() => setLoading(false));
+      fetchDepartures();
     });
   }, []);
 
@@ -252,20 +283,21 @@ export default function Kitchen() {
     setAlaCarteDialogOpen(true);
   };
 
-  // Meal Service tab's "Special Order" button - kind is "member"|"booking"
-  // from the omnibar lookup, the a la carte form uses "member"|"guest".
-  const openSpecialOrderFor = (kind: 'member' | 'booking', id: number) => {
-    openAlaCarteDialog({ consumer_kind: kind === 'member' ? 'member' : 'guest', consumer_id: id });
-  };
-
-  // The global "New A La Carte Order" shortcut (Layout.tsx) deep-links here
-  // with navigation state - consume it once, then clear the state so a
-  // back-navigation or remount doesn't reopen the dialog. The dialog is a
-  // portal overlay so it opens fine regardless of which tab is active.
+  // The Attendance page's per-row "Special Order" button deep-links here
+  // with navigation state (kind is "member"|"booking" from the attendance
+  // matrix, the a la carte form uses "member"|"guest") - the global "New A
+  // La Carte Order" shortcut (Layout.tsx) does the same without a preset
+  // consumer. Consume the state once, then clear it so a back-navigation or
+  // remount doesn't reopen the dialog. The dialog is a portal overlay so it
+  // opens fine regardless of which tab is active.
   useEffect(() => { queueMicrotask(() => {
-    const state = location.state as { openAlaCarte?: boolean } | null;
+    const state = location.state as { openAlaCarte?: boolean; presetConsumerKind?: 'member' | 'booking'; presetConsumerId?: number } | null;
     if (state?.openAlaCarte) {
-      openAlaCarteDialog();
+      if (state.presetConsumerKind && state.presetConsumerId) {
+        openAlaCarteDialog({ consumer_kind: state.presetConsumerKind === 'member' ? 'member' : 'guest', consumer_id: state.presetConsumerId });
+      } else {
+        openAlaCarteDialog();
+      }
       navigate(location.pathname, { replace: true, state: null });
     }
   }); // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -305,6 +337,37 @@ export default function Kitchen() {
       toast.success('Gas charge percentage updated');
       fetchGasRate();
     } catch (err) { toast.error(getErrorMessage(err, 'Failed to update rate')); }
+  };
+
+  const openPricingDialog = (order: KitchenOrder) => {
+    setPricingDialogOrder(order);
+    setPriceInput(order.price_override !== null ? String(order.price_override) : '');
+    setGasInput(order.gas_amount !== null ? String(order.gas_amount) : '');
+  };
+
+  const handleSavePricing = async () => {
+    if (!pricingDialogOrder || !pricingDialogOrder.meal_date || !pricingDialogOrder.meal_type) return;
+    setSavingPricing(true);
+    try {
+      await api.put('/kitchen/dish-pricing', {
+        date: pricingDialogOrder.meal_date, meal_type: pricingDialogOrder.meal_type, menu_item_id: pricingDialogOrder.menu_item_id,
+        price_override: priceInput.trim() === '' ? null : Number(priceInput),
+        gas_amount: gasInput.trim() === '' ? null : Number(gasInput),
+      });
+      toast.success(`Pricing for ${pricingDialogOrder.menu_item_name || 'this dish'} updated`);
+      setPricingDialogOrder(null);
+      fetchOrders();
+      fetchOverview();
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to update pricing')); }
+    finally { setSavingPricing(false); }
+  };
+
+  const handleFinalizeDeparture = async (bookingId: number) => {
+    try {
+      await api.post(`/kitchen/departures/${bookingId}/finalize`);
+      toast.success('Marked mess/gas charges final — Clerk notified');
+      fetchDepartures();
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to finalize')); }
   };
 
   const countdownLabel = (dueAt: string | null): { label: string; overdue: boolean } => {
@@ -352,17 +415,13 @@ export default function Kitchen() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><ChefHat size={24} /> Kitchen</h1>
 
-      <Tabs defaultValue="service">
+      <Tabs defaultValue="production">
         <TabsList className="grid grid-cols-4 max-w-2xl">
-          <TabsTrigger value="service">Meal Service</TabsTrigger>
           <TabsTrigger value="production">Production</TabsTrigger>
           <TabsTrigger value="charges">Mess Charges Overview</TabsTrigger>
+          <TabsTrigger value="departures">Departures</TabsTrigger>
           <TabsTrigger value="menu">Menu</TabsTrigger>
         </TabsList>
-
-        <TabsContent value="service" className="space-y-4">
-          <MealServiceTab onSpecialOrder={openSpecialOrderFor} />
-        </TabsContent>
 
         <TabsContent value="production" className="space-y-4">
           {/* Plan the meal: what's booked + turn it into orders */}
@@ -402,15 +461,31 @@ export default function Kitchen() {
                       <TableCell>{o.quantity_ordered}</TableCell>
                       <TableCell>{orderStatusBadge(o.status)}</TableCell>
                       <TableCell>
-                        {o.status === 'pending' && (
-                          <div className="flex gap-1">
-                            <Button size="sm" onClick={() => handleCook(o.id)} className="bg-orange-600 hover:bg-orange-700"><Flame size={14} className="mr-1" /> Mark Cooked</Button>
-                            <Button size="sm" variant="ghost" onClick={() => handleCancelOrder(o.id)} title="Cancel"><XCircle size={16} className="text-red-500" /></Button>
-                          </div>
-                        )}
-                        {o.status === 'prepared' && (
-                          <Button size="sm" onClick={() => handleFinishPrepared(o.id)} className="bg-orange-600 hover:bg-orange-700"><Flame size={14} className="mr-1" /> Finish</Button>
-                        )}
+                        <div className="flex items-center gap-1">
+                          {o.status === 'pending' && (
+                            <>
+                              <Button size="sm" onClick={() => handleCook(o.id)} className="bg-orange-600 hover:bg-orange-700"><Flame size={14} className="mr-1" /> Mark Cooked</Button>
+                              <Button size="sm" variant="ghost" onClick={() => handleCancelOrder(o.id)} title="Cancel"><XCircle size={16} className="text-red-500" /></Button>
+                            </>
+                          )}
+                          {o.status === 'prepared' && (
+                            <Button size="sm" onClick={() => handleFinishPrepared(o.id)} className="bg-orange-600 hover:bg-orange-700"><Flame size={14} className="mr-1" /> Finish</Button>
+                          )}
+                          {o.meal_date && o.meal_type && o.status !== 'cancelled' && (
+                            <Button
+                              size="sm" variant="ghost" onClick={() => openPricingDialog(o)}
+                              title={(() => {
+                                const parts: string[] = [];
+                                if (o.price_override !== null) parts.push(`Food: ${formatCurrency(o.price_override)}`);
+                                if (o.gas_amount !== null) parts.push(`Gas: ${formatCurrency(o.gas_amount)}/head`);
+                                return parts.length ? `${parts.join(' · ')} - click to edit` : 'Set food price / gas charge for this dish';
+                              })()}
+                              className={(o.price_override !== null || o.gas_amount !== null) ? 'text-orange-600' : 'text-muted-foreground'}
+                            >
+                              <Fuel size={16} />
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -499,12 +574,14 @@ export default function Kitchen() {
                 </div>
                 <p className="text-xs text-muted-foreground">
                   Extra Messing is always computed from what a member/guest actually ordered - there's nothing to set for it.
-                  Sui Gas Charges on Messing is this percentage of that computed total (still overridable per checkout).
+                  Sui Gas Charges on Messing is this percentage of that computed total - only used as a fallback for a
+                  dish that doesn't have its own gas charge set (via the <Fuel size={12} className="inline" /> icon on a
+                  production order in the Production tab).
                 </p>
                 <div className="max-w-xs">
                   <Label>Gas Charge (%)</Label>
                   <div className="flex gap-1.5">
-                    <Input type="number" min={0} max={100} disabled={!canEditRates} value={gasRateInput} onChange={e => setGasRateInput(e.target.value)} />
+                    <Input type="number" min={0} max={100} disabled={!canEditRates} value={gasRateInput} onChange={e => setGasRateInput(e.target.value.replace(/^0+(?=\d)/, ''))} />
                     {canEditRates && <Button size="sm" onClick={handleSaveGasRate}>Save</Button>}
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">Current: {gasRate.percentage}%</p>
@@ -518,7 +595,7 @@ export default function Kitchen() {
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2">
                   <Receipt size={18} className="text-orange-600" />
-                  <p className="text-sm font-medium">Every member and checked-in guest's unbilled mess charge, computed from what they've actually ordered.</p>
+                  <p className="text-sm font-medium">Every member and checked-in guest's unbilled mess charge, computed from what they've actually ordered - "Log Charge" adds a priced item straight to their account, pre-filled from the menu.</p>
                 </div>
                 <div className="flex rounded-md border overflow-hidden text-xs">
                   {([['all', 'All'], ['member', 'Members'], ['guest', 'Guests']] as const).map(([val, label]) => (
@@ -536,36 +613,105 @@ export default function Kitchen() {
           <Card>
             <CardContent className="p-0">
               <Table>
-                <TableHeader><TableRow><TableHead>Type</TableHead><TableHead>Name</TableHead><TableHead>Room/Unit</TableHead><TableHead className="text-right">Unbilled Mess Charge</TableHead><TableHead className="w-32">Action</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead>Type</TableHead><TableHead>Name</TableHead><TableHead>Room/Unit</TableHead><TableHead className="text-right">Unbilled Food Charge</TableHead><TableHead className="text-right">Gas Charge</TableHead><TableHead className="w-48">Action</TableHead></TableRow></TableHeader>
                 <TableBody>
-                  {overviewLoading && <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Loading…</TableCell></TableRow>}
+                  {overviewLoading && <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">Loading…</TableCell></TableRow>}
                   {!overviewLoading && overviewRows.map(r => (
                     <TableRow key={`${r.consumer_type}-${r.consumer_id}`}>
                       <TableCell className="capitalize">{r.consumer_type}</TableCell>
                       <TableCell className="font-medium">{r.name}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">{r.sub_label || '-'}</TableCell>
                       <TableCell className="text-right font-mono">{formatCurrency(r.unbilled_mess_total)}</TableCell>
+                      <TableCell className="text-right font-mono text-muted-foreground">{formatCurrency(r.unbilled_gas_total)}</TableCell>
                       <TableCell>
-                        <Button size="sm" variant="ghost" onClick={() => setHistoryTarget(r)}>View History</Button>
+                        <div className="flex gap-1 justify-end">
+                          <Button size="sm" variant="outline" onClick={() => openAlaCarteDialog({ consumer_kind: r.consumer_type, consumer_id: r.consumer_id })}>Log Charge</Button>
+                          {/* Guests only - a member's dining is billed monthly in
+                              aggregate, not per meal, so there's no per-dish
+                              breakdown to correct for them; their history lives
+                              in Member Management instead (MemberLedger.tsx). */}
+                          {r.consumer_type === 'guest' && (
+                            <Button size="sm" variant="ghost" onClick={() => setBreakdownTarget(r)}>
+                              {r.is_departing && !r.kitchen_finalized_by_name && <LogOut size={13} className="mr-1 text-blue-600" />}
+                              Breakdown
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
-                  {!overviewLoading && overviewRows.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Nothing to show</TableCell></TableRow>}
+                  {!overviewLoading && overviewRows.length === 0 && <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">Nothing to show</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </CardContent>
           </Card>
 
-          <OrderHistoryDialog
-            open={historyTarget !== null} onOpenChange={open => { if (!open) setHistoryTarget(null); }}
-            memberId={historyTarget?.consumer_type === 'member' ? historyTarget.consumer_id : undefined}
-            bookingId={historyTarget?.consumer_type === 'guest' ? historyTarget.consumer_id : undefined}
-            personName={historyTarget?.name}
-          />
+          {breakdownTarget && (
+            <DishBreakdownDialog
+              open={breakdownTarget !== null} onOpenChange={open => { if (!open) setBreakdownTarget(null); }}
+              bookingId={breakdownTarget.consumer_id} guestName={breakdownTarget.name}
+              isDeparting={breakdownTarget.is_departing} kitchenFinalizedByName={breakdownTarget.kitchen_finalized_by_name}
+              onFinalized={() => { fetchOverview(); fetchDepartures(); setBreakdownTarget(null); }}
+            />
+          )}
+        </TabsContent>
+
+        <TabsContent value="departures" className="space-y-4">
+          <Card>
+            <CardContent className="p-4 space-y-1">
+              <p className="text-sm font-medium flex items-center gap-2"><LogOut size={18} className="text-blue-600" /> Guests checking out today or overdue</p>
+              <p className="text-xs text-muted-foreground">
+                A narrow view of who's leaving - not the full Bookings module. Finalize once this guest's mess/gas charges are
+                settled and won't change further; the Clerk is notified and sees both this and Booking NCO's own sign-off at checkout.
+              </p>
+            </CardContent>
+          </Card>
+
+          {departuresLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+          {!departuresLoading && departures.length === 0 && (
+            <p className="text-sm text-muted-foreground">No departures expected today.</p>
+          )}
+          <div className="space-y-2">
+            {departures.map(d => (
+              <Card key={d.booking_id}>
+                <CardContent className="p-4 space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                      <p className="font-medium text-sm">{d.guest_name} <span className="text-muted-foreground text-xs">Room {d.room_number || '-'}</span></p>
+                      {d.overdue && <p className="text-xs text-red-600 font-medium">Overdue — should have left {d.days_overdue === 1 ? 'yesterday' : `${d.days_overdue} days ago`}</p>}
+                    </div>
+                    <div className="flex items-center gap-3 text-xs">
+                      <span>Unbilled Food: <span className="font-mono">{formatCurrency(d.unbilled_mess_total)}</span></span>
+                      <span>Gas: <span className="font-mono">{formatCurrency(d.unbilled_gas_total)}</span></span>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        {d.kitchen_finalized_by_name ? <CheckCircle2 size={13} className="text-emerald-600" /> : <Circle size={13} />}
+                        Kitchen{d.kitchen_finalized_by_name ? `: finalized by ${d.kitchen_finalized_by_name}` : ': not finalized'}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        {d.booking_finalized_by_name ? <CheckCircle2 size={13} className="text-emerald-600" /> : <Circle size={13} />}
+                        Booking{d.booking_finalized_by_name ? `: finalized by ${d.booking_finalized_by_name}` : ': not finalized'}
+                      </span>
+                    </div>
+                    <Button size="sm" disabled={!!d.kitchen_finalized_by_name} onClick={() => handleFinalizeDeparture(d.booking_id)}>
+                      {d.kitchen_finalized_by_name ? 'Finalized' : 'Finalize & Notify Clerk'}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
         </TabsContent>
 
         <TabsContent value="menu" className="space-y-4">
-          <div className="flex justify-end">
+          <div className="flex justify-between items-center">
+            <select className="h-10 rounded-md border border-input bg-background px-3 text-sm capitalize" value={menuMealFilter} onChange={e => setMenuMealFilter(e.target.value)}>
+              <option value="all">All Meals</option>
+              {MEAL_TYPES.map(mt => <option key={mt} value={mt} className="capitalize">{mt}</option>)}
+            </select>
             <Dialog open={proposalDialogOpen} onOpenChange={setProposalDialogOpen}>
               {canProposeMenu && (
                 <DialogTrigger asChild><Button onClick={openProposeNew}><Plus size={16} className="mr-1" /> Propose New Item</Button></DialogTrigger>
@@ -614,7 +760,7 @@ export default function Kitchen() {
                 <TableHeader><TableRow><TableHead>Day</TableHead><TableHead>Meal</TableHead><TableHead>Name</TableHead><TableHead>Price</TableHead>{canProposeMenu && <TableHead className="w-24">Actions</TableHead>}</TableRow></TableHeader>
                 <TableBody>
                   {loading && <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Loading...</TableCell></TableRow>}
-                  {!loading && menuItems.map(m => (
+                  {!loading && menuItems.filter(m => menuMealFilter === 'all' || m.meal_type === menuMealFilter).map(m => (
                     <TableRow key={m.id} className={canProposeMenu ? 'cursor-pointer hover:bg-accent' : ''} onClick={() => canProposeMenu && openProposeEdit(m)}>
                       <TableCell className="capitalize">{m.day_of_week || '-'}</TableCell>
                       <TableCell className="capitalize">{m.meal_type}</TableCell>
@@ -623,7 +769,7 @@ export default function Kitchen() {
                       {canProposeMenu && <TableCell><Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); openProposeEdit(m); }}>Edit</Button></TableCell>}
                     </TableRow>
                   ))}
-                  {!loading && menuItems.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No menu items yet</TableCell></TableRow>}
+                  {!loading && menuItems.filter(m => menuMealFilter === 'all' || m.meal_type === menuMealFilter).length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No menu items {menuMealFilter === 'all' ? '' : `for ${menuMealFilter}`}</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </CardContent>
@@ -632,7 +778,7 @@ export default function Kitchen() {
       </Tabs>
 
       {/* Rendered outside the Tabs so it stays mounted (and thus openable from
-          the Meal Service tab's Special Order button) regardless of which
+          the Attendance tab's Special Order button) regardless of which
           tab's content is currently active - Radix unmounts inactive TabsContent. */}
       <Dialog open={alaCarteDialogOpen} onOpenChange={setAlaCarteDialogOpen}>
         <DialogContent className="max-w-2xl">
@@ -678,6 +824,28 @@ export default function Kitchen() {
             </div>
 
             <Button onClick={handleCreateAlaCarteOrder} className="w-full">Start Order</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={pricingDialogOrder !== null} onOpenChange={open => { if (!open) setPricingDialogOrder(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Pricing - {pricingDialogOrder?.menu_item_name || 'this dish'}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Set once for this dish/meal - everyone marked attended for {pricingDialogOrder?.meal_type} on {pricingDialogOrder?.meal_date} who
+              ate this dish is automatically charged these amounts, whether they're a member or a guest. Leave either blank to go back to
+              its automatic default (the menu price, or no gas charge).
+            </p>
+            <div>
+              <Label>Food price per head (Rs)</Label>
+              <Input type="number" min={0} autoFocus placeholder="Menu price" value={priceInput} onChange={e => setPriceInput(e.target.value.replace(/^0+(?=\d)/, ''))} />
+            </div>
+            <div>
+              <Label>Gas charge per head (Rs)</Label>
+              <Input type="number" min={0} placeholder="0" value={gasInput} onChange={e => setGasInput(e.target.value.replace(/^0+(?=\d)/, ''))} />
+            </div>
+            <Button onClick={handleSavePricing} disabled={savingPricing} className="w-full">{savingPricing ? 'Saving…' : 'Save'}</Button>
           </div>
         </DialogContent>
       </Dialog>

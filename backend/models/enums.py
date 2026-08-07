@@ -37,6 +37,7 @@ class RoomType(str, enum.Enum):
 class InvoiceStatus(str, enum.Enum):
     DRAFT = "draft"
     ISSUED = "issued"
+    PARTIALLY_PAID = "partially_paid"
     PAID = "paid"
     VOID = "void"
     OVERDUE = "overdue"
@@ -56,6 +57,7 @@ class WasteCategory(str, enum.Enum):
 class AlertSeverity(str, enum.Enum):
     LOW = "low"
     MEDIUM = "medium"
+    WARNING = "warning"  # Overdue Checkout's first-tier escalation, below HIGH
     HIGH = "high"
     CRITICAL = "critical"
 
@@ -129,6 +131,7 @@ class LeaveStatus(str, enum.Enum):
 class MessBillStatus(str, enum.Enum):
     DRAFT = "draft"
     ISSUED = "issued"
+    PARTIALLY_PAID = "partially_paid"
     PAID = "paid"
 
 class EventStatus(str, enum.Enum):

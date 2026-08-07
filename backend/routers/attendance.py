@@ -7,11 +7,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import (
-    MealAttendance, MemberLeave, Member, MemberStatus, Booking, Guest, AttendanceStatus, LeaveStatus, Room,
+    MealAttendance, MemberLeave, Member, MemberStatus, DiningStatus, Booking, Guest, AttendanceStatus, LeaveStatus, Room,
 )
 from backend.schemas import (
     MealAttendanceCreate, MealAttendanceOut, AttendanceMarkRequest, BulkAttendanceCreate, MemberLeaveCreate,
     AttendanceLookupResult, ServeAttendanceRequest, NoShowSweepResult,
+    AttendanceMatrixOut, AttendanceMatrixRow, AttendanceMatrixSave,
 )
 from backend.auth import get_current_user, check_permission, PermissionChecker
 from backend.audit import log_audit, serialize_model, AuditAction
@@ -221,6 +222,126 @@ async def bulk_book_attendance(data: BulkAttendanceCreate, request: Request, db:
     log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "meal_attendance", None,
               after_state={"count": len(succeeded), "date": str(data.date), "meal_type": data.meal_type}, ip_address=request.client.host)
     return {"booked": succeeded, "failed": failed}
+
+
+# --- Attendance Matrix (Kitchen Attendance Module) ---
+# Replaces the old Meal Service tab's search-and-serve flow with a full
+# roster view for one date+meal: every active Dining member (default ON),
+# every active Non-Dining member (default OFF), and every currently
+# checked-in room guest with no member_id (default OFF) - Active Room
+# Guests who ARE members are already covered by the Dining/Non-Dining
+# groups above, not double-listed here. Nothing is written to the DB until
+# "Save Attendance" is clicked - GET always computes live so there's no
+# background job to keep a day's defaults in sync.
+
+def _matrix_row(kind: str, id_: int, name: str, sub_label: str | None, group_default: bool, record: MealAttendance | None, on_leave: bool) -> AttendanceMatrixRow:
+    if on_leave and record is None:
+        return AttendanceMatrixRow(kind=kind, id=id_, name=name, sub_label=sub_label, present=False, status=None, on_leave=True, attendance_id=None)
+    if record is not None:
+        present = record.status in (AttendanceStatus.BOOKED, AttendanceStatus.ATTENDED)
+        return AttendanceMatrixRow(kind=kind, id=id_, name=name, sub_label=sub_label, present=present, status=record.status.value, on_leave=(record.status == AttendanceStatus.EXCLUDED), attendance_id=record.id)
+    return AttendanceMatrixRow(kind=kind, id=id_, name=name, sub_label=sub_label, present=group_default, status=None, on_leave=False, attendance_id=None)
+
+
+@router.get("/matrix", response_model=AttendanceMatrixOut)
+async def get_attendance_matrix(
+    date_: str = Query(..., alias="date"), meal_type: str = Query(...),
+    db: Session = Depends(get_db), current_user=Depends(get_current_user),
+):
+    try:
+        matrix_date = date.fromisoformat(date_)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be an ISO date (YYYY-MM-DD)")
+
+    members = db.query(Member).filter(Member.status == MemberStatus.ACTIVE).order_by(Member.full_name).all()
+    member_ids = [m.id for m in members]
+    member_records = {}
+    if member_ids:
+        member_records = {r.member_id: r for r in db.query(MealAttendance).filter(
+            MealAttendance.member_id.in_(member_ids), MealAttendance.date == matrix_date, MealAttendance.meal_type == meal_type,
+        ).all()}
+
+    # Non-member room guests only - members occupying an HRA room are
+    # already represented in the dining/non_dining groups below via Member,
+    # not here, so nobody appears twice in the matrix.
+    guest_bookings = db.query(Booking).filter(Booking.status == "checked_in", Booking.member_id.is_(None)).order_by(Booking.guest_name).all()
+    booking_ids = [b.id for b in guest_bookings]
+    booking_records = {}
+    if booking_ids:
+        booking_records = {r.booking_id: r for r in db.query(MealAttendance).filter(
+            MealAttendance.booking_id.in_(booking_ids), MealAttendance.date == matrix_date, MealAttendance.meal_type == meal_type,
+        ).all()}
+
+    dining, non_dining = [], []
+    has_saved_records = False
+    for m in members:
+        rec = member_records.get(m.id)
+        if rec is not None:
+            has_saved_records = True
+        on_leave = rec is None and _has_active_leave(db, m.id, matrix_date)
+        row = _matrix_row("member", m.id, m.full_name, m.service_number, m.dining_status != DiningStatus.NON_DINING, rec, on_leave)
+        (dining if m.dining_status != DiningStatus.NON_DINING else non_dining).append(row)
+
+    guests = []
+    for b in guest_bookings:
+        rec = booking_records.get(b.id)
+        if rec is not None:
+            has_saved_records = True
+        guests.append(_matrix_row("booking", b.id, b.guest_name, b.room.room_number if b.room else None, False, rec, False))
+
+    cutoff = _get_meal_cutoff_time(db, meal_type)
+    return AttendanceMatrixOut(
+        date=matrix_date, meal_type=meal_type, locked=_is_locked(matrix_date, cutoff),
+        has_saved_records=has_saved_records, dining=dining, non_dining=non_dining, guests=guests,
+    )
+
+
+@router.post("/matrix")
+async def save_attendance_matrix(data: AttendanceMatrixSave, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "attendance", "create"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    cutoff = _get_meal_cutoff_time(db, data.meal_type)
+    if _is_locked(data.date, cutoff):
+        raise HTTPException(status_code=400, detail=f"Attendance for {data.meal_type} on {data.date} is final - booking closed at {cutoff.strftime('%H:%M')}")
+
+    created, updated, skipped = 0, 0, 0
+    for entry in data.entries:
+        if entry.kind not in ("member", "booking"):
+            continue
+        query = db.query(MealAttendance).filter(MealAttendance.date == data.date, MealAttendance.meal_type == data.meal_type)
+        query = query.filter(MealAttendance.member_id == entry.id) if entry.kind == "member" else query.filter(MealAttendance.booking_id == entry.id)
+        record = query.first()
+
+        if entry.present:
+            if record is None:
+                # A leave-excluded member toggled back ON is a deliberate
+                # override - honor it rather than re-deriving EXCLUDED, since
+                # the NCO just explicitly asked for them to be counted.
+                try:
+                    _create_attendance(db, entry.id if entry.kind == "member" else None, entry.id if entry.kind == "booking" else None, data.date, data.meal_type, "manual")
+                    created += 1
+                except IntegrityError:
+                    db.rollback()
+                    skipped += 1
+            elif record.status == AttendanceStatus.CANCELLED:
+                before = serialize_model(record)
+                record.status = AttendanceStatus.BOOKED
+                db.commit()
+                log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "meal_attendance", record.id, before_state=before, after_state=serialize_model(record), ip_address=request.client.host)
+                updated += 1
+            else:
+                skipped += 1  # already BOOKED/ATTENDED/EXCLUDED - nothing to do
+        else:
+            if record is not None and record.status == AttendanceStatus.BOOKED:
+                before = serialize_model(record)
+                record.status = AttendanceStatus.CANCELLED
+                db.commit()
+                log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "meal_attendance", record.id, before_state=before, after_state=serialize_model(record), ip_address=request.client.host)
+                updated += 1
+            else:
+                skipped += 1  # no row (never asked) or already ATTENDED/EXCLUDED - leave alone
+
+    return {"created": created, "updated": updated, "skipped": skipped}
 
 
 # --- Meal Service (omnibar search, per-person serve, no-show sweep) ---

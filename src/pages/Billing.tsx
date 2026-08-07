@@ -8,13 +8,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { Search, FileText, Ban, DollarSign, Receipt, Calendar, Wallet, Printer } from 'lucide-react';
+import { Search, FileText, Ban, DollarSign, Receipt, Calendar, Wallet, Printer, ClipboardEdit } from 'lucide-react';
 import { formatCurrency } from '@/lib/currency';
 import { BillPrintView, PaymentReceiptView } from '@/components/BillPrint';
+import { MasterBillView } from '@/components/MasterBillView';
+import { CustomerHistoryModal } from '@/components/CustomerHistoryModal';
 
 interface Invoice {
   id: number;
   invoice_number: string;
+  customer_guest_id: number | null;
   guest_name: string;
   room_number: string;
   total_amount: number;
@@ -35,9 +38,12 @@ interface BillingStats {
 // Invoices are only created by the two flows that track what's been billed:
 // guest checkout (room/mess bills) and the monthly member Mess Bill run.
 // This page reviews, prints, settles, and voids them.
+const BILL_TYPE_LABELS: Record<string, string> = { combined: 'Combined', room: 'Room', mess: 'Mess', event: 'Event' };
+
 export default function Billing() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [search, setSearch] = useState('');
+  const [billTypeFilter, setBillTypeFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<BillingStats | null>(null);
   const [paymentDialogInvoice, setPaymentDialogInvoice] = useState<Invoice | null>(null);
@@ -46,10 +52,12 @@ export default function Billing() {
   const [voidReason, setVoidReason] = useState('');
   const [printInvoiceIds, setPrintInvoiceIds] = useState<number[] | null>(null);
   const [receiptPaymentId, setReceiptPaymentId] = useState<number | null>(null);
+  const [masterBillInvoiceId, setMasterBillInvoiceId] = useState<number | null>(null);
+  const [historyGuestId, setHistoryGuestId] = useState<number | null>(null);
 
   const fetchInvoices = async () => {
     try {
-      const res = await api.get(`/billing/invoices?search=${search}`);
+      const res = await api.get(`/billing/invoices?search=${encodeURIComponent(search)}&bill_type=${billTypeFilter}`);
       setInvoices(res.data.items);
     } catch { toast.error('Failed to load invoices'); }
   };
@@ -64,7 +72,7 @@ export default function Billing() {
       setLoading(true);
       Promise.all([fetchInvoices(), fetchStats()]).finally(() => setLoading(false));
     });
-  }, [search]);
+  }, [search, billTypeFilter]);
 
   const handleVoid = async () => {
     if (!voidDialogInvoice) return;
@@ -155,7 +163,16 @@ export default function Billing() {
         </div>
       )}
 
-      <div className="relative max-w-sm"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} /><Input placeholder="Search invoices..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" /></div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative max-w-sm flex-1 min-w-64">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
+          <Input placeholder="Search by name, rank, service #, invoice #, voucher # or bill serial #..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" />
+        </div>
+        <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={billTypeFilter} onChange={e => setBillTypeFilter(e.target.value)}>
+          <option value="">All Categories</option>
+          {Object.entries(BILL_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      </div>
 
       <Card>
         <CardContent className="p-0">
@@ -176,13 +193,18 @@ export default function Billing() {
                       </Badge>
                     )}
                   </TableCell>
-                  <TableCell>{inv.guest_name}</TableCell>
+                  <TableCell>
+                    {inv.customer_guest_id ? (
+                      <button type="button" className="text-blue-600 hover:underline text-left" onClick={() => setHistoryGuestId(inv.customer_guest_id)}>{inv.guest_name}</button>
+                    ) : inv.guest_name}
+                  </TableCell>
                   <TableCell>{inv.room_number}</TableCell>
                   <TableCell className="font-semibold">{formatCurrency(inv.total_amount)}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{formatCurrency(inv.amount_paid)} / {formatCurrency(inv.total_amount - (inv.amount_paid || 0))}</TableCell>
                   <TableCell>{statusBadge(inv.status)}</TableCell>
                   <TableCell>{inv.issue_date}</TableCell>
                   <TableCell className="flex gap-1">
+                    <Button size="sm" variant="ghost" title="Make Bill / Interactive Table" onClick={() => setMasterBillInvoiceId(inv.id)}><ClipboardEdit size={16} className="text-blue-600" /></Button>
                     <Button size="sm" variant="ghost" title="Print bill" onClick={() => setPrintInvoiceIds([inv.id])}><Printer size={16} className="text-muted-foreground" /></Button>
                     {inv.status !== 'void' && inv.status !== 'paid' && (
                       <Button size="sm" variant="ghost" title="Record payment" onClick={() => { setPaymentDialogInvoice(inv); setPaymentAmount(0); }}><Wallet size={16} className="text-emerald-600" /></Button>
@@ -199,6 +221,13 @@ export default function Billing() {
 
       <BillPrintView invoiceIds={printInvoiceIds} onClose={() => setPrintInvoiceIds(null)} />
       <PaymentReceiptView paymentId={receiptPaymentId} onClose={() => setReceiptPaymentId(null)} />
+      <MasterBillView source="invoice" sourceId={masterBillInvoiceId} onClose={() => { setMasterBillInvoiceId(null); fetchInvoices(); }} />
+      <CustomerHistoryModal
+        guestId={historyGuestId}
+        onClose={() => setHistoryGuestId(null)}
+        onOpenMasterBill={id => { setHistoryGuestId(null); setMasterBillInvoiceId(id); }}
+        onOpenReceipt={id => { setHistoryGuestId(null); setReceiptPaymentId(id); }}
+      />
     </div>
   );
 }

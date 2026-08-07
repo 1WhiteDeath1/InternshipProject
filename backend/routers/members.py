@@ -21,6 +21,11 @@ async def list_members(
     if not check_permission(current_user, "members", "view"):
         raise HTTPException(status_code=403, detail="Permission denied")
     query = db.query(Member)
+    # Booking NCO's Members view is HRA-only - Kitchen NCO/Manager see the
+    # full roster (they classify dining vs non-dining, which applies to
+    # everyone, HRA or not).
+    if current_user.role and current_user.role.name == "Booking NCO":
+        query = query.filter(Member.is_hra == True)
     if status:
         query = query.filter(Member.status == status)
     if mess_category:
@@ -48,6 +53,7 @@ async def list_members(
          "rank": m.rank, "unit": m.unit, "mess_category": m.mess_category.value,
          "client_category": m.client_category.value, "is_womens_bloc": bool(m.is_womens_bloc),
          "dining_status": (m.dining_status.value if m.dining_status else "dining"),
+         "is_hra": bool(m.is_hra), "hra_stay_type": m.hra_stay_type, "dorm_location": m.dorm_location,
          "custom_discount_rate": float(m.custom_discount_rate or 0),
          "phone": m.phone, "email": m.email, "status": m.status.value,
          "current_room_id": current_rooms[m.id].room_id if m.id in current_rooms else None,
@@ -70,6 +76,7 @@ async def get_member(member_id: int, db: Session = Depends(get_db), current_user
         "rank": member.rank, "unit": member.unit, "mess_category": member.mess_category.value,
         "client_category": member.client_category.value, "is_womens_bloc": bool(member.is_womens_bloc),
         "dining_status": (member.dining_status.value if member.dining_status else "dining"),
+        "is_hra": bool(member.is_hra), "hra_stay_type": member.hra_stay_type, "dorm_location": member.dorm_location,
         "custom_discount_rate": float(member.custom_discount_rate or 0),
         "phone": member.phone, "email": member.email, "status": member.status.value,
         "current_room_id": current_hra.room_id if current_hra else None,
@@ -120,8 +127,38 @@ async def update_member(member_id: int, data: MemberUpdate, request: Request, db
     if not member:
         raise HTTPException(status_code=404, detail="Member not found")
 
+    updates = data.model_dump(exclude_unset=True)
+    # Merge onto the current row's values (not just what's in this partial
+    # payload) so cross-field HRA validation sees the real resulting state -
+    # e.g. an update that only sends is_hra=False must still know the
+    # member's existing hra_stay_type/dorm_location to validate correctly.
+    next_is_hra = updates.get("is_hra", member.is_hra)
+    next_stay_type = updates.get("hra_stay_type", member.hra_stay_type)
+    next_dorm = updates.get("dorm_location", member.dorm_location)
+
+    if next_is_hra and not next_stay_type:
+        raise HTTPException(status_code=422, detail="hra_stay_type is required when is_hra is true")
+    if next_is_hra and next_stay_type == "out_of_mess" and not (next_dorm or "").strip():
+        raise HTTPException(status_code=422, detail="dorm_location is required for an out-of-mess HRA member")
+    if not next_is_hra or next_stay_type == "in_mess":
+        updates["dorm_location"] = None
+    if not next_is_hra:
+        updates["hra_stay_type"] = None
+
+    # A member with an active HRA booking can't be silently un-HRA'd or
+    # switched to out-of-mess - that would leave a real room occupancy
+    # orphaned with no member record backing it. Check them out via Bookings
+    # first (mirrors how Members can't be hard-deleted, only status-changed).
+    was_dropping_in_mess_residency = member.is_hra and member.hra_stay_type == "in_mess" and not (next_is_hra and next_stay_type == "in_mess")
+    if was_dropping_in_mess_residency:
+        active_hra_booking = db.query(Booking).filter(
+            Booking.member_id == member.id, Booking.nature_of_duty == "hra", Booking.status == "checked_in",
+        ).first()
+        if active_hra_booking:
+            raise HTTPException(status_code=400, detail=f"{member.full_name} currently occupies room {active_hra_booking.room.room_number if active_hra_booking.room else active_hra_booking.room_id} - check them out via Bookings before changing their HRA status")
+
     before = serialize_model(member)
-    for field, value in data.model_dump(exclude_unset=True).items():
+    for field, value in updates.items():
         setattr(member, field, value)
     db.commit()
     db.refresh(member)

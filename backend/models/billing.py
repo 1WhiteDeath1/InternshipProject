@@ -31,6 +31,19 @@ class Invoice(Base):
     # mattress, dhobi, breakage...) or 'mess' (messing/food charges). Older
     # single-bill invoices stay 'combined'.
     bill_type = Column(String(20), default="combined")  # room | mess | combined
+    # Manually-entered physical bill-book serial, distinct from the
+    # system-generated invoice_number - Clerk fills this in against the
+    # paper register before printing/settling. Nullable/free-text since not
+    # every bill is tracked against a physical book.
+    bill_serial_number = Column(String(50), nullable=True)
+    # Clerk-entered carry-forward balance from the prior period's paper bill
+    # (see services/master_bill.py) - sums into the printed Total Debit/Net
+    # Debits only, never into subtotal/total_amount (which stay the pure
+    # computed room/mess charge).
+    last_debit_balance = Column(Numeric(10, 2), default=0)
+    # Null = still a draft in the Interactive Invoice Table (freely editable);
+    # set by "Make Bill" - locks further editing and enables Print.
+    bill_made_at = Column(DateTime, nullable=True)
     is_complimentary = Column(Boolean, default=False)
     complimentary_reason = Column(Text)
     notes = Column(Text)
@@ -52,6 +65,11 @@ class InvoiceItem(Base):
     quantity = Column(Float, default=1)
     unit_price = Column(Numeric(10, 2), nullable=False)
     total_price = Column(Numeric(10, 2), nullable=False)
+    # Mandatory-reason line items added post-generation via the Interactive
+    # Invoice Table (master_bill.py) while the bill is still a draft (before
+    # "Make Bill" locks it) - null for every item swept in at checkout time,
+    # which already carries its own justification (a real charge/computation).
+    reason = Column(String(255), nullable=True)
 
     invoice = relationship("Invoice", back_populates="items")
 
@@ -64,6 +82,16 @@ class InvoicePayment(Base):
     amount = Column(Numeric(10, 2), nullable=False)
     method = Column(String(50))
     notes = Column(Text)
+    # AG Branch advance-deduction tracking - set only for the auto-applied
+    # "Advance (Online)" payment instant_checkout creates from an online
+    # booking's advance. voucher_number mirrors Booking.online_voucher_no
+    # (copied at payment-creation time so it's queryable on the payment row
+    # itself, not just embedded in notes' free text). ag_branch_fee is the
+    # 10%-of-gross AG Branch retains - it does NOT reduce `amount` (the guest
+    # is credited the full gross advance); it's a separate reporting figure
+    # for what the mess actually nets after AG Branch's own deduction.
+    voucher_number = Column(String(50), nullable=True)
+    ag_branch_fee = Column(Numeric(10, 2), nullable=True)
     received_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api, { getErrorMessage } from '@/lib/api';
+import { useAuth } from '@/contexts/useAuth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -7,7 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Search, Plus, Unlock } from 'lucide-react';
+import { Search, Plus, Unlock, UserX } from 'lucide-react';
+import { ConfirmDialog, type ConfirmRequest } from '@/components/ConfirmDialog';
 
 interface User {
   id: number;
@@ -21,11 +23,13 @@ interface User {
 }
 
 export default function UsersPage() {
+  const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [search, setSearch] = useState('');
   const [roles, setRoles] = useState<{id: number; name: string}[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ username: '', email: '', full_name: '', password: '', role_id: 0 });
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
 
   const fetchUsers = async () => {
     try {
@@ -52,6 +56,25 @@ export default function UsersPage() {
   const handleUnlock = async (id: number) => {
     try { await api.post(`/users/${id}/unlock`); toast.success('User unlocked'); fetchUsers(); }
     catch { toast.error('Failed'); }
+  };
+
+  const handleDelete = (u: User) => {
+    setConfirmRequest({
+      title: `Delete "${u.full_name}"?`,
+      description: `${u.username} - this deactivates the account (blocks login) rather than erasing their history; audit and record ownership are preserved.`,
+      confirmLabel: 'Delete User',
+      destructive: true,
+      reasonLabel: 'Reason for deleting this user',
+      reasonRequired: true,
+      reasonMinLength: 10,
+      onConfirm: async (reason) => {
+        try {
+          await api.delete(`/users/${u.id}?reason=${encodeURIComponent(reason)}`);
+          toast.success('User deleted');
+          fetchUsers();
+        } catch (err) { toast.error(getErrorMessage(err, 'Failed to delete user')); }
+      },
+    });
   };
 
   const statusBadge = (status: string) => {
@@ -98,7 +121,12 @@ export default function UsersPage() {
                   <TableCell>{statusBadge(u.status)}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{u.last_login ? new Date(u.last_login).toLocaleDateString() : 'Never'}</TableCell>
                   <TableCell>
-                    {u.status === 'locked' && <Button size="sm" variant="ghost" onClick={() => handleUnlock(u.id)}><Unlock size={16} className="text-green-600" /></Button>}
+                    <div className="flex gap-1">
+                      {u.status === 'locked' && <Button size="sm" variant="ghost" title="Unlock" onClick={() => handleUnlock(u.id)}><Unlock size={16} className="text-green-600" /></Button>}
+                      {u.status !== 'inactive' && u.id !== currentUser?.id && (
+                        <Button size="sm" variant="ghost" title="Delete User" onClick={() => handleDelete(u)}><UserX size={16} className="text-red-600" /></Button>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -107,6 +135,8 @@ export default function UsersPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <ConfirmDialog request={confirmRequest} onClose={() => setConfirmRequest(null)} />
     </div>
   );
 }

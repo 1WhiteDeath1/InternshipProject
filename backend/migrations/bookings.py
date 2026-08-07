@@ -149,6 +149,42 @@ def _migrate_bookings_discount_rate(engine):
             logger.info("migration: added bookings.discount_rate")
 
 
+def _migrate_booking_charges_reason(engine):
+    # Mandatory-reason gating on ad-hoc charges (Other Charges / manual price
+    # adjustments) - nullable column since existing rows predate the
+    # requirement; new inserts always carry one via BookingChargeCreate.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(booking_charges)")).fetchall()
+        if not cols:
+            return
+        if "reason" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE booking_charges ADD COLUMN reason VARCHAR(255)"))
+            conn.commit()
+            logger.info("migration: added booking_charges.reason")
+
+
+def _migrate_bookings_finalize_fields(engine):
+    # Checkout-readiness sign-off: independent Kitchen NCO / Booking NCO
+    # stamps, surfaced to the Clerk at checkout - see Booking.kitchen_finalized_at's
+    # model docstring. All nullable - plain ALTER TABLE ADD COLUMN.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(bookings)")).fetchall()
+        if not cols:
+            return
+        col_names = {c[1] for c in cols}
+        additions = (
+            ("kitchen_finalized_at", "DATETIME"),
+            ("kitchen_finalized_by", "INTEGER REFERENCES users(id)"),
+            ("booking_finalized_at", "DATETIME"),
+            ("booking_finalized_by", "INTEGER REFERENCES users(id)"),
+        )
+        for name, ddl_type in additions:
+            if name not in col_names:
+                conn.execute(text(f"ALTER TABLE bookings ADD COLUMN {name} {ddl_type}"))
+                logger.info("migration: added bookings.%s", name)
+        conn.commit()
+
+
 MIGRATIONS = [
     _migrate_bookings_register_fields,
     _migrate_bookings_source_fields,
@@ -158,4 +194,6 @@ MIGRATIONS = [
     _migrate_bookings_advance_payment,
     _migrate_bookings_is_indefinite,
     _migrate_bookings_discount_rate,
+    _migrate_booking_charges_reason,
+    _migrate_bookings_finalize_fields,
 ]

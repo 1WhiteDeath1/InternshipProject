@@ -24,11 +24,12 @@ export function QuickChargeModal({ open, onOpenChange }: QuickChargeModalProps) 
   const [head, setHead] = useState(ROOM_CHARGE_HEADS[0]);
   const [customLabel, setCustomLabel] = useState('');
   const [amount, setAmount] = useState('');
+  const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
 
   const reset = () => {
     setSearch(''); setSelected(null); setIsMess(false);
-    setHead(ROOM_CHARGE_HEADS[0]); setCustomLabel(''); setAmount('');
+    setHead(ROOM_CHARGE_HEADS[0]); setCustomLabel(''); setAmount(''); setReason('');
   };
 
   useEffect(() => {
@@ -53,9 +54,10 @@ export function QuickChargeModal({ open, onOpenChange }: QuickChargeModalProps) 
     const amt = Number(amount);
     if (!label) { toast.error('Enter a charge description'); return; }
     if (!amt || amt <= 0) { toast.error('Enter a charge amount'); return; }
+    if (label === 'Allied Charges' && reason.trim().length < 3) { toast.error('A reason (at least 3 characters) is required for Allied Charges'); return; }
     setSaving(true);
     try {
-      await api.post(`/billing/bookings/${selected.current_booking_id}/charges`, { head: label, amount: amt, is_mess_charge: isMess });
+      await api.post(`/billing/bookings/${selected.current_booking_id}/charges`, { head: label, amount: amt, is_mess_charge: isMess, reason: reason.trim() || undefined });
       toast.success(`${label} — ${formatCurrency(amt)} logged for Room ${selected.room_number}`);
       onOpenChange(false);
       reset();
@@ -109,11 +111,12 @@ export function QuickChargeModal({ open, onOpenChange }: QuickChargeModalProps) 
                   {presetHeads.map(h => <option key={h} value={h}>{h}</option>)}
                   <option value={CUSTOM_CHARGE_HEAD}>Custom…</option>
                 </select>
-                <Input type="number" min={1} placeholder="Rs" value={amount} onChange={e => setAmount(e.target.value)} />
+                <Input type="number" min={1} placeholder="Rs" value={amount} onChange={e => setAmount(e.target.value.replace(/^0+(?=\d)/, ''))} />
               </div>
               {head === CUSTOM_CHARGE_HEAD && (
                 <Input placeholder="Charge description" value={customLabel} onChange={e => setCustomLabel(e.target.value)} />
               )}
+              <Input placeholder={head === 'Allied Charges' ? 'Reason / Description (required)' : 'Reason / Description (optional)'} value={reason} onChange={e => setReason(e.target.value)} />
 
               <Button className="w-full" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save Charge'}</Button>
             </>

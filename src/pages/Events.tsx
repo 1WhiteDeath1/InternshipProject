@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import api, { getErrorMessage } from '@/lib/api';
 import { useAuth } from '@/contexts/useAuth';
 import { hasPermission } from '@/contexts/auth-context';
@@ -9,12 +9,15 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { toast } from 'sonner';
 import {
   CalendarDays, Plus, Users, MapPin, Wallet, UtensilsCrossed, Trash2,
-  CheckCircle2, ChefHat, Clock, Ban, Receipt, CalendarClock,
+  CheckCircle2, ChefHat, Clock, Ban, Receipt, CalendarClock, ChevronLeft, ChevronRight, List, LayoutGrid,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/currency';
+import { todayISO, fmtDay } from './bookings/shared';
 
 interface MenuItem { id: number; dish_name: string; estimated_price: number; quantity: number; }
 
@@ -38,7 +41,125 @@ const STATUS_COLORS: Record<string, string> = {
   preparing: 'bg-orange-100 text-orange-800', completed: 'bg-emerald-100 text-emerald-800',
   cancelled: 'bg-red-100 text-red-800',
 };
+const STATUS_DOT: Record<string, string> = {
+  booked: 'bg-blue-500', menu_set: 'bg-amber-500', preparing: 'bg-orange-500',
+  completed: 'bg-emerald-500', cancelled: 'bg-red-500',
+};
 const STATUS_FLOW = ['booked', 'menu_set', 'preparing', 'completed'];
+
+function addMonths(iso: string, n: number): string {
+  const [y, m] = iso.split('-').map(Number);
+  const dt = new Date(y, m - 1 + n, 1);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-01`;
+}
+function startOfMonth(iso: string): string {
+  const [y, m] = iso.split('-').map(Number);
+  return `${y}-${String(m).padStart(2, '0')}-01`;
+}
+function daysInMonth(iso: string): string[] {
+  const [y, m] = iso.split('-').map(Number);
+  const count = new Date(y, m, 0).getDate();
+  return Array.from({ length: count }, (_, i) => `${y}-${String(m).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`);
+}
+
+// Month grid matching the visual layout of the Bookings module's
+// CalendarTab (nav row, Today button, weekday header, day-cell popovers) -
+// grouped client-side from the already-fetched `events` list rather than a
+// dedicated endpoint, since Events has no per-room capacity dimension to
+// aggregate server-side.
+function EventsCalendarView({ events, onOpenEvent }: { events: EventItem[]; onOpenEvent: (id: number) => void }) {
+  const [anchor, setAnchor] = useState(todayISO());
+  const today = todayISO();
+
+  const byDate = useMemo(() => {
+    const map = new Map<string, EventItem[]>();
+    for (const e of events) {
+      const key = e.event_date.slice(0, 10);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(e);
+    }
+    return map;
+  }, [events]);
+
+  const monthStart = startOfMonth(anchor);
+  const days = daysInMonth(monthStart);
+  const leadingBlanks = new Date(Number(monthStart.split('-')[0]), Number(monthStart.split('-')[1]) - 1, 1).getDay();
+  const periodLabel = useMemo(() => {
+    const [y, m] = monthStart.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  }, [monthStart]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5">
+          <Button size="sm" variant="outline" onClick={() => setAnchor(addMonths(anchor, -1))}><ChevronLeft size={16} /></Button>
+          <Button size="sm" variant="outline" onClick={() => setAnchor(todayISO())}>Today</Button>
+          <Button size="sm" variant="outline" onClick={() => setAnchor(addMonths(anchor, 1))}><ChevronRight size={16} /></Button>
+          <p className="text-sm font-semibold ml-2">{periodLabel}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-7 gap-1 mb-1">
+        {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(d => <div key={d} className="text-center text-xs text-muted-foreground font-medium">{d}</div>)}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {Array.from({ length: leadingBlanks }).map((_, i) => <div key={`b${i}`} />)}
+        {days.map(day => {
+          const dayEvents = byDate.get(day) || [];
+          const dayNum = Number(day.split('-')[2]);
+          const shown = dayEvents.slice(0, 2);
+          const overflow = dayEvents.length - shown.length;
+          return (
+            <Popover key={day}>
+              <PopoverTrigger asChild>
+                <button type="button" disabled={dayEvents.length === 0}
+                  className={`min-h-20 rounded-md border p-1.5 text-left flex flex-col gap-0.5 transition-colors ${dayEvents.length > 0 ? 'hover:bg-accent' : ''} ${day === today ? 'ring-2 ring-primary' : 'border-border'}`}>
+                  <span className="text-xs font-medium">{dayNum}</span>
+                  <div className="flex-1 space-y-0.5 overflow-hidden">
+                    {shown.map(e => (
+                      <p key={e.id} className="text-[10px] leading-tight truncate flex items-center gap-1">
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${STATUS_DOT[e.status] || 'bg-gray-400'}`} />
+                        {e.title}
+                      </p>
+                    ))}
+                    {overflow > 0 && <p className="text-[10px] leading-tight text-muted-foreground">+{overflow} more</p>}
+                  </div>
+                </button>
+              </PopoverTrigger>
+              {dayEvents.length > 0 && (
+                <PopoverContent className="w-72">
+                  <p className="text-sm font-medium mb-1.5">{fmtDay(day)}</p>
+                  <div className="space-y-1 max-h-64 overflow-y-auto">
+                    {dayEvents.map(e => (
+                      <button key={e.id} type="button" onClick={() => onOpenEvent(e.id)}
+                        className="w-full flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded hover:bg-accent text-left">
+                        <span className="truncate flex items-center gap-1.5">
+                          <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS_DOT[e.status] || 'bg-gray-400'}`} />
+                          {e.title}
+                        </span>
+                        <span className="text-muted-foreground shrink-0">{e.hall_name} · {STATUS_LABELS[e.status]}</span>
+                      </button>
+                    ))}
+                  </div>
+                </PopoverContent>
+              )}
+            </Popover>
+          );
+        })}
+      </div>
+
+      <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+        {Object.entries(STATUS_DOT).map(([status, cls]) => (
+          <span key={status} className="flex items-center gap-1">
+            <span className={`w-3 h-3 rounded-sm inline-block ${cls}`} /> {STATUS_LABELS[status]}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const emptyForm = () => ({
   title: '', guest_name: '', guest_phone: '', hall_name: '', capacity: '', headcount: '',
   event_date: '', requirements: '', arrangement: '', billing_type: 'split' as 'split' | 'single_payer',
@@ -79,8 +200,8 @@ function NewEventDialog({ open, onClose, onCreated }: { open: boolean; onClose: 
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div><Label>Hall / Area</Label><Input value={form.hall_name} onChange={e => setForm({ ...form, hall_name: e.target.value })} placeholder="e.g. Lawn" /></div>
-            <div><Label>Capacity</Label><Input type="number" min={1} value={form.capacity} onChange={e => setForm({ ...form, capacity: e.target.value })} /></div>
-            <div><Label>Headcount</Label><Input type="number" min={1} value={form.headcount} onChange={e => setForm({ ...form, headcount: e.target.value })} /></div>
+            <div><Label>Capacity</Label><Input type="number" min={1} value={form.capacity} onChange={e => setForm({ ...form, capacity: e.target.value.replace(/^0+(?=\d)/, '') })} /></div>
+            <div><Label>Headcount</Label><Input type="number" min={1} value={form.headcount} onChange={e => setForm({ ...form, headcount: e.target.value.replace(/^0+(?=\d)/, '') })} /></div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div><Label>Event Date</Label><Input type="date" value={form.event_date} onChange={e => setForm({ ...form, event_date: e.target.value })} /></div>
@@ -250,8 +371,8 @@ function EventDetailDialog({ event, onClose, onChanged }: { event: EventItem | n
             {canManageKitchen && (
               <div className="flex gap-1.5 pt-1">
                 <Input placeholder="Dish" className="h-9 text-xs flex-1" value={dishName} onChange={e => setDishName(e.target.value)} />
-                <Input type="number" placeholder="Rs/unit" className="h-9 text-xs w-24" value={dishPrice} onChange={e => setDishPrice(e.target.value)} />
-                <Input type="number" placeholder="Qty" className="h-9 text-xs w-20" value={dishQty} onChange={e => setDishQty(e.target.value)} />
+                <Input type="number" placeholder="Rs/unit" className="h-9 text-xs w-24" value={dishPrice} onChange={e => setDishPrice(e.target.value.replace(/^0+(?=\d)/, ''))} />
+                <Input type="number" placeholder="Qty" className="h-9 text-xs w-20" value={dishQty} onChange={e => setDishQty(e.target.value.replace(/^0+(?=\d)/, ''))} />
                 <Button size="sm" className="h-9" onClick={addDish} disabled={busy}>Add</Button>
               </div>
             )}
@@ -297,7 +418,7 @@ function EventDetailDialog({ event, onClose, onChanged }: { event: EventItem | n
               )}
               {canLogCost ? (
                 <div className="flex items-center gap-1.5">
-                  <Input type="number" placeholder="Actual cost (Rs)" className="h-9 text-xs flex-1" value={costInput} onChange={e => setCostInput(e.target.value)} />
+                  <Input type="number" placeholder="Actual cost (Rs)" className="h-9 text-xs flex-1" value={costInput} onChange={e => setCostInput(e.target.value.replace(/^0+(?=\d)/, ''))} />
                   <Button size="sm" className="h-9" disabled={busy} onClick={saveActualCost}>{event.actual_cost != null ? 'Update' : 'Log Cost'}</Button>
                 </div>
               ) : event.actual_cost != null && (
@@ -366,30 +487,46 @@ export default function Events() {
       </div>
 
       {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
-      {!loading && events.length === 0 && <p className="text-sm text-muted-foreground">No events booked yet.</p>}
 
-      {active.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {active.map(e => <EventCard key={e.id} e={e} />)}
-        </div>
-      )}
+      {!loading && (
+        <Tabs defaultValue="list">
+          <TabsList>
+            <TabsTrigger value="list"><List size={14} className="mr-1" /> List</TabsTrigger>
+            <TabsTrigger value="calendar"><LayoutGrid size={14} className="mr-1" /> Calendar</TabsTrigger>
+          </TabsList>
 
-      {completed.length > 0 && (
-        <div>
-          <h2 className="text-sm font-semibold mb-2 text-emerald-700 dark:text-emerald-400">Completed</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {completed.map(e => <EventCard key={e.id} e={e} />)}
-          </div>
-        </div>
-      )}
+          <TabsContent value="list" className="space-y-6 mt-4">
+            {events.length === 0 && <p className="text-sm text-muted-foreground">No events booked yet.</p>}
 
-      {cancelled.length > 0 && (
-        <div>
-          <h2 className="text-sm font-semibold mb-2 text-muted-foreground">Cancelled</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {cancelled.map(e => <EventCard key={e.id} e={e} />)}
-          </div>
-        </div>
+            {active.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {active.map(e => <EventCard key={e.id} e={e} />)}
+              </div>
+            )}
+
+            {completed.length > 0 && (
+              <div>
+                <h2 className="text-sm font-semibold mb-2 text-emerald-700 dark:text-emerald-400">Completed</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {completed.map(e => <EventCard key={e.id} e={e} />)}
+                </div>
+              </div>
+            )}
+
+            {cancelled.length > 0 && (
+              <div>
+                <h2 className="text-sm font-semibold mb-2 text-muted-foreground">Cancelled</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {cancelled.map(e => <EventCard key={e.id} e={e} />)}
+                </div>
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="calendar" className="mt-4">
+            <EventsCalendarView events={events} onOpenEvent={setSelectedId} />
+          </TabsContent>
+        </Tabs>
       )}
 
       <NewEventDialog open={newOpen} onClose={() => setNewOpen(false)} onCreated={fetchEvents} />

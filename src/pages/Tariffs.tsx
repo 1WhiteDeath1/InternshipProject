@@ -44,6 +44,7 @@ const emptyForm = { rank: RANKS[0], room_type: 'standard', stay_type: 'official'
 
 const UTILITY_LABELS: Record<string, string> = {
   standard: 'Standard / VIP GRs', suite_1ac: 'Suite (1x AC)', suite_2ac: 'Suite (2x AC)', dg_suite: 'DG Suite',
+  out_of_mess: 'Out-of-Mess Resident (Flat)',
 };
 
 const roomRateKey = (r: { room_type: string; guest_category: string }) => `${r.room_type}|${r.guest_category}`;
@@ -99,14 +100,21 @@ export default function Tariffs() {
     });
   }, []);
 
+  const [savingTariff, setSavingTariff] = useState(false);
+  const [justSavedKey, setJustSavedKey] = useState<string | null>(null);
+
   const handleSave = async () => {
+    setSavingTariff(true);
     try {
       await api.put('/tariffs', form);
-      toast.success('Tariff saved');
+      toast.success(`Tariff saved — ${form.rank} · ${ROOM_TYPE_LABELS[form.room_type] || form.room_type} · ${form.stay_type} now bills at ${formatCurrency(form.nightly_rate)}/night`);
       setDialogOpen(false);
+      setJustSavedKey(`${form.rank}|${form.room_type}|${form.stay_type}`);
+      setTimeout(() => setJustSavedKey(null), 4000);
       setForm(emptyForm);
       fetchTariffs();
     } catch (err) { toast.error(getErrorMessage(err, 'Failed to save tariff')); }
+    finally { setSavingTariff(false); }
   };
 
   const handleDelete = async (id: number) => {
@@ -338,7 +346,7 @@ export default function Tariffs() {
                       <Label className="text-xs">Nightly Rate (Rs)</Label>
                       <Input type="number" min={0} value={form.nightly_rate} onChange={e => setForm({ ...form, nightly_rate: Number(e.target.value) })} />
                     </div>
-                    <Button onClick={handleSave} className="w-full">Save Rate</Button>
+                    <Button onClick={handleSave} disabled={savingTariff} className="w-full">{savingTariff ? 'Saving…' : 'Save Rate'}</Button>
                     <p className="text-xs text-muted-foreground">Saving an existing rank/room type/stay type combination updates its rate in place.</p>
                   </div>
                 </DialogContent>
@@ -361,7 +369,7 @@ export default function Tariffs() {
                 <TableBody>
                   {loading && <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Loading tariffs...</TableCell></TableRow>}
                   {!loading && rows.map(r => (
-                    <TableRow key={r.id}>
+                    <TableRow key={r.id} className={justSavedKey === `${r.rank}|${r.room_type}|${r.stay_type}` ? 'bg-emerald-50 dark:bg-emerald-950/30 transition-colors' : ''}>
                       <TableCell className="font-medium">{r.rank}</TableCell>
                       <TableCell>{ROOM_TYPE_LABELS[r.room_type] || r.room_type}</TableCell>
                       <TableCell className="capitalize">{r.stay_type}</TableCell>

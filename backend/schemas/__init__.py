@@ -15,6 +15,7 @@ from backend.schemas.access import (
 from backend.schemas.system import FeatureFlagOut, FeatureFlagToggle, SettingOut, SettingUpdate
 from backend.schemas.audit import AuditLogOut, AuditLogList
 from backend.schemas.alerts import AlertOut, AlertAcknowledge
+from backend.schemas.expenses import ExpenseCreate, ExpenseOut
 from backend.schemas.inventory import (
     InventoryCategoryBase, InventoryCategoryCreate, InventoryCategoryOut,
     InventoryItemBase, InventoryItemCreate, InventoryItemUpdate, InventoryItemOut,
@@ -24,7 +25,7 @@ from backend.schemas.inventory import (
 )
 from backend.schemas.kitchen import (
     MenuItemOut, MenuItemProposal, MenuItemEditRequestOut, EditRequestReject,
-    KitchenOrderCreate, KitchenOrderOut, KitchenOrderPrepareRequest,
+    KitchenOrderCreate, KitchenOrderOut, KitchenOrderPrepareRequest, DishPricingSet,
     GasChargeRateOut, GasChargeRateUpdate, GasChargeRateHistoryOut, MessChargeOverviewRow, OrderHistoryRow,
 )
 from backend.schemas.procurement import (
@@ -49,6 +50,7 @@ from backend.schemas.bookings import (
 from backend.schemas.billing import (
     GuestInvoiceSummary, InvoiceItemCreate, InvoiceBase, InvoiceItemOut, InvoiceOut,
     BookingChargeCreate, PaymentCreate, PaymentOut,
+    MasterBillLineCreate, MasterBillLineCorrection, LastDebitBalanceUpdate,
     InvoiceEditRequestCreate, InvoiceEditRequestOut, InvoiceEditDecision,
 )
 from backend.schemas.security import (
@@ -63,10 +65,14 @@ from backend.schemas.attendance import (
     MealAttendanceBase, MealAttendanceCreate, MealAttendanceOut,
     AttendanceMarkRequest, BulkAttendanceCreate, AttendanceLookupResult,
     ServeAttendanceRequest, NoShowSweepResult,
+    AttendanceMatrixRow, AttendanceMatrixOut, AttendanceMatrixEntry, AttendanceMatrixSave,
 )
 from backend.schemas.mess_billing import (
     MessBillOut, GuestMealChargeCreate, GuestMealChargeOut,
     DiscountApplyRequest,
+    MessBillChargeCreate, MessBillChargeOut, MessBillChargeCorrection, MessBillFieldCorrection,
+    MessBillPaymentCreate, MessBillPaymentOut,
+    MasterBillRow, MasterBillOut,
 )
 from backend.schemas.events import (
     EventMenuItemCreate, EventCreate, EventUpdate, EventStatusUpdate, EventPostponeRequest, EventActualCostUpdate,
@@ -83,13 +89,14 @@ __all__ = [
     "FeatureFlagOut", "FeatureFlagToggle", "SettingOut", "SettingUpdate",
     "AuditLogOut", "AuditLogList",
     "AlertOut", "AlertAcknowledge",
+    "ExpenseCreate", "ExpenseOut",
     "InventoryCategoryBase", "InventoryCategoryCreate", "InventoryCategoryOut",
     "InventoryItemBase", "InventoryItemCreate", "InventoryItemUpdate", "InventoryItemOut",
     "StockBatchBase", "StockBatchCreate", "StockBatchOut", "StockMovementCreate",
     "WasteLogCreate", "WasteLogOut", "CycleCountCreate",
     "StockIntakeCreate", "ReceiptConfirmLine", "ReceiptConfirmRequest",
     "MenuItemOut", "MenuItemProposal", "MenuItemEditRequestOut", "EditRequestReject",
-    "KitchenOrderCreate", "KitchenOrderOut", "KitchenOrderPrepareRequest",
+    "KitchenOrderCreate", "KitchenOrderOut", "KitchenOrderPrepareRequest", "DishPricingSet",
     "GasChargeRateOut", "GasChargeRateUpdate", "GasChargeRateHistoryOut", "MessChargeOverviewRow", "OrderHistoryRow",
     "VendorBase", "VendorCreate", "VendorUpdate", "VendorOut",
     "AttendantBase", "AttendantCreate", "AttendantUpdate", "AttendantOut", "AttendantDuty",
@@ -102,6 +109,7 @@ __all__ = [
     "GuestBookingSummary", "BookingBase", "BookingCreate", "BookingUpdate", "BookingOut", "GuestMovementOut",
     "GuestInvoiceSummary", "InvoiceItemCreate", "InvoiceBase", "InvoiceItemOut", "InvoiceOut",
     "BookingChargeCreate", "PaymentCreate", "PaymentOut",
+    "MasterBillLineCreate", "MasterBillLineCorrection", "LastDebitBalanceUpdate",
     "InvoiceEditRequestCreate", "InvoiceEditRequestOut", "InvoiceEditDecision",
     "SecurityLogCreate", "SecurityLogOut",
     "IncidentReportBase", "IncidentReportCreate", "IncidentReportUpdate", "IncidentReportOut",
@@ -110,8 +118,12 @@ __all__ = [
     "MealAttendanceBase", "MealAttendanceCreate", "MealAttendanceOut",
     "AttendanceMarkRequest", "BulkAttendanceCreate", "AttendanceLookupResult",
     "ServeAttendanceRequest", "NoShowSweepResult",
+    "AttendanceMatrixRow", "AttendanceMatrixOut", "AttendanceMatrixEntry", "AttendanceMatrixSave",
     "MessBillOut", "GuestMealChargeCreate", "GuestMealChargeOut",
     "DiscountApplyRequest",
+    "MessBillChargeCreate", "MessBillChargeOut", "MessBillChargeCorrection", "MessBillFieldCorrection",
+    "MessBillPaymentCreate", "MessBillPaymentOut",
+    "MasterBillRow", "MasterBillOut",
     "EventMenuItemCreate", "EventCreate", "EventUpdate", "EventStatusUpdate", "EventPostponeRequest", "EventActualCostUpdate",
     "DirectiveCreate", "DirectiveOut",
 ]

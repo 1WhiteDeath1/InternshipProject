@@ -5,6 +5,9 @@ from pydantic import BaseModel, Field, ConfigDict, model_validator, field_valida
 from backend.models.enums import MessCategory, DiningStatus
 
 
+_HRA_STAY_TYPES = ("in_mess", "out_of_mess")
+
+
 class MemberBase(BaseModel):
     service_number: str = Field(..., min_length=1, max_length=50)
     full_name: str = Field(..., min_length=1, max_length=200)
@@ -13,6 +16,9 @@ class MemberBase(BaseModel):
     mess_category: str
     is_womens_bloc: bool = False
     dining_status: str = "dining"
+    is_hra: bool = False
+    hra_stay_type: Optional[str] = None
+    dorm_location: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
     custom_discount_rate: float = Field(0, ge=0, le=100)
@@ -36,6 +42,29 @@ class MemberBase(BaseModel):
             raise ValueError(f"dining_status must be one of {valid}")
         return v
 
+    @field_validator("hra_stay_type")
+    @classmethod
+    def _validate_hra_stay_type(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in _HRA_STAY_TYPES:
+            raise ValueError(f"hra_stay_type must be one of {_HRA_STAY_TYPES}")
+        return v
+
+    @model_validator(mode="after")
+    def _check_hra_fields(self):
+        if self.is_hra:
+            if not self.hra_stay_type:
+                raise ValueError("hra_stay_type is required when is_hra is true")
+            if self.hra_stay_type == "out_of_mess" and not (self.dorm_location or "").strip():
+                raise ValueError("dorm_location is required for an out-of-mess HRA member")
+        if not self.is_hra or self.hra_stay_type == "in_mess":
+            # Room comes from the active HRA Booking for an in-mess resident
+            # (or doesn't apply at all for a non-HRA member) - never both a
+            # dorm_location AND a real room at once.
+            self.dorm_location = None
+        if not self.is_hra:
+            self.hra_stay_type = None
+        return self
+
 class MemberCreate(MemberBase):
     pass
 
@@ -46,10 +75,20 @@ class MemberUpdate(BaseModel):
     mess_category: Optional[str] = None
     is_womens_bloc: Optional[bool] = None
     dining_status: Optional[str] = None
+    is_hra: Optional[bool] = None
+    hra_stay_type: Optional[str] = None
+    dorm_location: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
     status: Optional[str] = None
     custom_discount_rate: Optional[float] = Field(None, ge=0, le=100)
+
+    @field_validator("hra_stay_type")
+    @classmethod
+    def _validate_hra_stay_type(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in _HRA_STAY_TYPES:
+            raise ValueError(f"hra_stay_type must be one of {_HRA_STAY_TYPES}")
+        return v
 
 class MemberStatusChange(BaseModel):
     status: str

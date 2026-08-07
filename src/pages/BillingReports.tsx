@@ -2,12 +2,21 @@ import { useEffect, useState } from 'react';
 import api, { getErrorMessage } from '@/lib/api';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import {
   Scale, ChevronLeft, ChevronRight, FileDown, Wallet,
-  Ban, Clock, Boxes, Percent, BedDouble, UtensilsCrossed,
+  Ban, Clock, Boxes, Percent, BedDouble, UtensilsCrossed, Search, Landmark,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/currency';
+
+interface AgBranchAdvance {
+  payment_id: number; voucher_number: string | null; customer_name: string | null;
+  booking_reference: string | null; invoice_number: string | null;
+  gross_advance: number; ag_branch_fee: number; net_amount: number; date: string;
+}
 
 interface CategoryFigures { income: number; cost: number | null; margin: number | null; }
 
@@ -102,6 +111,11 @@ export default function BillingReports() {
   const [stock, setStock] = useState<StockSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState<string | null>(null);
+  const [agAdvances, setAgAdvances] = useState<AgBranchAdvance[]>([]);
+  const [agVoucherSearch, setAgVoucherSearch] = useState('');
+  const [agDateFrom, setAgDateFrom] = useState('');
+  const [agDateTo, setAgDateTo] = useState('');
+  const [agLoading, setAgLoading] = useState(true);
 
   const dateStr = refDate.toISOString().slice(0, 10);
 
@@ -116,6 +130,38 @@ export default function BillingReports() {
         .finally(() => setLoading(false));
     });
   }, [period, dateStr]);
+
+  const agParams = () => `voucher_number=${encodeURIComponent(agVoucherSearch)}&date_from=${agDateFrom}&date_to=${agDateTo}`;
+
+  const fetchAgAdvances = async () => {
+    setAgLoading(true);
+    try {
+      const res = await api.get(`/billing/ag-branch-advances?${agParams()}&page_size=50`);
+      setAgAdvances(res.data.items);
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to load AG Branch advances')); }
+    finally { setAgLoading(false); }
+  };
+
+  useEffect(() => { queueMicrotask(fetchAgAdvances); }, [agVoucherSearch, agDateFrom, agDateTo]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const downloadAgAdvances = async (format: 'excel' | 'pdf') => {
+    setExporting(`ag-branch-${format}`);
+    try {
+      const path = format === 'pdf' ? '/billing/export/ag-branch-advances/pdf' : '/billing/export/ag-branch-advances';
+      const res = await api.get(`${path}?${agParams()}`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `ag_branch_advances_${dateStr}.${format === 'pdf' ? 'pdf' : 'xlsx'}`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      toast.success(`AG Branch advances exported (${format.toUpperCase()})`);
+    } catch (err) { toast.error(getErrorMessage(err, 'Export failed')); }
+    finally { setExporting(null); }
+  };
+
+  const agGrandTotal = agAdvances.reduce((s, a) => ({ gross: s.gross + a.gross_advance, fee: s.fee + a.ag_branch_fee, net: s.net + a.net_amount }), { gross: 0, fee: 0, net: 0 });
 
   const shift = (dir: 1 | -1) => {
     const d = new Date(refDate);
@@ -243,6 +289,75 @@ export default function BillingReports() {
           )}
         </>
       )}
+
+      {/* AG Branch 10% advance deduction - online-booking advances only.
+          Independent of the period picker above (a voucher lookup usually
+          spans any date), so it's its own section with its own search. */}
+      <Card id="ag-branch">
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2 text-sm font-medium"><Landmark size={16} className="text-indigo-600" /> AG Branch Advance Report</div>
+            <div className="flex gap-1.5">
+              <Button size="sm" variant="outline" disabled={!!exporting} onClick={() => downloadAgAdvances('excel')}>
+                <FileDown size={14} className="mr-1" /> {exporting === 'ag-branch-excel' ? 'Exporting…' : 'Export Excel'}
+              </Button>
+              <Button size="sm" variant="outline" disabled={!!exporting} onClick={() => downloadAgAdvances('pdf')}>
+                <FileDown size={14} className="mr-1" /> {exporting === 'ag-branch-pdf' ? 'Exporting…' : 'Export PDF'}
+              </Button>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            10% of every online-booking advance is retained by AG Branch - the guest is still credited the full amount; this is what the mess actually nets after that deduction.
+          </p>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="relative max-w-sm flex-1 min-w-52">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={16} />
+              <Input placeholder="Search by voucher number…" value={agVoucherSearch} onChange={e => setAgVoucherSearch(e.target.value)} className="pl-9 h-9" />
+            </div>
+            <div>
+              <Label className="text-xs">From</Label>
+              <Input type="date" className="h-9 w-40" value={agDateFrom} onChange={e => setAgDateFrom(e.target.value)} />
+            </div>
+            <div>
+              <Label className="text-xs">To</Label>
+              <Input type="date" className="h-9 w-40" value={agDateTo} onChange={e => setAgDateTo(e.target.value)} />
+            </div>
+          </div>
+          <Table>
+            <TableHeader><TableRow>
+              <TableHead>Voucher Number</TableHead><TableHead>Customer Name &amp; Rank</TableHead>
+              <TableHead className="text-right">Gross Advance Received</TableHead>
+              <TableHead className="text-right">10% AG Branch Fee Deducted</TableHead>
+              <TableHead className="text-right">Net Amount Received by Mess</TableHead>
+              <TableHead>Date</TableHead><TableHead>Booking Ref</TableHead>
+            </TableRow></TableHeader>
+            <TableBody>
+              {agLoading && <TableRow><TableCell colSpan={7} className="text-center py-6 text-muted-foreground">Loading…</TableCell></TableRow>}
+              {!agLoading && agAdvances.map(a => (
+                <TableRow key={a.payment_id}>
+                  <TableCell className="font-mono text-sm">{a.voucher_number || '—'}</TableCell>
+                  <TableCell>{a.customer_name || '—'}</TableCell>
+                  <TableCell className="text-right font-mono">{formatCurrency(a.gross_advance)}</TableCell>
+                  <TableCell className="text-right font-mono text-red-600">− {formatCurrency(a.ag_branch_fee)}</TableCell>
+                  <TableCell className="text-right font-mono font-semibold">{formatCurrency(a.net_amount)}</TableCell>
+                  <TableCell className="text-sm">{new Date(a.date).toLocaleDateString('en-GB')}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{a.booking_reference || '—'}</TableCell>
+                </TableRow>
+              ))}
+              {!agLoading && agAdvances.length === 0 && <TableRow><TableCell colSpan={7} className="text-center py-6 text-muted-foreground">No online-advance payments{agVoucherSearch ? ' matching that voucher number' : ' yet'}</TableCell></TableRow>}
+            </TableBody>
+            {!agLoading && agAdvances.length > 0 && (
+              <tfoot><TableRow>
+                <TableCell colSpan={2} className="font-bold text-right">Total</TableCell>
+                <TableCell className="text-right font-mono font-bold">{formatCurrency(agGrandTotal.gross)}</TableCell>
+                <TableCell className="text-right font-mono font-bold text-red-600">− {formatCurrency(agGrandTotal.fee)}</TableCell>
+                <TableCell className="text-right font-mono font-bold">{formatCurrency(agGrandTotal.net)}</TableCell>
+                <TableCell colSpan={2} />
+              </TableRow></tfoot>
+            )}
+          </Table>
+        </CardContent>
+      </Card>
     </div>
   );
 }

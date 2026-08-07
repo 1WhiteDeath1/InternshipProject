@@ -30,6 +30,7 @@ export default function GuestDiscountsPanel() {
   const [loading, setLoading] = useState(true);
   const [draftDiscount, setDraftDiscount] = useState<Record<number, string>>({});
   const [savingId, setSavingId] = useState<number | null>(null);
+  const [savingCategoryId, setSavingCategoryId] = useState<number | null>(null);
 
   const fetchGuests = async () => {
     setLoading(true);
@@ -46,12 +47,15 @@ export default function GuestDiscountsPanel() {
   useEffect(() => { queueMicrotask(fetchGuests); }, []);
 
   const changeCategory = async (guest: GuestRow, category: string) => {
+    setSavingCategoryId(guest.id);
     try {
       await api.put(`/bookings/${guest.id}/category`, { client_category: category });
       toast.success(`Category updated to ${RATE_CARD_CATEGORY_LABELS[category] || category}`);
       fetchGuests();
     } catch (e) {
       toast.error(getErrorMessage(e));
+    } finally {
+      setSavingCategoryId(null);
     }
   };
 
@@ -104,8 +108,8 @@ export default function GuestDiscountsPanel() {
                     </TableCell>
                     <TableCell>{g.room_number || '—'}</TableCell>
                     <TableCell>
-                      <Select value={g.client_category || ''} onValueChange={v => changeCategory(g, v)}>
-                        <SelectTrigger className="w-40"><SelectValue placeholder="Category" /></SelectTrigger>
+                      <Select value={g.client_category || ''} onValueChange={v => changeCategory(g, v)} disabled={savingCategoryId === g.id}>
+                        <SelectTrigger className="w-40"><SelectValue placeholder={savingCategoryId === g.id ? 'Saving…' : 'Category'} /></SelectTrigger>
                         <SelectContent>
                           {Object.entries(RATE_CARD_CATEGORY_LABELS).map(([value, label]) => (
                             <SelectItem key={value} value={value}>{label}</SelectItem>
@@ -118,7 +122,7 @@ export default function GuestDiscountsPanel() {
                         <Input
                           type="number" min={0} max={100} step="any" className="w-20"
                           value={draft !== undefined ? draft : String(g.discount_rate)}
-                          onChange={e => setDraftDiscount(prev => ({ ...prev, [g.id]: e.target.value }))}
+                          onChange={e => setDraftDiscount(prev => ({ ...prev, [g.id]: e.target.value.replace(/^0+(?=\d)/, '') }))}
                           onKeyDown={e => { if (e.key === 'Enter') saveDiscount(g); }}
                         />
                         {dirty && (

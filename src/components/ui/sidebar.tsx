@@ -358,8 +358,10 @@ function SidebarContent({ className, ...props }: React.ComponentProps<"div">) {
         // override here (shadcn's default) - this app has up to 17 nav items
         // per role, which don't fit the icon rail's height on a normal
         // screen even collapsed, so the rail must stay scrollable in both
-        // states rather than clipping the bottom items unreachably.
-        "flex min-h-0 flex-1 flex-col gap-2 overflow-auto",
+        // states rather than clipping the bottom items unreachably. Locked
+        // to overflow-y only (not overflow-auto) so the icon-only rail can
+        // never pick up horizontal scroll/drag and visibly slide sideways.
+        "flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden",
         className
       )}
       {...props}
@@ -402,7 +404,11 @@ function SidebarGroupLabel({
       data-sidebar="group-label"
       className={cn(
         "text-sidebar-foreground/70 ring-sidebar-ring flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium outline-hidden transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
-        "group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0",
+        // Collapsed-to-icon rail: this label goes opacity-0 and shifts up
+        // -mt-8 to close its gap, but without pointer-events-none it still
+        // sits on top of the previous group's last button while invisible,
+        // silently swallowing clicks meant for that nav icon.
+        "group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:pointer-events-none",
         className
       )}
       {...props}

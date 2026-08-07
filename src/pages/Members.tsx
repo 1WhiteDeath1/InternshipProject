@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { Search, Plus, IdCard, ArrowRightLeft, Settings2, Receipt } from 'lucide-react';
+import { Search, Plus, IdCard, ArrowRightLeft, Receipt } from 'lucide-react';
 import { ConfirmDialog, type ConfirmRequest } from '@/components/ConfirmDialog';
 
 interface Member {
@@ -24,6 +24,9 @@ interface Member {
   client_category: string;
   is_womens_bloc: boolean;
   dining_status: string;
+  is_hra: boolean;
+  hra_stay_type: string | null;
+  dorm_location: string | null;
   custom_discount_rate: number;
   phone: string | null;
   email: string | null;
@@ -32,14 +35,10 @@ interface Member {
   current_room_number: string | null;
 }
 
-const emptyForm = { service_number: '', full_name: '', rank: '', unit: '', mess_category: 'officers', is_womens_bloc: false, dining_status: 'dining', phone: '', email: '', custom_discount_rate: 0 };
-
-// Fixed set of 5 rank bands - same as the HRA table, always all 5 editable
-// rows (missing ones just default to Rs 0 via the backend fallback), unlike
-// Tariffs' open-ended rank x room_type x stay_type matrix.
-const WOMENS_BLOC_BANDS: [string, string][] = [
-  ['capt', 'Capt'], ['maj', 'Maj'], ['ltcol_col', 'Lt Col / Col'], ['brig', 'Brig'], ['maj_gen', 'Maj Gen'],
-];
+const emptyForm = {
+  service_number: '', full_name: '', rank: '', unit: '', mess_category: 'officers', is_womens_bloc: false,
+  dining_status: 'dining', is_hra: false, hra_stay_type: '', dorm_location: '', phone: '', email: '', custom_discount_rate: 0,
+};
 
 export default function Members() {
   const { user } = useAuth();
@@ -51,8 +50,6 @@ export default function Members() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState(emptyForm);
-  const [wbRatesOpen, setWbRatesOpen] = useState(false);
-  const [wbRates, setWbRates] = useState<Record<string, number>>({});
 
   const fetchMembers = async () => {
     try {
@@ -87,43 +84,38 @@ export default function Members() {
     setForm({
       service_number: m.service_number, full_name: m.full_name, rank: m.rank,
       unit: m.unit || '', mess_category: m.mess_category, is_womens_bloc: m.is_womens_bloc,
-      dining_status: m.dining_status || 'dining', phone: m.phone || '',
+      dining_status: m.dining_status || 'dining', is_hra: m.is_hra, hra_stay_type: m.hra_stay_type || '',
+      dorm_location: m.dorm_location || '', phone: m.phone || '',
       email: m.email || '', custom_discount_rate: m.custom_discount_rate,
     });
     setDialogOpen(true);
   };
 
   const handleSave = async () => {
+    if (form.is_hra && form.hra_stay_type === 'out_of_mess' && !form.dorm_location.trim()) {
+      toast.error('Dorm Location / Details is required for an out-of-mess HRA member');
+      return;
+    }
     try {
       if (editingId) {
-        const { full_name, rank, unit, mess_category, is_womens_bloc, dining_status, phone, email, custom_discount_rate } = form;
-        await api.put(`/members/${editingId}`, { full_name, rank, unit, mess_category, is_womens_bloc, dining_status, phone, email, custom_discount_rate });
+        const { full_name, rank, unit, mess_category, is_womens_bloc, dining_status, is_hra, hra_stay_type, dorm_location, phone, email, custom_discount_rate } = form;
+        await api.put(`/members/${editingId}`, {
+          full_name, rank, unit, mess_category, is_womens_bloc, dining_status,
+          is_hra, hra_stay_type: is_hra ? hra_stay_type : null, dorm_location: is_hra && hra_stay_type === 'out_of_mess' ? dorm_location : null,
+          phone, email, custom_discount_rate,
+        });
         toast.success('Member updated');
       } else {
-        await api.post('/members', form);
+        await api.post('/members', {
+          ...form,
+          hra_stay_type: form.is_hra ? form.hra_stay_type : null,
+          dorm_location: form.is_hra && form.hra_stay_type === 'out_of_mess' ? form.dorm_location : null,
+        });
         toast.success('Member created');
       }
       setDialogOpen(false);
       fetchMembers();
     } catch (err) { toast.error(getErrorMessage(err, 'Failed to save member')); }
-  };
-
-  const fetchWbRates = async () => {
-    try {
-      const res = await api.get('/womens-bloc-rates');
-      const map: Record<string, number> = {};
-      for (const r of res.data) map[r.rank_band] = r.monthly_amount;
-      setWbRates(map);
-    } catch { toast.error("Failed to load Women's Bloc rates"); }
-  };
-
-  const openWbRates = () => { fetchWbRates(); setWbRatesOpen(true); };
-
-  const saveWbRate = async (band: string, label: string) => {
-    try {
-      await api.put('/womens-bloc-rates', { rank_band: band, label, monthly_amount: wbRates[band] ?? 0 });
-      toast.success(`${label} rate saved`);
-    } catch (err) { toast.error(getErrorMessage(err, 'Failed to save rate')); }
   };
 
   const handleStatusChange = (id: number, status: string) => {
@@ -157,25 +149,6 @@ export default function Members() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-foreground flex items-center gap-2"><IdCard size={24} /> Member Management</h1>
         <div className="flex gap-2">
-        {hasPermission(user, 'womens_bloc_rates', 'edit') && (
-          <Dialog open={wbRatesOpen} onOpenChange={setWbRatesOpen}>
-            <DialogTrigger asChild><Button variant="outline" onClick={openWbRates}><Settings2 size={16} className="mr-1" /> Women's Bloc Rates</Button></DialogTrigger>
-            <DialogContent className="max-w-md">
-              <DialogHeader><DialogTitle>Women's Bloc Rank Rates</DialogTitle></DialogHeader>
-              <div className="space-y-3">
-                <p className="text-xs text-muted-foreground">Monthly HRA rate for a Women's Bloc resident, by rank - used instead of the standard HRA rate for members flagged Women's Bloc. Unset bands bill at Rs 0 until saved here.</p>
-                {WOMENS_BLOC_BANDS.map(([band, label]) => (
-                  <div key={band} className="flex items-center gap-2">
-                    <Label className="flex-1">{label}</Label>
-                    <Input type="number" min={0} className="w-32" value={wbRates[band] ?? 0}
-                      onChange={e => setWbRates({...wbRates, [band]: Number(e.target.value)})} />
-                    <Button size="sm" onClick={() => saveWbRate(band, label)}>Save</Button>
-                  </div>
-                ))}
-              </div>
-            </DialogContent>
-          </Dialog>
-        )}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild><Button onClick={openCreate}><Plus size={16} className="mr-1" /> Add Member</Button></DialogTrigger>
           <DialogContent className="max-w-lg">
@@ -213,7 +186,7 @@ export default function Members() {
               {hasPermission(user, 'members', 'edit') && (
                 <div>
                   <Label>Assigned Member Discount (%)</Label>
-                  <Input type="number" min={0} max={100} value={form.custom_discount_rate} onChange={e => setForm({...form, custom_discount_rate: Number(e.target.value)})} />
+                  <Input type="number" min={0} max={100} value={form.custom_discount_rate} onChange={e => setForm({...form, custom_discount_rate: Number(e.target.value.replace(/^0+(?=\d)/, ''))})} />
                 </div>
               )}
               {hasPermission(user, 'members', 'edit') && (
@@ -222,6 +195,39 @@ export default function Members() {
                   Women's Bloc resident (uses the Women's Bloc rank rate for HRA billing instead of the standard HRA rate)
                 </label>
               )}
+              {hasPermission(user, 'members', 'edit') && (
+                <div className="rounded-md border p-3 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <Label>Is HRA?</Label>
+                    <div className="flex rounded-md border overflow-hidden text-xs">
+                      {([[true, 'Yes'], [false, 'No']] as const).map(([val, label]) => (
+                        <button key={String(val)} type="button"
+                          className={`px-3 py-1 ${form.is_hra === val ? 'bg-primary text-primary-foreground font-medium' : 'bg-transparent text-muted-foreground hover:text-foreground'}`}
+                          onClick={() => setForm({...form, is_hra: val, hra_stay_type: val ? (form.hra_stay_type || 'in_mess') : '', dorm_location: val ? form.dorm_location : ''})}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {form.is_hra && (
+                    <div>
+                      <Label className="text-xs">Stay Type</Label>
+                      <select className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                        value={form.hra_stay_type} onChange={e => setForm({...form, hra_stay_type: e.target.value, dorm_location: e.target.value === 'in_mess' ? '' : form.dorm_location})}>
+                        <option value="in_mess">In-Mess Stay (internal room)</option>
+                        <option value="out_of_mess">Out-of-Mess Stay (external dorm)</option>
+                      </select>
+                      {form.hra_stay_type === 'in_mess' && (
+                        <p className="text-xs text-muted-foreground mt-1">Room is assigned via Bookings, not here - book/transfer their room from the Bookings module.</p>
+                      )}
+                      {form.hra_stay_type === 'out_of_mess' && (
+                        <Input className="mt-1.5" placeholder="Dorm Location / Details *" value={form.dorm_location}
+                          onChange={e => setForm({...form, dorm_location: e.target.value})} />
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               <Button onClick={handleSave} className="w-full">{editingId ? 'Save Changes' : 'Create Member'}</Button>
             </div>
           </DialogContent>
@@ -229,11 +235,9 @@ export default function Members() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-4">
         <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Active Members</p><p className="text-2xl font-bold">{activeCount}</p></CardContent></Card>
         <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Officers</p><p className="text-2xl font-bold">{members.filter(m => m.mess_category === 'officers').length}</p></CardContent></Card>
-        <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">JCOs</p><p className="text-2xl font-bold">{members.filter(m => m.mess_category === 'jcos').length}</p></CardContent></Card>
-        <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">ORs</p><p className="text-2xl font-bold">{members.filter(m => m.mess_category === 'ors').length}</p></CardContent></Card>
       </div>
 
       <div className="relative max-w-sm"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} /><Input placeholder="Search members..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10" /></div>
@@ -252,7 +256,12 @@ export default function Members() {
                   <TableCell>{m.unit || '-'}</TableCell>
                   <TableCell className="capitalize">{m.mess_category}</TableCell>
                   <TableCell>{m.dining_status === 'non_dining' ? <Badge variant="outline">Non-Dining</Badge> : <span className="text-muted-foreground">Dining</span>}</TableCell>
-                  <TableCell>{m.current_room_number ? <Badge className="bg-purple-100 text-purple-800">{m.current_room_number} (HRA)</Badge> : <span className="text-muted-foreground">-</span>}</TableCell>
+                  <TableCell>
+                    {m.current_room_number ? <Badge className="bg-purple-100 text-purple-800">{m.current_room_number} (HRA)</Badge>
+                      : m.is_hra && m.hra_stay_type === 'out_of_mess' ? <Badge className="bg-indigo-100 text-indigo-800">{m.dorm_location || 'Out-of-Mess'}</Badge>
+                      : m.is_hra ? <Badge variant="outline">HRA - room pending</Badge>
+                      : <span className="text-muted-foreground">-</span>}
+                  </TableCell>
                   <TableCell>{statusBadge(m.status)}</TableCell>
                   <TableCell>
                     <div className="flex gap-1">

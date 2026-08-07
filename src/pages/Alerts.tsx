@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api, { getErrorMessage } from '@/lib/api';
 import { useAuth } from '@/contexts/useAuth';
@@ -8,9 +8,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import {
-  Bell, AlertTriangle, CheckCircle, ShieldAlert, RotateCw, ChevronDown, ChevronRight,
+  Bell, AlertTriangle, CheckCircle, ShieldAlert, RotateCw,
   ClipboardCheck, CheckCircle2, XCircle, FileEdit, UtensilsCrossed,
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/currency';
@@ -28,7 +29,7 @@ interface AlertRow {
   status: string;
   module: string;
   entity_type: string | null;
-  detail: AnomalyDetail | null;
+  detail: AnomalyDetail | Record<string, string | number | null> | null;
   created_at: string;
 }
 
@@ -51,12 +52,13 @@ interface MenuEditRequest {
 
 const BILL_LABELS: Record<string, string> = { room: 'Room Bill', mess: 'Mess Bill', combined: 'Bill' };
 const SEVERITY_COLORS: Record<string, string> = {
-  low: 'hsl(var(--chart-2))', medium: 'hsl(var(--chart-3))', high: 'hsl(217 91% 55%)', critical: 'hsl(var(--destructive))',
+  low: 'hsl(var(--chart-2))', medium: 'hsl(var(--chart-3))', warning: 'hsl(43 96% 56%)',
+  high: 'hsl(217 91% 55%)', critical: 'hsl(var(--destructive))',
 };
 
 function severityBadge(sev: string) {
   const colors: Record<string, string> = {
-    low: 'bg-blue-100 text-blue-800', medium: 'bg-amber-100 text-amber-800',
+    low: 'bg-blue-100 text-blue-800', medium: 'bg-amber-100 text-amber-800', warning: 'bg-yellow-100 text-yellow-800',
     high: 'bg-orange-100 text-orange-800', critical: 'bg-red-100 text-red-800',
   };
   return <Badge className={colors[sev] || ''}>{sev}</Badge>;
@@ -73,7 +75,8 @@ function statusBadge(status: string) {
 function AlertsTab() {
   const [alerts, setAlerts] = useState<AlertRow[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [detailAlert, setDetailAlert] = useState<AlertRow | null>(null);
+  const [moduleFilter, setModuleFilter] = useState('all');
 
   const fetchAlerts = async () => {
     try {
@@ -100,22 +103,17 @@ function AlertsTab() {
     try { await api.post('/alerts/run-checks'); toast.success('Alert checks completed'); fetchAlerts(); fetchUnread(); } catch { toast.error('Failed to run checks'); }
   };
 
-  const toggleExpanded = (id: number) => {
-    setExpanded(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
-
   // By-severity breakdown, computed client-side from the already-fetched
   // list - a quick "where's the heat" glance to sit next to the status
   // counts below, rather than a whole separate reporting endpoint.
   const severityData = useMemo(() => {
-    const counts: Record<string, number> = { low: 0, medium: 0, high: 0, critical: 0 };
+    const counts: Record<string, number> = { low: 0, medium: 0, warning: 0, high: 0, critical: 0 };
     for (const a of alerts) counts[a.severity] = (counts[a.severity] || 0) + 1;
     return Object.entries(counts).map(([severity, count]) => ({ severity, count }));
   }, [alerts]);
+
+  const moduleOptions = useMemo(() => Array.from(new Set(alerts.map(a => a.module))).sort(), [alerts]);
+  const filteredAlerts = useMemo(() => moduleFilter === 'all' ? alerts : alerts.filter(a => a.module === moduleFilter), [alerts, moduleFilter]);
 
   return (
     <div className="space-y-6">
@@ -124,7 +122,13 @@ function AlertsTab() {
           <h2 className="text-lg font-semibold">Alerts</h2>
           {unreadCount > 0 && <Badge variant="destructive" className="animate-pulse">{unreadCount} new</Badge>}
         </div>
-        <Button variant="outline" onClick={runChecks}><RotateCw size={16} className="mr-1" /> Run Checks</Button>
+        <div className="flex items-center gap-2">
+          <select className="h-9 rounded-md border border-input bg-background px-3 text-sm capitalize" value={moduleFilter} onChange={e => setModuleFilter(e.target.value)}>
+            <option value="all">All Types</option>
+            {moduleOptions.map(m => <option key={m} value={m} className="capitalize">{m}</option>)}
+          </select>
+          <Button variant="outline" onClick={runChecks}><RotateCw size={16} className="mr-1" /> Run Checks</Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -168,48 +172,77 @@ function AlertsTab() {
       <Card>
         <CardContent className="p-0">
           <Table>
-            <TableHeader><TableRow><TableHead className="w-8" /><TableHead>Title</TableHead><TableHead>Message</TableHead><TableHead>Severity</TableHead><TableHead>Status</TableHead><TableHead>Module</TableHead><TableHead>Created</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead>Title</TableHead><TableHead>Message</TableHead><TableHead>Severity</TableHead><TableHead>Status</TableHead><TableHead>Module</TableHead><TableHead>Created</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
             <TableBody>
-              {alerts.map(alert => {
-                const isOpen = expanded.has(alert.id);
-                return (
-                  <Fragment key={alert.id}>
-                    <TableRow
-                      className={`${alert.status === 'new' ? 'bg-red-50/50 dark:bg-red-950/10' : ''} ${alert.detail ? 'cursor-pointer' : ''}`}
-                      onClick={() => alert.detail && toggleExpanded(alert.id)}
-                    >
-                      <TableCell>
-                        {alert.detail && (isOpen ? <ChevronDown size={14} className="text-muted-foreground" /> : <ChevronRight size={14} className="text-muted-foreground" />)}
-                      </TableCell>
-                      <TableCell className="font-medium">{alert.title}</TableCell>
-                      <TableCell className="max-w-[300px] truncate">{alert.message}</TableCell>
-                      <TableCell>{severityBadge(alert.severity)}</TableCell>
-                      <TableCell>{statusBadge(alert.status)}</TableCell>
-                      <TableCell className="capitalize">{alert.module}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{new Date(alert.created_at).toLocaleString()}</TableCell>
-                      <TableCell>
-                        <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                          {alert.status === 'new' && <Button size="sm" variant="ghost" onClick={() => handleAcknowledge(alert.id)}><CheckCircle size={16} className="text-blue-600" /></Button>}
-                          {alert.status !== 'resolved' && <Button size="sm" variant="ghost" onClick={() => handleResolve(alert.id)}><ShieldAlert size={16} className="text-green-600" /></Button>}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                    {alert.detail && isOpen && (
-                      <TableRow className="bg-muted/20">
-                        <TableCell colSpan={8} className="py-3">
-                          <p className="text-sm mb-2">{alert.message}</p>
-                          <AnomalyMiniChart detail={alert.detail} />
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </Fragment>
-                );
-              })}
-              {alerts.length === 0 && <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">No alerts</TableCell></TableRow>}
+              {filteredAlerts.map(alert => (
+                <TableRow
+                  key={alert.id}
+                  className={`cursor-pointer ${alert.status === 'new' ? 'bg-red-50/50 dark:bg-red-950/10' : ''}`}
+                  onClick={() => setDetailAlert(alert)}
+                >
+                  <TableCell className="font-medium">{alert.title}</TableCell>
+                  <TableCell className="max-w-[300px] truncate">{alert.message}</TableCell>
+                  <TableCell>{severityBadge(alert.severity)}</TableCell>
+                  <TableCell>{statusBadge(alert.status)}</TableCell>
+                  <TableCell className="capitalize">{alert.module}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{new Date(alert.created_at).toLocaleString()}</TableCell>
+                  <TableCell>
+                    <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+                      {alert.status === 'new' && <Button size="sm" variant="ghost" onClick={() => handleAcknowledge(alert.id)}><CheckCircle size={16} className="text-blue-600" /></Button>}
+                      {alert.status !== 'resolved' && <Button size="sm" variant="ghost" onClick={() => handleResolve(alert.id)}><ShieldAlert size={16} className="text-green-600" /></Button>}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {filteredAlerts.length === 0 && <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No alerts{moduleFilter === 'all' ? '' : ` for ${moduleFilter}`}</TableCell></TableRow>}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+
+      <Dialog open={!!detailAlert} onOpenChange={open => { if (!open) setDetailAlert(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>{detailAlert?.title}</DialogTitle></DialogHeader>
+          {detailAlert && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                {severityBadge(detailAlert.severity)}
+                {statusBadge(detailAlert.status)}
+                <Badge variant="outline" className="capitalize">{detailAlert.module}</Badge>
+              </div>
+              <p className="text-sm">{detailAlert.message}</p>
+              <p className="text-xs text-muted-foreground">Created {new Date(detailAlert.created_at).toLocaleString()}</p>
+
+              {detailAlert.detail && 'kind' in detailAlert.detail && (
+                <AnomalyMiniChart detail={detailAlert.detail as AnomalyDetail} />
+              )}
+              {detailAlert.detail && !('kind' in detailAlert.detail) && (
+                <div className="rounded-md border p-3 text-sm space-y-1">
+                  {Object.entries(detailAlert.detail).map(([k, v]) => (
+                    <div key={k} className="flex justify-between gap-3">
+                      <span className="text-muted-foreground capitalize">{k.replace(/_/g, ' ')}</span>
+                      <span className="font-medium">{String(v)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                {detailAlert.status === 'new' && (
+                  <Button size="sm" variant="outline" onClick={() => { handleAcknowledge(detailAlert.id); setDetailAlert(null); }}>
+                    <CheckCircle size={14} className="mr-1" /> Acknowledge
+                  </Button>
+                )}
+                {detailAlert.status !== 'resolved' && (
+                  <Button size="sm" onClick={() => { handleResolve(detailAlert.id); setDetailAlert(null); }}>
+                    <ShieldAlert size={14} className="mr-1" /> Resolve
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

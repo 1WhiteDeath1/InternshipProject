@@ -4,7 +4,7 @@
 ; PyInstaller onedir build to already exist at packaging\_build\dist\EME-MESS.
 
 #define MyAppName "EME MESS"
-#define MyAppVersion "1.5.0"
+#define MyAppVersion "1.6.0"
 #define MyAppExeName "EME-MESS.exe"
 #define MyBuildDir "_build\dist\EME-MESS"
 

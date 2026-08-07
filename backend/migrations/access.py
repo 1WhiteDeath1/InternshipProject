@@ -114,12 +114,13 @@ _ROLE_PERMISSIONS = {
         # Dining/non-dining member classification (incl. marking an HRA
         # resident who isn't actually eating there as non-dining) is a mess
         # concern, so Kitchen NCO gets full member access - not just a
-        # dining-status toggle. Room occupancy itself (who's an HRA resident,
-        # who's a checked-in guest) stays view-only - that's Booking NCO's data.
-        "members": "VCE", "bookings": "V",
-        # Sets the event's menu and advances it through the prep lifecycle
-        # (menu_set -> preparing -> completed) - not the booking itself.
-        "events": "VE", "directives": "V",
+        # dining-status toggle. No "bookings" permission at all - the
+        # Bookings module (create/check-in/cancel rooms) is Booking NCO's
+        # alone and is fully hidden/blocked for Kitchen NCO.
+        "members": "VCE",
+        # Full access: creates and manages events end-to-end (not just the
+        # prep lifecycle), same shape as Deputy Manager's event ownership.
+        "events": "VCE", "directives": "V",
         # Create-only: the meal-attendance omnibar needs to register a
         # walk-in guest's identity on the spot (no room booking involved) -
         # not the full Customer Directory, which stays Booking NCO/Manager's.
@@ -131,11 +132,14 @@ _ROLE_PERMISSIONS = {
     # instead, see the /guests/search permission check in guests.py).
     "Booking NCO": {
         "bookings": "VCE", "attendants": "VCE",
-        # "C" (not just "V") so a Booking NCO can register a brand-new HRA
-        # member inline from the booking form, instead of only picking from
-        # the existing roster - member roster edits/status changes still stay
-        # Manager's call (no "E" here).
-        "members": "VC", "tariffs": "V", "womens_bloc_rates": "V", "directives": "V",
+        # Full edit: Booking NCO owns the HRA classification fields
+        # (is_hra/hra_stay_type/dorm_location) since they're the ones
+        # actually assigning rooms/registering dorm residents, not just
+        # registering a brand-new member inline from the booking form. This
+        # view is also is_hra-filtered server-side (see members.py's
+        # list_members) - Booking NCO only ever sees HRA members here, non-
+        # HRA roster management stays Kitchen NCO's/Manager's.
+        "members": "VCE", "tariffs": "V", "womens_bloc_rates": "V", "directives": "V",
     },
     # Gate only - no guest/member/attendant lookup, no directives. Everything
     # this role needs (check-in/out log, incident reports) lives inside the

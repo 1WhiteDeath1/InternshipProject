@@ -83,6 +83,11 @@ DEFAULT_HRA_UTILITY_RATES = {
     "suite_1ac": 25500,
     "suite_2ac": 29500,
     "dg_suite": 29500,
+    # Flat monthly utility charge for an Out-of-Mess HRA resident (external
+    # dorm, no internal room) - seeded at Rs 0 like Women's Bloc rates until
+    # a Manager fills it in via Tariffs > HRA Utility Charges; see the
+    # matching zero-rate alert in mess_billing._hra_charge_and_renew.
+    "out_of_mess": 0,
 }
 
 # Ordered: longer/more specific rank names must match before their suffixes

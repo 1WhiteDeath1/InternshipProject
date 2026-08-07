@@ -66,7 +66,10 @@ export function RoomBookingForm({
     }
     setNewMemberSaving(true);
     try {
-      const res = await api.post('/members', newMember);
+      // Registered specifically to fill this HRA booking, so mark them HRA
+      // + in-mess up front rather than leaving is_hra unset - their room
+      // comes from the booking this form is about to create.
+      const res = await api.post('/members', { ...newMember, is_hra: true, hra_stay_type: 'in_mess' });
       const created: MemberOption = { id: res.data.id, full_name: res.data.full_name, service_number: res.data.service_number };
       setLocalMembers(m => [...m, created]);
       setForm({ ...form, member_id: created.id });
@@ -102,7 +105,7 @@ export function RoomBookingForm({
             <div>
               <Label className="text-xs">Advance Received (Rs) *</Label>
               <Input type="number" min={0} placeholder="Amount" value={form.advance_payment_amount}
-                onChange={e => setForm({ ...form, advance_payment_amount: e.target.value })} />
+                onChange={e => setForm({ ...form, advance_payment_amount: e.target.value.replace(/^0+(?=\d)/, '') })} />
             </div>
             <div>
               <Label className="text-xs">Date Received *</Label>

@@ -27,6 +27,8 @@ interface MessBill {
   discount_amount: number; total_amount: number; status: string;
 }
 
+interface DiningHistoryRow { date: string; meal_type: string; item_name: string; price: number; status: string; }
+
 const monthLabel = (m: number) => new Date(2000, m - 1).toLocaleString('default', { month: 'short' });
 
 const statusBadge = (status: string) => {
@@ -50,6 +52,7 @@ export default function MemberLedger() {
   const [member, setMember] = useState<MemberDetail | null>(null);
   const [residencies, setResidencies] = useState<Residency[]>([]);
   const [bills, setBills] = useState<MessBill[]>([]);
+  const [diningHistory, setDiningHistory] = useState<DiningHistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -66,6 +69,12 @@ export default function MemberLedger() {
         setBills(b.data.items);
       }).catch(err => toast.error(getErrorMessage(err, 'Failed to load member ledger')))
         .finally(() => setLoading(false));
+      // Fetched separately, non-blocking - permission-gated slightly
+      // differently (kitchen:view/members:view/clerk_desk:view/billing:view)
+      // than the ledger's own core data, so a 403 here shouldn't break the page.
+      api.get(`/kitchen/order-history?member_id=${memberId}`)
+        .then(h => setDiningHistory(h.data))
+        .catch(() => { /* dining history is a secondary section */ });
     });
   }, [memberId]);
 
@@ -161,6 +170,30 @@ export default function MemberLedger() {
                   {!loading && bills.length === 0 && <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">No mess bills yet</TableCell></TableRow>}
                 </TableBody>
               </Table>
+            </CardContent>
+          </Card>
+
+          <Card className="mt-4">
+            <CardContent className="p-4 space-y-2">
+              <p className="text-sm font-semibold">Meal History</p>
+              <p className="text-xs text-muted-foreground">Every meal attended and à la carte order this member has ever had - the day-to-day detail behind the monthly totals above.</p>
+              <div className="max-h-96 overflow-y-auto rounded-md border">
+                <Table>
+                  <TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Meal</TableHead><TableHead>Item</TableHead><TableHead className="text-right">Price</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {diningHistory.map((r, i) => (
+                      <TableRow key={i}>
+                        <TableCell>{new Date(r.date).toLocaleDateString()}</TableCell>
+                        <TableCell className="capitalize">{r.meal_type.replace(/_/g, ' ')}</TableCell>
+                        <TableCell>{r.item_name}</TableCell>
+                        <TableCell className="text-right font-mono">{formatCurrency(r.price)}</TableCell>
+                        <TableCell className="text-muted-foreground capitalize">{r.status.replace(/_/g, ' ')}</TableCell>
+                      </TableRow>
+                    ))}
+                    {diningHistory.length === 0 && <TableRow><TableCell colSpan={5} className="text-center py-6 text-muted-foreground">No meal history on record</TableCell></TableRow>}
+                  </TableBody>
+                </Table>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

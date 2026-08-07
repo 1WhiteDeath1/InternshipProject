@@ -16,7 +16,7 @@ from backend.models.alerts import Alert
 from backend.models.inventory import (
     InventoryCategory, InventoryItem, StockBatch, StockMovement, WasteLog, CycleCount,
 )
-from backend.models.kitchen import MenuItem, MenuItemEditRequest, GasChargeRate, GasChargeRateHistory, KitchenOrder
+from backend.models.kitchen import MenuItem, MenuItemEditRequest, GasChargeRate, GasChargeRateHistory, MealGasCharge, KitchenOrder
 from backend.models.procurement import Vendor
 from backend.models.rooms import Room, Attendant, RoomPhoto, AttendantDutyLog
 from backend.models.rates import (
@@ -28,7 +28,8 @@ from backend.models.billing import Invoice, InvoiceItem, InvoicePayment, Invoice
 from backend.models.security import SecurityLog, IncidentReport
 from backend.models.members import Member, MemberLeave
 from backend.models.attendance import MealAttendance
-from backend.models.mess_billing import MessBill, GuestMealCharge
+from backend.models.mess_billing import MessBill, GuestMealCharge, MessBillCharge, MessBillPayment
+from backend.models.expenses import Expense
 from backend.models.events import Event, EventMenuItem
 from backend.models.directives import Directive
 
@@ -43,7 +44,7 @@ __all__ = [
     "AuditLog",
     "Alert",
     "InventoryCategory", "InventoryItem", "StockBatch", "StockMovement", "WasteLog", "CycleCount",
-    "MenuItem", "MenuItemEditRequest", "GasChargeRate", "GasChargeRateHistory", "KitchenOrder",
+    "MenuItem", "MenuItemEditRequest", "GasChargeRate", "GasChargeRateHistory", "MealGasCharge", "KitchenOrder",
     "Vendor",
     "Room", "Attendant", "RoomPhoto", "AttendantDutyLog",
     "RoomRate", "DutyRate", "HraRankRate", "WomensBlocRankRate", "HraUtilityRate", "TariffRate",
@@ -53,7 +54,8 @@ __all__ = [
     "SecurityLog", "IncidentReport",
     "Member", "MemberLeave",
     "MealAttendance",
-    "MessBill", "GuestMealCharge",
+    "MessBill", "GuestMealCharge", "MessBillCharge", "MessBillPayment",
+    "Expense",
     "Event", "EventMenuItem",
     "Directive",
 ]

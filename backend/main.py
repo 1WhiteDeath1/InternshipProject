@@ -69,6 +69,7 @@ app.include_router(routers.womens_bloc_rates_router, prefix="/api/womens-bloc-ra
 app.include_router(routers.events_router, prefix="/api/events", tags=["Events"])
 app.include_router(routers.rate_card_router, prefix="/api/rate-card", tags=["Rate Card"])
 app.include_router(routers.directives_router, prefix="/api/directives", tags=["Directives"])
+app.include_router(routers.expenses_router, prefix="/api/expenses", tags=["Expenses"])
 
 @app.get("/api/health")
 async def health_check():

@@ -648,7 +648,7 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
                     type="number"
                     placeholder="e.g. 25.50"
                     value={quantity}
-                    onChange={e => setQuantity(e.target.value)}
+                    onChange={e => setQuantity(e.target.value.replace(/^0+(?=\d)/, ''))}
                     onKeyDown={e => { if (e.key === 'Enter') costRef.current?.focus(); }}
                     min={0}
                     step="any"
@@ -667,7 +667,7 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
                     type="number"
                     placeholder="e.g. 3,570"
                     value={totalCost}
-                    onChange={e => setTotalCost(e.target.value)}
+                    onChange={e => setTotalCost(e.target.value.replace(/^0+(?=\d)/, ''))}
                     onKeyDown={e => { if (e.key === 'Enter') submitRef.current?.focus(); }}
                     min={0}
                     step="any"

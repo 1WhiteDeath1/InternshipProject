@@ -48,7 +48,34 @@ def _migrate_kitchen_orders_ala_carte(engine):
         conn.commit()
 
 
+def _migrate_kitchen_orders_gas_amount(engine):
+    # Per-dish gas charge, replacing the old date+meal-wide MealGasCharge
+    # table (left in place, unused, per this app's no-drop migration policy).
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(kitchen_orders)")).fetchall()
+        if not cols:
+            return
+        if "gas_amount" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE kitchen_orders ADD COLUMN gas_amount NUMERIC(12, 2)"))
+            conn.commit()
+            logger.info("migration: added kitchen_orders.gas_amount")
+
+
+def _migrate_kitchen_orders_price_override(engine):
+    # Per-dish food price override, same shape/lifecycle as gas_amount above.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(kitchen_orders)")).fetchall()
+        if not cols:
+            return
+        if "price_override" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE kitchen_orders ADD COLUMN price_override NUMERIC(12, 2)"))
+            conn.commit()
+            logger.info("migration: added kitchen_orders.price_override")
+
+
 MIGRATIONS = [
     _migrate_kitchen_orders,
     _migrate_kitchen_orders_ala_carte,
+    _migrate_kitchen_orders_gas_amount,
+    _migrate_kitchen_orders_price_override,
 ]

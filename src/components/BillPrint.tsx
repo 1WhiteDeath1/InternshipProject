@@ -29,6 +29,7 @@ export interface BillInvoice {
   id: number; invoice_number: string; bill_type: string; issue_date: string;
   subtotal: number; total_amount: number; amount_paid: number; balance_due: number;
   status: string; items: BillItem[]; is_complimentary?: boolean;
+  bill_serial_number?: string | null;
 }
 interface BillBooking {
   guest_name: string; rank: string | null; pa_number: string | null; unit_address: string | null;
@@ -69,7 +70,7 @@ const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight'
   'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
 const TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
 
-function rupeesInWords(n: number): string {
+export function rupeesInWords(n: number): string {
   n = Math.round(n);
   if (n <= 0) return 'Zero';
   const two = (x: number) => x < 20 ? ONES[x] : `${TENS[Math.floor(x / 10)]}${x % 10 ? ' ' + ONES[x % 10] : ''}`;
@@ -96,7 +97,7 @@ const fmtD = (iso: string) => {
    inside it anchored the bill to the dialog (big top offset, rows clipped
    at the dialog edge, broken page breaks). The portal copy is hidden on
    screen (print:block) and positioned from the real page origin. */
-const PRINT_STYLE = `
+export const PRINT_STYLE = `
   @media print {
     body * { visibility: hidden; }
     #bill-print-area, #bill-print-area * { visibility: visible; }
@@ -109,7 +110,7 @@ const PRINT_STYLE = `
 `;
 
 /** Screen preview inside the dialog + the print-only copy portaled to <body>. */
-function PrintArea({ children }: { children: ReactNode }) {
+export function PrintArea({ children }: { children: ReactNode }) {
   return (
     <>
       <div className="space-y-4">{children}</div>
@@ -121,7 +122,7 @@ function PrintArea({ children }: { children: ReactNode }) {
   );
 }
 
-function DottedField({ label, value, grow }: { label: string; value?: string | number | null; grow?: boolean }) {
+export function DottedField({ label, value, grow }: { label: string; value?: string | number | null; grow?: boolean }) {
   return (
     <span className={`inline-flex items-baseline gap-1 ${grow ? 'flex-1' : ''}`}>
       <span className="whitespace-nowrap">{label}</span>
@@ -330,7 +331,7 @@ function RequestCorrectionDialog({ invoiceId, items, invoiceNumber, open, onClos
               </div>
               <div className="space-y-1.5">
                 <Label>{selectedHead ? 'Amount (Rs)' : 'Corrected amount (Rs)'}</Label>
-                <Input type="number" min="0" step="0.01" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} />
+                <Input type="number" min="0" step="0.01" value={unitPrice} onChange={e => setUnitPrice(e.target.value.replace(/^0+(?=\d)/, ''))} />
               </div>
               <div className="space-y-1.5">
                 <Label>Reason</Label>
@@ -361,7 +362,7 @@ interface BillPrintViewProps {
   bookingId?: number;
 }
 
-const PAYMENT_METHODS = ['Cash', 'Bank Transfer', 'Cheque', 'Online'];
+const PAYMENT_METHODS = ['Online/AG Branch', 'Bank Transfer', 'Cash Deposit'];
 
 type ViewMode = 'room' | 'mess' | 'combined';
 
@@ -391,9 +392,11 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
   const [loading, setLoading] = useState(false);
   const [paying, setPaying] = useState(false);
   const [method, setMethod] = useState(PAYMENT_METHODS[0]);
+  const [voucherNumber, setVoucherNumber] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('combined');
   const [pendingCorrectionItemIds, setPendingCorrectionItemIds] = useState<Set<number>>(new Set());
   const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [serialInput, setSerialInput] = useState('');
 
   const fetchBills = (ids: number[]) =>
     Promise.all(ids.map(id => api.get(`/billing/invoices/${id}/print-data`).then(r => r.data as PrintData)))
@@ -452,14 +455,29 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
   const activeBill = showTabs ? (viewMode === 'room' ? roomBill : viewMode === 'mess' ? messBill : undefined) : bills[0];
   const activeBillHasPendingCorrection = !!activeBill?.invoice.items.some(it => pendingCorrectionItemIds.has(it.id));
 
+  useEffect(() => {
+    setSerialInput(activeBill?.invoice.bill_serial_number || '');
+  }, [activeBill?.invoice.id]);
+
+  const saveSerialNumber = async () => {
+    if (!activeBill || activeBill.invoice.id <= 0) return;
+    const trimmed = serialInput.trim();
+    if (trimmed === (activeBill.invoice.bill_serial_number || '')) return;
+    try {
+      await api.put(`/billing/invoices/${activeBill.invoice.id}/serial-number`, { bill_serial_number: trimmed });
+      activeBill.invoice.bill_serial_number = trimmed || null;
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to save bill serial number')); }
+  };
+
   const unpaid = bills.filter(b => b.invoice.balance_due > 0.005 && b.invoice.status !== 'void');
   const unpaidTotal = unpaid.reduce((s, b) => s + b.invoice.balance_due, 0);
 
   const payInvoices = async (targets: PrintData[]) => {
+    if (method === 'Online/AG Branch' && !voucherNumber.trim()) { toast.error('Voucher Number is required for Online/AG Branch payments'); return; }
     setPaying(true);
     try {
       for (const b of targets) {
-        await api.post(`/billing/invoices/${b.invoice.id}/payments`, { amount: b.invoice.balance_due, method });
+        await api.post(`/billing/invoices/${b.invoice.id}/payments`, { amount: b.invoice.balance_due, method, voucher_number: voucherNumber.trim() || undefined });
       }
       toast.success(targets.length > 1
         ? `Both bills settled together — ${formatCurrency(targets.reduce((s, b) => s + b.invoice.balance_due, 0))} by ${method}`
@@ -479,7 +497,16 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <style>{PRINT_STYLE}</style>
         <DialogHeader>
-          <DialogTitle>{showTabs ? titles[viewMode] : 'Bill'}</DialogTitle>
+          <div className="flex items-start justify-between gap-3 pr-6">
+            <DialogTitle>{showTabs ? titles[viewMode] : 'Bill'}</DialogTitle>
+            {allowPayments && activeBill && activeBill.invoice.id > 0 && (
+              <div className="flex flex-col items-end gap-1 print:hidden">
+                <Label htmlFor="bill-serial-number" className="text-[11px] text-muted-foreground font-normal">Bill Serial No.</Label>
+                <Input id="bill-serial-number" className="h-8 w-32 text-sm" value={serialInput}
+                  onChange={e => setSerialInput(e.target.value)} onBlur={saveSerialNumber} placeholder="e.g. 1045" />
+              </div>
+            )}
+          </div>
         </DialogHeader>
         {loading && <p className="text-sm text-muted-foreground">Loading bill…</p>}
         {/* Three views over the same stay: Room-only and Mess-only keep
@@ -532,6 +559,9 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
                 {PAYMENT_METHODS.map(m => <option key={m}>{m}</option>)}
               </select>
             </div>
+            {(method === 'Online/AG Branch' || method === 'Bank Transfer') && (
+              <Input placeholder={method === 'Online/AG Branch' ? 'Voucher Number (required)' : 'Voucher Number (optional)'} className="h-8 text-xs" value={voucherNumber} onChange={e => setVoucherNumber(e.target.value)} />
+            )}
             <div className="flex flex-wrap gap-2">
               {unpaid.length > 1 && (
                 <Button size="sm" disabled={paying} onClick={() => payInvoices(unpaid)}>
@@ -687,17 +717,18 @@ interface ReceiptData {
   mess: MessIdentity; qr_svg: string;
 }
 
-export function PaymentReceiptView({ paymentId, onClose }: { paymentId: number | null; onClose: () => void }) {
+export function PaymentReceiptView({ paymentId, onClose, kind = 'invoice' }: { paymentId: number | null; onClose: () => void; kind?: 'invoice' | 'mess_bill' }) {
   const [data, setData] = useState<ReceiptData | null>(null);
 
   useEffect(() => {
     queueMicrotask(() => {
       if (!paymentId) { setData(null); return; }
-      api.get(`/billing/payments/${paymentId}/receipt-data`)
+      const path = kind === 'mess_bill' ? `/mess-billing/payments/${paymentId}/receipt-data` : `/billing/payments/${paymentId}/receipt-data`;
+      api.get(path)
         .then(r => setData(r.data))
         .catch(err => toast.error(getErrorMessage(err, 'Failed to load receipt')));
     });
-  }, [paymentId]);
+  }, [paymentId, kind]);
 
   if (!paymentId) return null;
   return (
@@ -708,14 +739,15 @@ export function PaymentReceiptView({ paymentId, onClose }: { paymentId: number |
         {data && (
           <PrintArea>
             <div className="bill-page border border-gray-400 rounded-sm p-5 text-[13px] text-foreground bg-white space-y-3">
-              <p className="text-right text-[11px] text-muted-foreground">{data.mess.phone}</p>
-              <div className="text-center">
-                <p className="font-bold text-lg tracking-wide uppercase">{data.mess.name}</p>
-                <p className="text-[11px] text-muted-foreground">{data.mess.address}</p>
-              </div>
-              <div className="flex justify-between items-end gap-4">
-                <DottedField label="No." value={data.receipt_no} />
+              <div className="flex justify-between items-start gap-4">
+                <p className="font-bold text-base border border-gray-500 rounded-sm px-2 py-1 shrink-0">{data.receipt_no}</p>
+                <div className="text-center flex-1">
+                  <p className="font-bold text-lg tracking-wide uppercase">{data.mess.name}</p>
+                  <p className="text-[11px] text-muted-foreground">{data.mess.address} | {data.mess.phone}</p>
+                </div>
                 <div className="w-14 h-14 shrink-0 [&>svg]:w-full [&>svg]:h-full" dangerouslySetInnerHTML={{ __html: data.qr_svg }} />
+              </div>
+              <div className="flex justify-end">
                 <DottedField label="Date" value={fmtD(data.date)} />
               </div>
               <div className="space-y-2.5 pt-1">

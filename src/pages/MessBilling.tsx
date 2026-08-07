@@ -12,10 +12,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Wallet, RefreshCw, CheckCircle, DollarSign, Percent, Plus, Printer, FileText } from 'lucide-react';
+import { Wallet, RefreshCw, CheckCircle, DollarSign, Percent, Plus, Printer, FileText, ClipboardEdit } from 'lucide-react';
 import { defaultMealForNow } from '@/lib/mealDefaults';
 import { formatCurrency } from '@/lib/currency';
 import { RoomLeaseDispatchView, DietInvoiceView } from '@/components/MessBillPrint';
+import { MasterBillView } from '@/components/MasterBillView';
+import { PaymentReceiptView } from '@/components/BillPrint';
 
 interface MessBill {
   id: number;
@@ -34,6 +36,8 @@ interface MessBill {
   discount_amount: number;
   discount_reason: string | null;
   total_amount: number;
+  amount_paid?: number;
+  last_debit_balance?: number;
   status: string;
 }
 
@@ -71,6 +75,10 @@ export default function MessBilling() {
   const [chargeForm, setChargeForm] = useState(emptyChargeForm());
   const [dispatchOpen, setDispatchOpen] = useState(false);
   const [dietInvoiceBillId, setDietInvoiceBillId] = useState<number | null>(null);
+  const [masterBillId, setMasterBillId] = useState<number | null>(null);
+  const [paymentBill, setPaymentBill] = useState<MessBill | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState(0);
+  const [receiptPaymentId, setReceiptPaymentId] = useState<number | null>(null);
 
   const fetchBills = async () => {
     try {
@@ -135,9 +143,16 @@ export default function MessBilling() {
     catch (err) { toast.error(getErrorMessage(err, 'Failed to issue bill')); }
   };
 
-  const handleMarkPaid = async (id: number) => {
-    try { await api.post(`/mess-billing/bills/${id}/mark-paid`); toast.success('Bill marked paid'); fetchBills(); }
-    catch (err) { toast.error(getErrorMessage(err, 'Failed to mark paid')); }
+  const handleRecordPayment = async () => {
+    if (!paymentBill || paymentAmount <= 0) { toast.error('Enter a valid payment amount'); return; }
+    try {
+      const res = await api.post(`/mess-billing/bills/${paymentBill.id}/payments`, { amount: paymentAmount });
+      toast.success('Payment recorded');
+      setPaymentBill(null);
+      setPaymentAmount(0);
+      setReceiptPaymentId(res.data.id);
+      fetchBills();
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to record payment')); }
   };
 
   const handleApplyDiscount = async () => {
@@ -227,10 +242,19 @@ export default function MessBilling() {
                       <TableCell>
                         <div className="flex gap-1">
                           {b.status === 'draft' && <Button size="sm" variant="ghost" onClick={() => handleIssue(b.id)}><CheckCircle size={16} className="text-blue-600" /></Button>}
-                          {b.status === 'issued' && <Button size="sm" variant="ghost" onClick={() => handleMarkPaid(b.id)}><DollarSign size={16} className="text-green-600" /></Button>}
+                          {b.status === 'issued' && (
+                            <Button size="sm" variant="ghost" title="Record Payment" onClick={() => { setPaymentBill(b); setPaymentAmount(0); }}>
+                              <DollarSign size={16} className="text-green-600" />
+                            </Button>
+                          )}
                           {hasPermission(user, 'mess_billing', 'approve') && b.status !== 'paid' && (
                             <Button size="sm" variant="ghost" onClick={() => { setDiscountBill(b); setDiscountRate(b.applied_discount_rate); setDiscountReason(''); }}>
                               <Percent size={16} className="text-purple-600" />
+                            </Button>
+                          )}
+                          {b.status !== 'draft' && (
+                            <Button size="sm" variant="ghost" title="Make Bill / Interactive Table" onClick={() => setMasterBillId(b.id)}>
+                              <ClipboardEdit size={16} className="text-blue-600" />
                             </Button>
                           )}
                           <Button size="sm" variant="ghost" title="Print Diet Invoice" onClick={() => setDietInvoiceBillId(b.id)}>
@@ -316,6 +340,23 @@ export default function MessBilling() {
         <RoomLeaseDispatchView month={month} year={year} onClose={() => setDispatchOpen(false)} />
       )}
       <DietInvoiceView billId={dietInvoiceBillId} onClose={() => setDietInvoiceBillId(null)} />
+      <MasterBillView source="mess_bill" sourceId={masterBillId} onClose={() => { setMasterBillId(null); fetchBills(); }} />
+
+      <Dialog open={!!paymentBill} onOpenChange={(open) => { if (!open) { setPaymentBill(null); setPaymentAmount(0); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Record Payment - {paymentBill?.member_name}</DialogTitle></DialogHeader>
+          {paymentBill && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Total: {formatCurrency(paymentBill.total_amount + (paymentBill.last_debit_balance || 0))} &middot; Paid: {formatCurrency(paymentBill.amount_paid || 0)}
+              </p>
+              <div><Label>Payment Amount</Label><Input type="number" min={0} value={paymentAmount || ''} onChange={e => setPaymentAmount(Number(e.target.value))} /></div>
+              <Button onClick={handleRecordPayment} className="w-full">Record Payment</Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+      <PaymentReceiptView paymentId={receiptPaymentId} kind="mess_bill" onClose={() => setReceiptPaymentId(null)} />
     </div>
   );
 }

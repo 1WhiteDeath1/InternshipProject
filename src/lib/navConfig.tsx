@@ -2,7 +2,7 @@ import {
   LayoutDashboard, Package, BedDouble, Receipt,
   Shield, Users, UserCog, ClipboardList, Bell, BarChart3,
   Settings, FileUp, IdCard, UtensilsCrossed, Wallet, ChefHat, LayoutGrid, Contact, UserCircle2,
-  TrendingUp, CalendarDays, MessageSquare, Scale,
+  TrendingUp, CalendarDays, MessageSquare, Scale, Banknote, Landmark,
 } from 'lucide-react';
 
 export interface Permission { module: string; action: string }
@@ -60,6 +60,12 @@ export const navItems: NavItem[] = [
   // issue/collect/discount/print what gets generated here.
   { path: '/mess-billing', label: 'Mess Billing', icon: Wallet, feature: 'mess_billing', requiredPermission: { module: 'mess_billing', action: 'view' }, group: 'Front Desk & Billing' },
   { path: '/billing-reports', label: 'Income & Cost', icon: Scale, feature: null, requiredPermission: { module: 'billing', action: 'view' }, group: 'Front Desk & Billing' },
+  // Same page as Income & Cost above (AG Branch is one card within it) -
+  // a second, distinctly-labeled entry point so it's directly reachable
+  // from the sidebar by its own name, not just as a scroll-down inside a
+  // broader financial-summary page.
+  { path: '/billing-reports#ag-branch', label: 'AG Branch Advance Report', icon: Landmark, feature: null, requiredPermission: { module: 'billing', action: 'view' }, group: 'Front Desk & Billing' },
+  { path: '/expenses', label: 'Expenses', icon: Banknote, feature: null, requiredPermission: { module: 'clerk_desk', action: 'view' }, group: 'Front Desk & Billing' },
 
   // --- Kitchen & stock operations (Kitchen NCO) ---
   { path: '/kitchen', label: 'Kitchen', icon: ChefHat, feature: 'kitchen_module', requiredPermission: { module: 'kitchen', action: 'view' }, group: 'Kitchen & Stock' },

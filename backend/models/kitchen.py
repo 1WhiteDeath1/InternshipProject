@@ -3,7 +3,7 @@ kitchen production orders, and the gas charge percentage rate that feeds
 guest bills (the Extra Messing total itself is always computed from actual
 orders - see backend/services/mess_charge_calc.py)."""
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, Text, ForeignKey, Numeric, Enum
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, Text, ForeignKey, Numeric, Enum, UniqueConstraint
 from sqlalchemy.orm import relationship
 from backend.database import Base
 from backend.models.enums import MealType, EditRequestStatus
@@ -79,6 +79,28 @@ class GasChargeRateHistory(Base):
     changed_at = Column(DateTime, default=datetime.utcnow)
 
 
+class MealGasCharge(Base):
+    """A flat Sui Gas Charges on Messing amount the Kitchen NCO sets once per
+    date+meal_type (e.g. "Dinner on 6 Aug = Rs 50") - every member/guest with
+    an 'attended' MealAttendance row for that date+meal is charged exactly
+    this amount instead of the old mess-wide percentage estimate (see
+    compute_unbilled_gas_total in backend/services/mess_charge_calc.py). One
+    row per (date, meal_type); re-setting it before that meal is billed
+    overwrites the amount for everyone still unbilled for it. A date+meal
+    that was never manually set falls back to GasChargeRate's percentage
+    estimate, so unconfigured history never shows Rs 0 gas."""
+    __tablename__ = "meal_gas_charges"
+
+    id = Column(Integer, primary_key=True)
+    date = Column(Date, nullable=False)
+    meal_type = Column(Enum(MealType), nullable=False)
+    amount = Column(Numeric(12, 2), nullable=False)
+    set_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("date", "meal_type", name="uq_meal_gas_charge_date_meal"),)
+
+
 class KitchenOrder(Base):
     __tablename__ = "kitchen_orders"
 
@@ -106,6 +128,19 @@ class KitchenOrder(Base):
     member_id = Column(Integer, ForeignKey("members.id"), nullable=True)
     booking_id = Column(Integer, ForeignKey("bookings.id"), nullable=True)
     sla_minutes = Column(Integer, nullable=True)
+    # --- Per-dish gas charge (routine/non-ala-carte orders only) ---
+    # Set once by the Kitchen NCO for this exact (meal_date, meal_type,
+    # menu_item_id) batch - a per-head amount every member/guest with an
+    # 'attended' MealAttendance row for that same date/meal/dish is charged,
+    # replacing the old date+meal-wide MealGasCharge (see mess_charge_calc.py's
+    # _dish_pricing_order). Null until the NCO sets it; never used for
+    # is_ala_carte orders or manual orders with no meal_date/meal_type.
+    gas_amount = Column(Numeric(12, 2), nullable=True)
+    # Per-dish food price override, same shape/lifecycle as gas_amount above -
+    # null means "use MenuItem.price" (the automatic default), set means every
+    # attendee of this exact date+meal+dish is charged this amount instead.
+    # Set together with gas_amount via PUT /kitchen/dish-pricing.
+    price_override = Column(Numeric(12, 2), nullable=True)
     due_at = Column(DateTime, nullable=True)  # fixed at creation; later SystemSetting changes don't move it
     cooking_started_at = Column(DateTime, nullable=True)  # set the instant status -> "cooking"
     escalated_at = Column(DateTime, nullable=True)  # idempotency guard: >15min-overdue admin alert posted once

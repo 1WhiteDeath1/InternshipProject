@@ -8,9 +8,9 @@ startup - each check is a no-op once applied.
 Split into one file per domain (see docs/MODULE_STRUCTURE.md) - each exports
 a MIGRATIONS list. Add a new patch to an existing domain by appending to that
 domain's list; only edit this file when adding a brand-new domain."""
-from backend.migrations import access, rooms, bookings, billing, inventory, kitchen, attendance, mess_billing, members, alerts, events
+from backend.migrations import access, rooms, bookings, billing, inventory, kitchen, attendance, mess_billing, members, alerts, events, expenses
 
-_DOMAINS = (access, rooms, bookings, billing, inventory, kitchen, attendance, mess_billing, members, alerts, events)
+_DOMAINS = (access, rooms, bookings, billing, inventory, kitchen, attendance, mess_billing, members, alerts, events, expenses)
 
 
 def run_startup_migrations(engine):

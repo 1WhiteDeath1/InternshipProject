@@ -1,36 +1,40 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api, { getErrorMessage } from '@/lib/api';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { UtensilsCrossed, XCircle, Lock } from 'lucide-react';
+import { UtensilsCrossed, Lock } from 'lucide-react';
 import { MealAttendanceOmnibar } from '@/components/MealAttendanceOmnibar';
 import { ConfirmDialog, type ConfirmRequest } from '@/components/ConfirmDialog';
+import { defaultMealForNow } from '@/lib/mealDefaults';
 
-interface AttendeeRow {
-  attendance_id: number;
-  kind: 'member' | 'booking' | 'guest';
+interface MatrixRow {
+  kind: 'member' | 'booking';
+  id: number;
   name: string;
   sub_label: string | null;
-  menu_item_name: string | null;
-  status: string;
+  present: boolean;
+  status: string | null;
+  on_leave: boolean;
+  attendance_id: number | null;
+}
+interface Matrix {
+  date: string; meal_type: string; locked: boolean; has_saved_records: boolean;
+  dining: MatrixRow[]; non_dining: MatrixRow[]; guests: MatrixRow[];
 }
 
 interface MenuItemOption { id: number; name: string; }
 interface CutoffInfo { cutoff: string; locked: boolean; }
 
-const MEAL_TYPES = ['breakfast', 'lunch', 'dinner'];
-const MEAL_LABELS: Record<string, string> = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner' };
-const KIND_LABEL: Record<AttendeeRow['kind'], string> = { member: 'Member', booking: 'Guest', guest: 'Guest' };
+const MEAL_TYPES = ['breakfast', 'lunch', 'hitea', 'dinner'];
+const MEAL_LABELS: Record<string, string> = { breakfast: 'Breakfast', lunch: 'Lunch', hitea: 'Hi-Tea', dinner: 'Dinner' };
 
-function defaultMeal(): string {
-  const hour = new Date().getHours();
-  if (hour < 11) return 'breakfast';
-  if (hour < 17) return 'lunch';
-  return 'dinner';
-}
+function rowKey(r: { kind: string; id: number }) { return `${r.kind}-${r.id}`; }
 
 function formatTime12h(hhmm: string): string {
   const [h, m] = hhmm.split(':').map(Number);
@@ -39,10 +43,49 @@ function formatTime12h(hhmm: string): string {
   return `${h12}:${String(m).padStart(2, '0')} ${period}`;
 }
 
+// Module-level (not defined inside Attendance) so React keeps a stable
+// component identity across renders of the parent.
+interface AttendanceGroupProps {
+  title: string;
+  rows: MatrixRow[];
+  isRowDisabled: (r: MatrixRow) => boolean;
+  onToggle: (r: MatrixRow) => void;
+  onSpecialOrder: (r: MatrixRow) => void;
+}
+
+function AttendanceGroup({ title, rows, isRowDisabled, onToggle, onSpecialOrder }: AttendanceGroupProps) {
+  return (
+    <Card>
+      <CardContent className="p-4 space-y-2">
+        <h3 className="text-sm font-semibold text-muted-foreground">{title} ({rows.length})</h3>
+        {rows.length === 0 && <p className="text-xs text-muted-foreground">None</p>}
+        {rows.map(r => (
+          <div key={rowKey(r)} className="flex items-center justify-between gap-3 py-1.5 border-b last:border-0">
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">{r.name}</p>
+              <p className="text-xs text-muted-foreground truncate">{r.sub_label || '-'}</p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {r.on_leave && <Badge variant="outline" className="text-xs">On Leave</Badge>}
+              {r.status === 'attended' && <Badge className="bg-emerald-100 text-emerald-800 text-xs">Served</Badge>}
+              {r.status === 'no_show' && <Badge className="bg-red-100 text-red-800 text-xs">No-Show</Badge>}
+              <Button size="sm" variant="ghost" title="Special order for this person" onClick={() => onSpecialOrder(r)}>
+                <UtensilsCrossed size={14} />
+              </Button>
+              <Switch checked={r.present} disabled={isRowDisabled(r)} onCheckedChange={() => onToggle(r)} />
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Attendance() {
+  const navigate = useNavigate();
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [mealType, setMealType] = useState<string>(defaultMeal());
-  const [attendeesByMeal, setAttendeesByMeal] = useState<Record<string, AttendeeRow[]>>({});
+  const [meal, setMeal] = useState<string>(defaultMealForNow());
+  const [matrixByMeal, setMatrixByMeal] = useState<Record<string, Matrix>>({});
   const [cutoffs, setCutoffs] = useState<Record<string, CutoffInfo>>({});
   const [loading, setLoading] = useState(true);
   const [menuItems, setMenuItems] = useState<MenuItemOption[]>([]);
@@ -51,72 +94,102 @@ export default function Attendance() {
 
   const isPast = new Date(date) < new Date(new Date().toDateString());
 
-  const fetchAttendees = useCallback(async () => {
+  const fetchMatrixFor = useCallback(async (mt: string) => {
+    // Explicit no-cache: this reflects live headcounts, and a same-shaped
+    // GET can otherwise return a stale cached list for the same date/meal.
+    const res = await api.get(`/attendance/matrix?date=${date}&meal_type=${mt}`, { headers: { 'Cache-Control': 'no-cache' } });
+    return [mt, res.data as Matrix] as const;
+  }, [date]);
+
+  const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [attendeeResults, cutoffRes] = await Promise.all([
-        Promise.all(
-          // Explicit no-cache: this reflects live headcounts (people are added/
-          // removed constantly), and the browser has no way to know that on its
-          // own for a same-shaped GET - without this a cached response for an
-          // identical date/meal query can quietly show a stale list.
-          MEAL_TYPES.map(mt => api.get(`/attendance/attendees?date=${date}&meal_type=${mt}`, { headers: { 'Cache-Control': 'no-cache' } }).then(res => [mt, res.data] as const))
-        ),
+      const [results, cutoffRes] = await Promise.all([
+        Promise.all(MEAL_TYPES.map(mt => fetchMatrixFor(mt))),
         api.get(`/attendance/cutoffs?date=${date}`, { headers: { 'Cache-Control': 'no-cache' } }),
       ]);
-      const next: Record<string, AttendeeRow[]> = {};
-      for (const [mt, rows] of attendeeResults) next[mt] = Array.isArray(rows) ? rows : [];
-      setAttendeesByMeal(next);
+      const next: Record<string, Matrix> = {};
+      for (const [mt, data] of results) next[mt] = data;
+      setMatrixByMeal(next);
       setCutoffs(cutoffRes.data);
     } catch { toast.error('Failed to load attendance'); }
     finally { setLoading(false); }
-  }, [date]);
+  }, [date, fetchMatrixFor]);
+
+  const refreshMeal = useCallback(async (mt: string) => {
+    try {
+      const [, data] = await fetchMatrixFor(mt);
+      setMatrixByMeal(prev => ({ ...prev, [mt]: data }));
+    } catch { toast.error('Failed to refresh attendance'); }
+  }, [fetchMatrixFor]);
 
   const fetchMenuItems = useCallback(async () => {
-    try { const res = await api.get(`/kitchen/menu?meal_type=${mealType}`); setMenuItems(res.data); }
+    try { const res = await api.get(`/kitchen/menu?meal_type=${meal}`); setMenuItems(res.data); }
     catch { toast.error('Failed to load menu items'); }
-  }, [mealType]);
+  }, [meal]);
 
   useEffect(() => {
-    queueMicrotask(() => { fetchAttendees(); });
-  }, [date, fetchAttendees]);
+    queueMicrotask(() => { fetchAll(); });
+  }, [date, fetchAll]);
 
   useEffect(() => {
     queueMicrotask(() => { setSelectedMenuItemId(0); fetchMenuItems(); });
-  }, [mealType, fetchMenuItems]);
+  }, [meal, fetchMenuItems]);
 
-  const removeAttendee = async (row: AttendeeRow, reason?: string) => {
+  const currentMatrix = matrixByMeal[meal];
+  const lockedMeals: Record<string, boolean> = {};
+  for (const mt of MEAL_TYPES) lockedMeals[mt] = cutoffs[mt]?.locked ?? false;
+  const mealLocked = currentMatrix?.locked ?? false;
+
+  const commitToggle = async (r: MatrixRow, present: boolean) => {
     try {
-      await api.post(`/attendance/${row.attendance_id}/mark`, { status: 'cancelled', reason });
-      toast.success(`Removed ${row.name}`);
-      fetchAttendees();
+      await api.post('/attendance/matrix', { date, meal_type: meal, entries: [{ kind: r.kind, id: r.id, present }] });
+      refreshMeal(meal);
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to update attendance')); }
+  };
+
+  const removeViaMark = async (attendanceId: number, reason: string) => {
+    try {
+      await api.post(`/attendance/${attendanceId}/mark`, { status: 'cancelled', reason });
+      toast.success('Removed');
+      refreshMeal(meal);
     } catch (err) { toast.error(getErrorMessage(err, 'Failed to remove')); }
   };
 
-  const handleRemove = (row: AttendeeRow) => {
-    if (!isPast) {
-      removeAttendee(row);
+  const handleToggle = (r: MatrixRow) => {
+    if (r.status === 'attended') return;
+    if (r.present) {
+      if (!mealLocked) { commitToggle(r, false); return; }
+      // Hard-lock (today past cutoff) has no override - only a genuinely
+      // past date with an actual saved record can be corrected, and only
+      // with a reason, matching the backend's own distinction.
+      if (isPast && r.attendance_id) {
+        setConfirmRequest({
+          title: 'Remove past attendance record?',
+          description: `${r.name} — ${date}`,
+          confirmLabel: 'Remove',
+          destructive: true,
+          reasonLabel: 'Reason for this correction',
+          reasonRequired: true,
+          reasonMinLength: 10,
+          onConfirm: (reason) => removeViaMark(r.attendance_id!, reason),
+        });
+      }
       return;
     }
-    setConfirmRequest({
-      title: 'Remove past attendance record?',
-      description: `${row.name} — ${date}`,
-      confirmLabel: 'Remove',
-      destructive: true,
-      reasonLabel: 'Reason for this correction',
-      reasonRequired: true,
-      reasonMinLength: 10,
-      onConfirm: (reason) => removeAttendee(row, reason),
-    });
+    if (mealLocked) return;
+    commitToggle(r, true);
   };
 
-  const currentAttendees = attendeesByMeal[mealType] ?? [];
-  const lockedMeals: Record<string, boolean> = {};
-  for (const mt of MEAL_TYPES) lockedMeals[mt] = cutoffs[mt]?.locked ?? false;
-  // Hard-lock (no override) only applies to today once its cutoff passes -
-  // a genuinely past date keeps using the existing reason-required
-  // correction flow below, matching the backend's own distinction.
-  const currentLocked = !isPast && lockedMeals[mealType];
+  const isRowDisabled = (r: MatrixRow) => {
+    if (r.status === 'attended') return true;
+    if (r.present) return mealLocked && !(isPast && r.attendance_id);
+    return mealLocked;
+  };
+
+  const handleSpecialOrder = (r: MatrixRow) => {
+    navigate('/kitchen', { state: { openAlaCarte: true, presetConsumerKind: r.kind, presetConsumerId: r.id } });
+  };
 
   return (
     <div className="space-y-6">
@@ -129,18 +202,19 @@ export default function Attendance() {
       </div>
 
       {/* Meal selector - the cards double as the view, no separate tab bar */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {MEAL_TYPES.map(mt => {
-          const rows = attendeesByMeal[mt] ?? [];
-          const names = rows.map(r => r.name);
-          const isActive = mt === mealType;
+          const matrix = matrixByMeal[mt];
+          const presentRows = matrix ? [...matrix.dining, ...matrix.non_dining, ...matrix.guests].filter(r => r.present) : [];
+          const names = presentRows.map(r => r.name);
+          const isActive = mt === meal;
           const locked = lockedMeals[mt];
           const cutoff = cutoffs[mt]?.cutoff;
           return (
             <Card
               key={mt}
               className={`cursor-pointer transition-colors ${isActive ? 'ring-2 ring-primary border-primary' : 'hover:border-gray-300 dark:hover:border-gray-600'}`}
-              onClick={() => setMealType(mt)}
+              onClick={() => setMeal(mt)}
             >
               <CardContent className="p-4">
                 <div className="flex items-center justify-between mb-2">
@@ -174,47 +248,33 @@ export default function Attendance() {
                 {menuItems.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
             </div>
-            <div className="flex-1" />
-            <Badge className="bg-green-100 text-green-800">{currentAttendees.length} confirmed for {MEAL_LABELS[mealType]}</Badge>
           </div>
           <MealAttendanceOmnibar
-            date={date} mealType={mealType} menuItemId={selectedMenuItemId} onAdded={fetchAttendees}
+            date={date} mealType={meal} menuItemId={selectedMenuItemId} onAdded={fetchAll}
             mealTypes={MEAL_TYPES} mealLabels={MEAL_LABELS} lockedMeals={lockedMeals}
           />
         </CardContent>
       </Card>
 
       {isPast && <p className="text-xs text-amber-600">Editing a past date — removals will ask for a correction reason.</p>}
+      {!mealLocked && !currentMatrix?.has_saved_records && !loading && (
+        <p className="text-xs text-muted-foreground">Showing default attendance for {MEAL_LABELS[meal]} (nothing saved yet) - Dining ON, Non-Dining and Room Guests OFF. Toggle to adjust.</p>
+      )}
+      {mealLocked && !isPast && (
+        <p className="text-xs text-red-600 flex items-center gap-1.5"><Lock size={13} /> {MEAL_LABELS[meal]}'s attendance window has closed - toggles are locked.</p>
+      )}
 
-      {/* Attendees */}
-      <Card>
-        <CardContent className="p-0">
-          {loading && <p className="text-center py-8 text-muted-foreground">Loading…</p>}
-          {!loading && currentAttendees.length === 0 && (
-            <p className="text-center py-8 text-muted-foreground">No one confirmed for {MEAL_LABELS[mealType]} yet — add someone above.</p>
-          )}
-          {!loading && currentAttendees.map(row => (
-            <div key={row.attendance_id} className="flex items-center justify-between gap-3 px-4 py-3 border-b last:border-0 border-border">
-              <div>
-                <p className="font-medium text-sm">{row.name} <span className="text-xs text-muted-foreground">({KIND_LABEL[row.kind]})</span></p>
-                <p className="text-xs text-muted-foreground">{row.sub_label}{row.menu_item_name ? ` · ${row.menu_item_name}` : ''}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge className={row.status === 'attended' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}>{row.status}</Badge>
-                {currentLocked ? (
-                  <span title="Final — this meal's booking window is closed" className="text-muted-foreground">
-                    <Lock size={16} />
-                  </span>
-                ) : (
-                  <button onClick={() => handleRemove(row)} className="text-muted-foreground hover:text-red-500" title="Remove">
-                    <XCircle size={18} />
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+      {/* Roster - every Dining member (default ON), Non-Dining member (default
+          OFF), and non-member checked-in room guest (default OFF), divided
+          into groups so the NCO can scan each population at a glance. */}
+      {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {!loading && currentMatrix && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <AttendanceGroup title="Dining Members" rows={currentMatrix.dining} isRowDisabled={isRowDisabled} onToggle={handleToggle} onSpecialOrder={handleSpecialOrder} />
+          <AttendanceGroup title="Non-Dining Members" rows={currentMatrix.non_dining} isRowDisabled={isRowDisabled} onToggle={handleToggle} onSpecialOrder={handleSpecialOrder} />
+          <AttendanceGroup title="Active Room Guests" rows={currentMatrix.guests} isRowDisabled={isRowDisabled} onToggle={handleToggle} onSpecialOrder={handleSpecialOrder} />
+        </div>
+      )}
 
       <ConfirmDialog request={confirmRequest} onClose={() => setConfirmRequest(null)} />
     </div>

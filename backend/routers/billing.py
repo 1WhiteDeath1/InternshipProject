@@ -4,7 +4,7 @@ import io
 import json
 import uuid
 from datetime import datetime, date, timedelta
-from typing import Optional, List
+from typing import Optional, List, Dict
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Body
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
@@ -13,25 +13,103 @@ from sqlalchemy.orm import Session, joinedload
 from backend.database import get_db
 from backend.models import (
     Invoice, InvoiceItem, InvoicePayment, Booking, BookingCharge, InvoiceStatus,
-    ClientCategory, MealAttendance, KitchenOrder, User, Guest,
+    ClientCategory, MealAttendance, KitchenOrder, User, Guest, AlertSeverity,
     InvoiceEditRequest, EditRequestStatus, InventoryItem, StockBatch, WasteLog, GasChargeRate,
 )
 from backend.schemas import (
     InvoiceItemCreate, BookingChargeCreate, PaymentCreate,
     InvoiceEditRequestCreate, InvoiceEditDecision,
+    MasterBillLineCreate, MasterBillLineCorrection, LastDebitBalanceUpdate,
 )
 from backend.auth import get_current_user, check_permission
 from backend.audit import log_audit, serialize_model, AuditAction
+from backend.alerts import create_alert
 from backend.logging_config import get_logger
 from backend.services.mess_billing_calc import get_setting_float, get_setting_str
 from backend.services.room_pricing import reprice_for_departure
 from backend.services.mess_charge_calc import (
-    compute_unbilled_mess_total, meal_multiplier_for_booking as _meal_multiplier,
+    compute_unbilled_mess_total, compute_unbilled_gas_total, meal_multiplier_for_booking as _meal_multiplier,
     walkin_meal_multiplier as _walkin_meal_multiplier,
 )
+from backend.services.master_bill import assemble_rows, MASTER_BILL_PRESET_HEADS
 
 logger = get_logger("app")
 router = APIRouter()
+
+# Split-payment methods (Workflow 1's Payment Summary Breakdown groups by
+# exactly these three). Voucher Number is mandatory for Online/AG Branch,
+# optional for Bank Transfer, unused for Cash Deposit - enforced in
+# PaymentCreate's validator (schemas/billing.py).
+PAYMENT_METHOD_ONLINE = "Online/AG Branch"
+PAYMENT_METHOD_BANK = "Bank Transfer"
+PAYMENT_METHOD_CASH = "Cash Deposit"
+PAYMENT_METHODS = (PAYMENT_METHOD_ONLINE, PAYMENT_METHOD_BANK, PAYMENT_METHOD_CASH)
+
+
+def _prior_outstanding_for_guest(db: Session, guest_identity_id: int) -> float:
+    """Sum of everything still owed across every PRIOR bill tied to this
+    persistent Guest identity (matched by CNIC/phone at check-in - see
+    models/guests.py) - covers both a past room stay (via Booking.guest_id)
+    and a past standalone walk-in mess visit (Invoice.guest_id directly).
+    Used to auto-fill a brand-new bill's Last Debit Balance; the Clerk can
+    still edit it afterward via set_last_debit_balance."""
+    prior = db.query(Invoice).outerjoin(Booking, Invoice.booking_id == Booking.id).filter(
+        Invoice.status != InvoiceStatus.VOID,
+        or_(Invoice.guest_id == guest_identity_id, Booking.guest_id == guest_identity_id),
+    ).all()
+    total = 0.0
+    for inv in prior:
+        owed = _invoice_net_owed(inv) - float(inv.amount_paid or 0)
+        if owed > 0:
+            total += owed
+    return round(total, 2)
+
+
+def _invoice_net_owed(inv: Invoice) -> float:
+    """What the guest actually owes on this bill, including any carried-
+    forward balance - the same figure the Master Bill's Net Debits row
+    represents (see master_bill.assemble_rows), used to decide
+    draft->issued->partially_paid->paid transitions."""
+    return float(inv.total_amount or 0) + float(inv.last_debit_balance or 0)
+
+
+def _build_payment_breakdown(payments: list) -> dict:
+    """Groups a bill's payment rows into the Payment Summary Breakdown
+    Workflow 1 wants on the Master Bill: one bucket per method plus an
+    "other" catch-all for any payment recorded before this split-payment
+    architecture existed (free-text method that isn't one of the three)."""
+    by_method = {PAYMENT_METHOD_ONLINE: 0.0, PAYMENT_METHOD_BANK: 0.0, PAYMENT_METHOD_CASH: 0.0, "other": 0.0}
+    vouchers = []
+    for p in payments:
+        amount = float(p.amount)
+        if p.method in by_method:
+            by_method[p.method] += amount
+        else:
+            by_method["other"] += amount
+        if p.voucher_number:
+            vouchers.append(p.voucher_number)
+    total_paid = sum(by_method.values())
+    return {
+        "online_ag_branch": round(by_method[PAYMENT_METHOD_ONLINE], 2),
+        "online_ag_branch_vouchers": vouchers,
+        "bank_transfer": round(by_method[PAYMENT_METHOD_BANK], 2),
+        "cash_deposit": round(by_method[PAYMENT_METHOD_CASH], 2),
+        "other": round(by_method["other"], 2),
+        "total_paid": round(total_paid, 2),
+        "payments": [{"id": p.id, "amount": float(p.amount), "method": p.method, "voucher_number": p.voucher_number,
+                      "notes": p.notes, "created_at": p.created_at} for p in payments],
+    }
+
+
+def _apply_invoice_payment_status(inv: Invoice) -> None:
+    net_owed = _invoice_net_owed(inv)
+    paid = float(inv.amount_paid or 0)
+    if paid >= net_owed - 0.01:
+        inv.status = InvoiceStatus.PAID
+    elif paid > 0.01:
+        inv.status = InvoiceStatus.PARTIALLY_PAID
+    elif inv.status == InvoiceStatus.DRAFT:
+        inv.status = InvoiceStatus.ISSUED
 
 
 def _build_invoice(db: Session, booking: Booking, items: list, current_user, issue_date: date, due_date: date, tax_amount: float = 0.0, discount: float = 0.0, notes: str = None, bill_type: str = "combined", *, guest: Guest = None) -> Invoice:
@@ -45,11 +123,19 @@ def _build_invoice(db: Session, booking: Booking, items: list, current_user, iss
     owner = {"booking_id": booking.id, "guest_id": None} if booking is not None else {"booking_id": None, "guest_id": guest.id}
     total = sum(item.unit_price * item.quantity for item in items)
 
+    # Auto-fill Last Debit Balance from this same persistent Guest's other
+    # still-unpaid bills (a prior stay or walk-in visit) - only when the
+    # identity is actually known (guest_id set at check-in/registration);
+    # the Clerk can still override it afterward via set_last_debit_balance.
+    guest_identity_id = booking.guest_id if booking is not None else guest.id
+    auto_last_debit_balance = _prior_outstanding_for_guest(db, guest_identity_id) if guest_identity_id else 0.0
+
     invoice = Invoice(
         invoice_number=f"TMP-{uuid.uuid4().hex}", **owner,
         issue_date=issue_date, due_date=due_date,
         subtotal=total, tax_amount=tax_amount,
         discount=discount, total_amount=total + tax_amount - discount,
+        last_debit_balance=auto_last_debit_balance,
         notes=notes, created_by=current_user.id, bill_type=bill_type,
         # A checkout bill handed to the guest is final the moment it exists -
         # 'issued', not 'draft', so revenue stats and overdue tracking see it.
@@ -78,23 +164,42 @@ def _build_invoice(db: Session, booking: Booking, items: list, current_user, iss
 
 @router.get("/invoices")
 async def list_invoices(
-    status: str = "", search: str = "",
+    status: str = "", search: str = "", bill_type: str = "",
     page: int = Query(1, ge=1), page_size: int = Query(25, ge=1),
     db: Session = Depends(get_db), current_user=Depends(get_current_user),
 ):
     if not check_permission(current_user, "billing", "view"):
         raise HTTPException(status_code=403, detail="Permission denied")
-    query = db.query(Invoice)
+    # Outer-joined (not filtered) so search can reach into the owning
+    # Booking/Guest - each Invoice owns at most one of the two (owner is
+    # exactly one per _build_invoice), so this can't fan out duplicate rows.
+    query = db.query(Invoice).outerjoin(Booking, Invoice.booking_id == Booking.id).outerjoin(Guest, Invoice.guest_id == Guest.id)
     if status:
         query = query.filter(Invoice.status == status)
+    if bill_type:
+        query = query.filter(Invoice.bill_type == bill_type)
     if search:
-        query = query.filter(Invoice.invoice_number.contains(search))
+        # Customer Name / Rank / Service Number / Voucher Number / Bill
+        # Serial Number - Booking carries rank/pa_number/online_voucher_no
+        # per-stay; a standalone walk-in Guest (mess-only invoice with no
+        # booking) only has full_name/id_number, so both sides are covered.
+        query = query.filter(or_(
+            Invoice.invoice_number.contains(search),
+            Invoice.bill_serial_number.contains(search),
+            Booking.guest_name.contains(search),
+            Booking.rank.contains(search),
+            Booking.pa_number.contains(search),
+            Booking.online_voucher_no.contains(search),
+            Guest.full_name.contains(search),
+            Guest.id_number.contains(search),
+        ))
 
     total = query.count()
     invoices = query.order_by(Invoice.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
 
     return {"items": [
         {"id": inv.id, "invoice_number": inv.invoice_number, "booking_id": inv.booking_id,
+         "customer_guest_id": (inv.booking.guest_id if inv.booking else None) or inv.guest_id,
          "guest_name": inv.booking.guest_name if inv.booking else (inv.guest.full_name if inv.guest else None),
          "room_number": inv.booking.room.room_number if inv.booking and inv.booking.room else None,
          "issue_date": inv.issue_date, "due_date": inv.due_date,
@@ -107,22 +212,77 @@ async def list_invoices(
                     "unit_price": float(i.unit_price), "total_price": float(i.total_price)} for i in inv.items]} for inv in invoices], "total": total}
 
 
+@router.get("/customers/{guest_id}/history")
+async def customer_history(guest_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Workflow 2's Customer Summary Modal - the persistent Guest identity
+    plus every Master Bill (Invoice) and payment/receipt ever tied to it,
+    across every stay/visit, not just the one the Clerk searched from."""
+    if not check_permission(current_user, "billing", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    guest = db.query(Guest).filter(Guest.id == guest_id).first()
+    if not guest:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    invoices = db.query(Invoice).outerjoin(Booking, Invoice.booking_id == Booking.id).filter(
+        or_(Invoice.guest_id == guest_id, Booking.guest_id == guest_id),
+    ).order_by(Invoice.created_at.desc()).all()
+
+    bills = []
+    for inv in invoices:
+        payments = db.query(InvoicePayment).filter(InvoicePayment.invoice_id == inv.id).order_by(InvoicePayment.created_at.desc()).all()
+        bills.append({
+            "id": inv.id, "invoice_number": inv.invoice_number, "bill_type": inv.bill_type or "combined",
+            "bill_serial_number": inv.bill_serial_number, "issue_date": inv.issue_date, "status": inv.status.value,
+            "total_amount": float(inv.total_amount), "last_debit_balance": float(inv.last_debit_balance or 0),
+            "amount_paid": float(inv.amount_paid or 0),
+            "room_number": inv.booking.room.room_number if inv.booking and inv.booking.room else None,
+            "payments": [{"id": p.id, "amount": float(p.amount), "method": p.method, "voucher_number": p.voucher_number,
+                          "created_at": p.created_at} for p in payments],
+        })
+
+    return {
+        "guest": {"id": guest.id, "full_name": guest.full_name, "phone": guest.phone,
+                  "id_type": guest.id_type, "id_number": guest.id_number, "unit_address": guest.unit_address},
+        "bills": bills,
+    }
+
+
 def _gas_percentage(db: Session) -> float:
     row = db.query(GasChargeRate).first()
     return float(row.percentage) if row else 0.0
 
 
-def _gather_unbilled_items(db: Session, booking_id: int, *, mess_override: float = None, gas_override: float = None):
+# Display labels for compute_booking_price()'s components dict keys (see
+# room_pricing.py) - covers every pricing mode's component set: rate-card/
+# member-rate (rent/electricity/generator/gas/internet), tariff matrix
+# (tariff_rate), official duty (da_charge), and HRA monthly (hra_rank_rate,
+# utility_charge - rarely hit here since HRA residents settle via the
+# monthly Mess Bill instead, see instant_checkout's guard below).
+ROOM_COMPONENT_LABELS = {
+    "rent": "Room Rent", "electricity": "Electricity Charges", "generator": "Generator Charges",
+    "gas": "Sui Gas Bill", "internet": "Internet Charges", "tariff_rate": "Tariff Rate",
+    "da_charge": "Daily Allowance (DA) Charge", "hra_rank_rate": "HRA Rank Rate", "utility_charge": "Room Utilities",
+}
+# Components that are already an absolute monthly figure, not a nightly rate
+# to multiply by nights (see compute_booking_price's hra_monthly branch).
+_MONTHLY_ROOM_COMPONENTS = {"hra_rank_rate", "utility_charge"}
+
+
+def _gather_unbilled_items(db: Session, booking_id: int, *, mess_override: float = None, gas_override: float = None, room_component_overrides: Dict[str, float] = None):
     """Collects everything not yet invoiced for a booking, split into the two
-    checkout bills: room_items (guest room charges + non-mess ad-hoc charges
-    like Dhobi/Breakage/Allied) and mess_items. Extra Messing is one
-    consolidated line = everything ordered through the kitchen (routine
-    meals + a la carte, see mess_charge_calc.compute_unbilled_mess_total);
-    Sui Gas Charges on Messing is that total x the Kitchen NCO's gas
-    percentage. Either figure can be overridden by the caller (Clerk Desk's
-    checkout preview). Any other ad-hoc mess-tagged BookingCharge (logged via
-    "Custom...") stays its own separate line. Returned as a dict so both the
-    read-only balance check and the mutating checkout can share it."""
+    checkout bills: room_items (itemized rate components - rent/electricity/
+    etc, see ROOM_COMPONENT_LABELS - plus non-mess ad-hoc charges like Dhobi/
+    Breakage/Allied) and mess_items. Extra Messing is one consolidated line =
+    everything ordered through the kitchen (routine meals + a la carte, see
+    mess_charge_calc.compute_unbilled_mess_total); Sui Gas Charges on Messing
+    is that total x the Kitchen NCO's gas percentage. All of these can be
+    overridden by the caller (Clerk Desk's checkout preview). Any other
+    ad-hoc mess-tagged BookingCharge (logged via "Custom...") stays its own
+    separate line. Returned as a dict so both the read-only balance check and
+    the mutating checkout can share it - every item carries a component_key
+    (computed/correctable rate lines) or charge_id (ad-hoc BookingCharge,
+    removable) so the running-balance preview can tell them apart from a
+    fixed structural line (Extra Mattress/Late Fee) with neither set."""
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     room_items, mess_items, unpriced = [], [], []
     amounts = {"room": 0.0, "mess_total": 0.0, "gas_total": 0.0,
@@ -133,11 +293,12 @@ def _gather_unbilled_items(db: Session, booking_id: int, *, mess_override: float
 
     room_total = float(booking.total_amount) if booking.total_amount else 0.0
     late_fee = float(booking.late_checkout_fee) if booking.late_checkout_fee else 0.0
-    mattress_total = 0.0
+    pricing_snapshot = {}
     try:
-        mattress_total = float((json.loads(booking.rate_breakdown or "{}") or {}).get("mattress_total") or 0)
+        pricing_snapshot = json.loads(booking.rate_breakdown or "{}") or {}
     except (ValueError, TypeError):
         pass
+    mattress_total = float(pricing_snapshot.get("mattress_total") or 0)
     check_out_label = booking.check_out
     # For a guest still in-house, preview the ACTUAL-stay price as of today
     # (overstayed nights added, unused nights dropped) - the same re-price
@@ -149,17 +310,40 @@ def _gather_unbilled_items(db: Session, booking_id: int, *, mess_override: float
             room_total = projected["total"]
             mattress_total = float(projected.get("mattress_total") or 0)
             check_out_label = effective_out
+            pricing_snapshot = projected
 
     if room_total:
-        amounts["room"] = room_total
         # Break the paper bill's separate heads out of the booking total:
         # Extra Mattress (from the pricing snapshot) and the late checkout fee
-        # each get their own line; the remainder is Guest Room Charges.
+        # each get their own line, and the rate itself is split into its real
+        # components (rent/electricity/generator/gas/internet, etc, from the
+        # pricing snapshot) rather than one lump "Guest Room Charges" figure -
+        # each individually overridable via room_component_overrides. Extra
+        # Mattress/Late Fee/any ad-hoc BookingCharge lines below stay
+        # itemized exactly as computed, untouched by component overrides.
         base_room = max(room_total - late_fee - mattress_total, 0.0)
+        nights = pricing_snapshot.get("nights") or 1
+        components = pricing_snapshot.get("components") or {}
+        overrides = room_component_overrides or {}
         room_no = booking.room.room_number if booking.room else ""
-        label = (f"Guest Room Charges - Room {room_no} "
-                 f"(From {booking.check_in.strftime('%d-%m-%y')} to {check_out_label.strftime('%d-%m-%y')})").strip()
-        room_items.append(InvoiceItemCreate(description=label, quantity=1, unit_price=base_room))
+        date_range = f"(From {booking.check_in.strftime('%d-%m-%y')} to {check_out_label.strftime('%d-%m-%y')})"
+        if components:
+            base_room = 0.0
+            for key, rate_value in components.items():
+                computed = float(rate_value) if key in _MONTHLY_ROOM_COMPONENTS else round(float(rate_value) * nights, 2)
+                line_total = overrides.get(key, computed)
+                base_room += line_total
+                label = f"{ROOM_COMPONENT_LABELS.get(key, key.replace('_', ' ').title())} - Room {room_no} {date_range}".strip()
+                room_items.append(InvoiceItemCreate(description=label, quantity=1, unit_price=line_total, component_key=key))
+        else:
+            # No component snapshot available (legacy booking pre-dating this
+            # breakdown, or a mode with no components computed) - fall back
+            # to one overridable lump line, same as before this change.
+            base_room = overrides.get("base", base_room)
+            label = f"Guest Room Charges - Room {room_no} {date_range}".strip()
+            room_items.append(InvoiceItemCreate(description=label, quantity=1, unit_price=base_room, component_key="base"))
+        room_total = base_room + late_fee + mattress_total
+        amounts["room"] = room_total
         if mattress_total > 0:
             room_items.append(InvoiceItemCreate(description="Extra Mattress", quantity=1, unit_price=mattress_total))
         if late_fee > 0:
@@ -173,19 +357,21 @@ def _gather_unbilled_items(db: Session, booking_id: int, *, mess_override: float
     if mess_total > 0:
         # Multiplier already baked in by compute_unbilled_mess_total - the
         # price on this line is exactly what the invoice will charge.
-        mess_items.append(InvoiceItemCreate(description="Extra Messing", quantity=1, unit_price=mess_total))
+        mess_items.append(InvoiceItemCreate(description="Extra Messing", quantity=1, unit_price=mess_total, component_key="mess_total"))
     amounts["mess_total"] = mess_total
 
-    gas_total = gas_override if gas_override is not None else (mess_total * _gas_percentage(db) / 100)
+    gas_total = gas_override if gas_override is not None else compute_unbilled_gas_total(
+        db, attendance_rows, meal_multiplier=meal_multiplier, fallback_percentage=_gas_percentage(db),
+    )
     if gas_total > 0:
-        mess_items.append(InvoiceItemCreate(description="Sui Gas Charges on Messing", quantity=1, unit_price=gas_total))
+        mess_items.append(InvoiceItemCreate(description="Sui Gas Charges on Messing", quantity=1, unit_price=gas_total, component_key="gas_total"))
     amounts["gas_total"] = gas_total
 
     charge_rows = db.query(BookingCharge).filter(
         BookingCharge.booking_id == booking_id, BookingCharge.invoiced_at.is_(None),
     ).all()
     for c in charge_rows:
-        item = InvoiceItemCreate(description=c.head, quantity=1, unit_price=float(c.amount))
+        item = InvoiceItemCreate(description=c.head, quantity=1, unit_price=float(c.amount), charge_id=c.id)
         if c.is_mess_charge:
             mess_items.append(item)
             amounts["other_mess_charges"] += float(c.amount)
@@ -252,8 +438,19 @@ def _running_balance_payload(db: Session, booking: Booking) -> dict:
         room_bill -= advance_credit_applied
     # What the guest still owes on bills that already exist but aren't paid off.
     outstanding = sum(float(i.total_amount) - float(i.amount_paid) for i in invoices)
-    # Itemized previews for the Clerk Desk's side-by-side Room / Food boxes.
-    preview = lambda item: {"description": item.description, "amount": round(item.unit_price * item.quantity, 2)}  # noqa: E731
+    # Itemized previews for the Clerk Desk's Room/Food correction dialogs -
+    # component_key marks a computed rate line as individually correctable,
+    # charge_id marks an ad-hoc BookingCharge as removable; a line with
+    # neither (Extra Mattress, Late Checkout Fee) is fixed/structural.
+    preview = lambda item: {  # noqa: E731
+        "description": item.description, "amount": round(item.unit_price * item.quantity, 2),
+        "component_key": item.component_key, "charge_id": item.charge_id,
+    }
+    # Checkout-readiness context (informational only, doesn't gate checkout) -
+    # who's already confirmed this guest's charges are final on their side.
+    # See Booking.kitchen_finalized_at's model docstring.
+    kitchen_finalizer = db.query(User).filter(User.id == booking.kitchen_finalized_by).first() if booking.kitchen_finalized_by else None
+    booking_finalizer = db.query(User).filter(User.id == booking.booking_finalized_by).first() if booking.booking_finalized_by else None
     return {
         "room_amount": amounts["room"], "mess_charge_amount": amounts["mess_total"],
         "gas_charge_amount": amounts["gas_total"],
@@ -269,6 +466,8 @@ def _running_balance_payload(db: Session, booking: Booking) -> dict:
         "unpriced_items": gathered["unpriced"],
         "room_billed": room_billed, "mess_billed": mess_billed,
         "advance_credit_applied": advance_credit_applied,
+        "kitchen_finalized_at": booking.kitchen_finalized_at, "kitchen_finalized_by_name": kitchen_finalizer.full_name if kitchen_finalizer else None,
+        "booking_finalized_at": booking.booking_finalized_at, "booking_finalized_by_name": booking_finalizer.full_name if booking_finalizer else None,
     }
 
 
@@ -299,7 +498,9 @@ def _gather_walkin_items(db: Session, guest: Guest, *, mess_override: float = No
     if mess_total > 0:
         mess_items.append(InvoiceItemCreate(description="Extra Messing", quantity=1, unit_price=mess_total))
 
-    gas_total = gas_override if gas_override is not None else (mess_total * _gas_percentage(db) / 100)
+    gas_total = gas_override if gas_override is not None else compute_unbilled_gas_total(
+        db, attendance_rows, meal_multiplier=meal_multiplier, fallback_percentage=_gas_percentage(db),
+    )
     if gas_total > 0:
         mess_items.append(InvoiceItemCreate(description="Sui Gas Charges on Messing", quantity=1, unit_price=gas_total))
 
@@ -522,35 +723,51 @@ async def clerk_desk(db: Session = Depends(get_db), current_user=Depends(get_cur
 
 @router.get("/bookings/{booking_id}/charges")
 async def list_booking_charges(booking_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    if not check_permission(current_user, "billing", "view"):
+    # Clerk (billing:view), Booking NCO (bookings:view), or Kitchen NCO
+    # (kitchen:view) - see add_booking_charge below for why each NCO is
+    # scoped in on their respective side.
+    if not (check_permission(current_user, "billing", "view") or check_permission(current_user, "bookings", "view")
+            or check_permission(current_user, "kitchen", "view")):
         raise HTTPException(status_code=403, detail="Permission denied")
     charges = db.query(BookingCharge).filter(BookingCharge.booking_id == booking_id).order_by(BookingCharge.created_at.desc()).all()
     return [{"id": c.id, "head": c.head, "amount": float(c.amount), "is_mess_charge": c.is_mess_charge,
-             "invoiced": c.invoiced_at is not None, "created_at": c.created_at} for c in charges]
+             "reason": c.reason, "invoiced": c.invoiced_at is not None, "created_at": c.created_at} for c in charges]
 
 
 @router.post("/bookings/{booking_id}/charges")
 async def add_booking_charge(booking_id: int, data: BookingChargeCreate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    # Clerk owns both sides of ad-hoc charge logging now (mess_billing:create
-    # for Extra Messing/Sui Gas, billing:create for Dhobi/Breakage/Allied) -
-    # kept as two permission checks rather than one so a future role could
-    # still be scoped to just one side.
-    required_module = "mess_billing" if data.is_mess_charge else "billing"
-    if not check_permission(current_user, required_module, "create"):
-        raise HTTPException(status_code=403, detail="Permission denied")
+    # Mess-side ad-hoc charges (a genuinely one-off Extra Messing/Sui Gas
+    # entry, not the normal auto-computed flow) are owned end-to-end by
+    # whichever of Clerk (mess_billing:create) or Kitchen NCO (kitchen:edit)
+    # is logging it - same "same level of access" pattern as the room side.
+    # Room-side charges (Dhobi/Breakage/Wages of Servants/Heater-AC/etc.) are
+    # owned end-to-end by whichever of Clerk (billing:create) or Booking NCO
+    # (bookings:edit) is logging it - both NCOs already own their respective
+    # module for the underlying stay/kitchen operation, so no separate
+    # billing/mess_billing grant is needed just to log its ad-hoc charges.
+    if data.is_mess_charge:
+        if not (check_permission(current_user, "mess_billing", "create") or check_permission(current_user, "kitchen", "edit")):
+            raise HTTPException(status_code=403, detail="Permission denied")
+    else:
+        if not (check_permission(current_user, "billing", "create") or check_permission(current_user, "bookings", "edit")):
+            raise HTTPException(status_code=403, detail="Permission denied")
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
     if booking.status.value not in ("confirmed", "checked_in"):
         raise HTTPException(status_code=400, detail=f"Cannot add charges to a booking with status '{booking.status.value}'")
+    # Reason is only mandatory for the ambiguous "Allied Charges" catch-all -
+    # every other preset head is already self-explanatory from its name.
+    if data.head.strip() == "Allied Charges" and len((data.reason or "").strip()) < 3:
+        raise HTTPException(status_code=400, detail="A reason (at least 3 characters) is required for Allied Charges")
     charge = BookingCharge(booking_id=booking_id, head=data.head.strip(), amount=data.amount,
-                           is_mess_charge=data.is_mess_charge, created_by=current_user.id)
+                           is_mess_charge=data.is_mess_charge, reason=(data.reason or "").strip() or None, created_by=current_user.id)
     db.add(charge)
     db.commit()
     db.refresh(charge)
     log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "booking_charges", charge.id,
-              after_state=serialize_model(charge), ip_address=request.client.host)
-    return {"id": charge.id, "head": charge.head, "amount": float(charge.amount), "is_mess_charge": charge.is_mess_charge}
+              after_state=serialize_model(charge), reason=charge.reason, ip_address=request.client.host)
+    return {"id": charge.id, "head": charge.head, "amount": float(charge.amount), "is_mess_charge": charge.is_mess_charge, "reason": charge.reason}
 
 
 @router.delete("/charges/{charge_id}")
@@ -558,9 +775,12 @@ async def delete_booking_charge(charge_id: int, request: Request, db: Session = 
     charge = db.query(BookingCharge).filter(BookingCharge.id == charge_id).first()
     if not charge:
         raise HTTPException(status_code=404, detail="Charge not found")
-    required_module = "mess_billing" if charge.is_mess_charge else "billing"
-    if not check_permission(current_user, required_module, "edit"):
-        raise HTTPException(status_code=403, detail="Permission denied")
+    if charge.is_mess_charge:
+        if not (check_permission(current_user, "mess_billing", "edit") or check_permission(current_user, "kitchen", "edit")):
+            raise HTTPException(status_code=403, detail="Permission denied")
+    else:
+        if not (check_permission(current_user, "billing", "edit") or check_permission(current_user, "bookings", "edit")):
+            raise HTTPException(status_code=403, detail="Permission denied")
     if charge.invoiced_at is not None:
         raise HTTPException(status_code=400, detail="Charge is already on an invoice - void the invoice instead")
     before = serialize_model(charge)
@@ -578,6 +798,7 @@ def _invoice_out(inv: Invoice) -> dict:
         "total_amount": float(inv.total_amount), "amount_paid": float(inv.amount_paid),
         "balance_due": float(inv.total_amount) - float(inv.amount_paid),
         "status": inv.status.value, "is_complimentary": bool(inv.is_complimentary),
+        "bill_serial_number": inv.bill_serial_number,
         "items": [{"id": i.id, "description": i.description, "quantity": float(i.quantity),
                    "unit_price": float(i.unit_price), "total_price": float(i.total_price)} for i in inv.items],
     }
@@ -589,24 +810,32 @@ async def instant_checkout(
     bill_types: Optional[List[str]] = Body(default=None, embed=True),
     mess_charge_override: Optional[float] = Body(default=None, embed=True),
     gas_charge_override: Optional[float] = Body(default=None, embed=True),
+    room_component_overrides: Optional[Dict[str, float]] = Body(default=None, embed=True),
+    room_override_reason: Optional[str] = Body(default=None, embed=True),
     db: Session = Depends(get_db), current_user=Depends(get_current_user),
 ):
     """Compiles all unbilled charges for a checked-in guest - room charges
-    (guest room charges + dhobi/breakage/allied...) and mess charges (one
+    (itemized rate components - rent/electricity/etc, see
+    ROOM_COMPONENT_LABELS - + dhobi/breakage/allied...) and mess charges (one
     consolidated Extra Messing line + one Sui Gas Charges line, computed from
     everything ordered - see mess_charge_calc.compute_unbilled_mess_total)
     into a room invoice and/or a mess invoice. bill_types selects which side
     to include now - defaults to both, but either can be settled alone and
     the other finalized later (e.g. an a la carte order still pending).
     mess_charge_override/gas_charge_override replace the computed totals when
-    the clerk adjusts them in the checkout preview. When both sides are
-    billed in the same call they land on two separate invoices (kept
-    detailed - room-only and mess-only rows, not merged), and the Clerk's
-    print dialog offers a Room / Mess / Combined toggle over them (the
-    combined view row-merges both via GET .../master-invoice). No advance is
-    applied - payment is settled here at checkout, via the Pay Together /
-    per-bill payment actions the print dialog offers. Guest/booking-only -
-    members settle through the monthly Mess Bill cycle instead."""
+    the clerk adjusts them in the checkout preview. room_component_overrides
+    replaces one or more individual rate-component lines (keyed the same as
+    compute_booking_price's components dict, e.g. "rent"/"electricity") -
+    Extra Mattress/Late Checkout Fee/any ad-hoc BookingCharge stay separate
+    lines regardless, so the bill never collapses into one flat number - and
+    requires room_override_reason (non-empty) to be supplied alongside it.
+    When both sides are billed in the same call they land on two separate
+    invoices (kept detailed - room-only and mess-only rows, not merged), and
+    the Clerk's print dialog offers a Room / Mess / Combined toggle over them
+    (the combined view row-merges both via GET .../master-invoice). No
+    advance is applied - payment is settled here at checkout, via the Pay
+    Together / per-bill payment actions the print dialog offers. Guest/
+    booking-only - members settle through the monthly Mess Bill cycle instead."""
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
@@ -614,6 +843,8 @@ async def instant_checkout(
         raise HTTPException(status_code=400, detail=f"Cannot check out a booking with status '{booking.status.value}' - guest must be checked in")
     if booking.nature_of_duty == "hra":
         raise HTTPException(status_code=400, detail="HRA residents settle via the monthly Mess Bill - this residency cannot be checked out here")
+    if room_component_overrides and not (room_override_reason or "").strip():
+        raise HTTPException(status_code=400, detail="A reason is required to override a room charge component")
 
     # billing/mess_billing:create only ever logs a charge (add_booking_charge,
     # gated separately above) - generating the actual invoice needs its own,
@@ -649,7 +880,7 @@ async def instant_checkout(
         from backend.routers.bookings import perform_check_out
         late_fee = perform_check_out(db, booking, current_user)
 
-    gathered = _gather_unbilled_items(db, booking_id, mess_override=mess_charge_override, gas_override=gas_charge_override)
+    gathered = _gather_unbilled_items(db, booking_id, mess_override=mess_charge_override, gas_override=gas_charge_override, room_component_overrides=room_component_overrides)
     room_items = gathered["room_items"] if "room" in requested else []
     mess_items = gathered["mess_items"] if "mess" in requested else []
     if not room_items and not mess_items:
@@ -664,7 +895,14 @@ async def instant_checkout(
     # without losing that per-invoice detail.
     invoices = []
     if room_items:
-        room_invoice = _build_invoice(db, booking, room_items, current_user, today, today, bill_type="room")
+        room_notes = None
+        if room_component_overrides:
+            overridden = ", ".join(
+                f"{ROOM_COMPONENT_LABELS.get(k, k.replace('_', ' ').title())} to Rs {v:,.0f}"
+                for k, v in room_component_overrides.items()
+            )
+            room_notes = f"{overridden} - {room_override_reason.strip()}"
+        room_invoice = _build_invoice(db, booking, room_items, current_user, today, today, notes=room_notes, bill_type="room")
         invoices.append(room_invoice)
         for c in gathered["charge_rows"]:
             if not c.is_mess_charge:
@@ -676,17 +914,27 @@ async def instant_checkout(
         # came in at checkout. Capped at the invoice total defensively, even
         # though online advances are always sized to match the room charge.
         if booking.source == "online" and booking.advance_payment_amount:
-            advance = min(float(booking.advance_payment_amount), float(room_invoice.total_amount))
+            gross_advance = float(booking.advance_payment_amount)
+            advance = min(gross_advance, float(room_invoice.total_amount))
             if advance > 0:
                 received_at = datetime.combine(booking.advance_paid_at, datetime.min.time()) if booking.advance_paid_at else now
+                # AG Branch fee is 10% of the GROSS advance (what the guest
+                # actually paid online), independent of `advance` above -
+                # the guest is still credited the full (capped) amount; this
+                # is purely what AG Branch retains from the mess's own net
+                # payout, tracked for reporting only.
+                ag_fee = gross_advance * get_setting_float(db, "ag_branch_fee_percentage", 10) / 100
                 db.add(InvoicePayment(
-                    invoice_id=room_invoice.id, amount=advance, method="Advance (Online)",
+                    invoice_id=room_invoice.id, amount=advance, method=PAYMENT_METHOD_ONLINE,
                     notes=f"Online booking advance - V/No {booking.online_voucher_no or '—'}",
+                    voucher_number=booking.online_voucher_no, ag_branch_fee=ag_fee,
                     received_by=current_user.id, created_at=received_at,
                 ))
                 room_invoice.amount_paid = advance
-                if advance >= float(room_invoice.total_amount) - 0.01:
+                if advance >= float(room_invoice.total_amount) + float(room_invoice.last_debit_balance or 0) - 0.01:
                     room_invoice.status = InvoiceStatus.PAID
+                elif advance > 0:
+                    room_invoice.status = InvoiceStatus.PARTIALLY_PAID
     if mess_items:
         invoices.append(_build_invoice(db, booking, mess_items, current_user, today, today, bill_type="mess"))
         for a in gathered["attendance_rows"]:
@@ -699,8 +947,9 @@ async def instant_checkout(
     db.commit()
 
     for inv in invoices:
+        inv_reason = room_override_reason if (inv.bill_type == "room" and room_component_overrides) else None
         log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "invoices", inv.id,
-                  after_state=serialize_model(inv), ip_address=request.client.host)
+                  after_state=serialize_model(inv), reason=inv_reason, ip_address=request.client.host)
 
     grand_total = sum(float(i.total_amount) for i in invoices)
     return {
@@ -1064,6 +1313,192 @@ async def void_invoice(invoice_id: int, reason: str, request: Request, db: Sessi
     return {"message": "Invoice voided"}
 
 
+@router.put("/invoices/{invoice_id}/serial-number")
+async def set_bill_serial_number(
+    invoice_id: int, bill_serial_number: Optional[str] = Body(default=None, embed=True),
+    request: Request = None, db: Session = Depends(get_db), current_user=Depends(get_current_user),
+):
+    """Clerk-entered physical bill-book serial, logged against the invoice
+    before printing/settling - distinct from the system invoice_number."""
+    if not (check_permission(current_user, "clerk_desk", "edit") or check_permission(current_user, "billing", "edit")):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if inv.bill_made_at is not None:
+        raise HTTPException(status_code=400, detail="This bill has been made - the serial number can no longer be changed here")
+    before = serialize_model(inv)
+    inv.bill_serial_number = (bill_serial_number or "").strip() or None
+    db.commit()
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "invoices", inv.id, before_state=before, after_state=serialize_model(inv), ip_address=request.client.host if request else None)
+    return {"message": "Bill serial number saved", "bill_serial_number": inv.bill_serial_number}
+
+
+def _invoice_master_bill_label(description: str) -> str:
+    """Maps an already-persisted InvoiceItem's free-text description onto the
+    paper form's fixed vocabulary (services/master_bill.py). Ad-hoc charge
+    lines (Dhobi, Breakage, Masjid...) already carry their head as the
+    description verbatim, so they pass through unchanged and match directly."""
+    if description.startswith("Guest Room Charges"):
+        return "Guest Room Charges"
+    if description == "Extra Mattress":
+        return "Extra Mettress"  # paper form's own spelling
+    if description == "Sui Gas Charges on Messing":
+        return "Sui Gas Charges on Messing / Extra Messing"
+    return description
+
+
+@router.get("/invoices/{invoice_id}/master-bill")
+async def get_master_bill(invoice_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "billing", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    entries = [{"label": _invoice_master_bill_label(it.description), "amount": float(it.unit_price) * it.quantity, "reason": it.reason} for it in inv.items]
+    assembled = assemble_rows(entries=entries, last_debit_balance=float(inv.last_debit_balance or 0), credits=float(inv.discount or 0))
+
+    payments = db.query(InvoicePayment).filter(InvoicePayment.invoice_id == inv.id).order_by(InvoicePayment.created_at).all()
+    payment_breakdown = _build_payment_breakdown(payments)
+    payment_breakdown["balance_due"] = round(assembled["net_debits"] - payment_breakdown["total_paid"], 2)
+
+    booking = inv.booking
+    header = {
+        "bill_for": None,  # guest bills aren't monthly - the paper form's "Bill for the Month of" is member-only
+        "rank": booking.rank if booking else None,
+        "name": (booking.guest_name if booking else (inv.guest.full_name if inv.guest else None)),
+        "address_unit": booking.unit_address if booking else None,
+        "date": inv.issue_date,
+    }
+    mess = {
+        "name": get_setting_str(db, "mess_name", "EME Officers Mess"),
+        "address": get_setting_str(db, "mess_address", "204 Firdousi Road, Rawalpindi"),
+        "phone": get_setting_str(db, "mess_phone", "Tele No. G.H.Q 31725"),
+    }
+    # Raw, uncollapsed items for the pre-lock Interactive correction table -
+    # `rows` above is aggregated by label (several Dhobi charges become one
+    # printed line) so it can't identify a single record to correct; this
+    # can, one entry per actual InvoiceItem.
+    line_items = [{"id": it.id, "label": _invoice_master_bill_label(it.description), "description": it.description,
+                   "amount": float(it.unit_price) * it.quantity, "reason": it.reason} for it in inv.items]
+
+    return {
+        "source": "invoice", "source_id": inv.id, "header": header, "mess": mess,
+        "rows": assembled["rows"], "line_items": line_items, "last_debit_balance": float(inv.last_debit_balance or 0),
+        "total_debit": assembled["total_debit"], "credits": assembled["credits"], "net_debits": assembled["net_debits"],
+        "bill_serial_number": inv.bill_serial_number, "bill_made_at": inv.bill_made_at,
+        "preset_heads": MASTER_BILL_PRESET_HEADS, "payment_breakdown": payment_breakdown,
+        "status": inv.status.value,
+    }
+
+
+@router.post("/invoices/{invoice_id}/master-bill-lines")
+async def add_master_bill_line(invoice_id: int, data: MasterBillLineCreate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Adds a new line item to an already-generated invoice while it's still
+    a draft in the Interactive Invoice Table (before "Make Bill" locks it) -
+    the paper form's remaining preset heads (Masjid, Library, Sweeper...)
+    that have no automated computation. Once bill_made_at is set, a change
+    here would bypass Make Bill's lock, so it's blocked - a genuine
+    correction after that point goes through the existing Manager-approved
+    InvoiceEditRequest flow instead, unchanged."""
+    if not check_permission(current_user, "billing", "create"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if inv.bill_made_at is not None:
+        raise HTTPException(status_code=400, detail="This bill has been made - further changes require a correction request")
+
+    item = InvoiceItem(invoice_id=inv.id, description=data.head.strip(), quantity=1, unit_price=data.amount, total_price=data.amount, reason=data.reason.strip())
+    db.add(item)
+    inv.subtotal = float(inv.subtotal) + data.amount
+    inv.total_amount = float(inv.total_amount) + data.amount
+    db.commit()
+    db.refresh(item)
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "invoice_items", item.id,
+              after_state=serialize_model(item), reason=item.reason, ip_address=request.client.host)
+    return {"id": item.id, "description": item.description, "amount": float(item.unit_price)}
+
+
+@router.put("/invoices/{invoice_id}/items/{item_id}/correct")
+async def correct_master_bill_line(invoice_id: int, item_id: int, data: MasterBillLineCorrection, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Inline correction of an already-populated line in the pre-lock
+    Interactive Master Bill Table (Workflow 1 step 3) - distinct from
+    add_master_bill_line (adds a brand-new line) and from InvoiceEditRequest
+    (the Manager-approval flow for a bill AFTER "Make Bill" locks it, still
+    unchanged/blocked here). Any correction here auto-dispatches an Alert to
+    the Manager's Alerts & Approvals inbox with the before/after and reason -
+    no approval gate, since the bill isn't locked yet and the Clerk still
+    owns it outright; this is a paper trail, not a checkpoint."""
+    if not check_permission(current_user, "billing", "create"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if inv.bill_made_at is not None:
+        raise HTTPException(status_code=400, detail="This bill has been made - further changes require a correction request")
+    item = db.query(InvoiceItem).filter(InvoiceItem.id == item_id, InvoiceItem.invoice_id == invoice_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Line item not found on this invoice")
+
+    old_amount = float(item.unit_price) * float(item.quantity)
+    delta = data.new_amount - old_amount
+    before = serialize_model(item)
+    item.unit_price = data.new_amount / float(item.quantity or 1)
+    item.total_price = data.new_amount
+    inv.subtotal = float(inv.subtotal) + delta
+    inv.total_amount = float(inv.total_amount) + delta
+    db.commit()
+    db.refresh(item)
+
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "invoice_items", item.id,
+              before_state=before, after_state=serialize_model(item), reason=data.correction_reason, ip_address=request.client.host)
+    create_alert(
+        db,
+        title=f"Bill correction: {item.description}",
+        message=(f"{current_user.full_name} corrected '{item.description}' on invoice {inv.invoice_number} "
+                  f"from Rs {old_amount:,.2f} to Rs {data.new_amount:,.2f}. Reason: {data.correction_reason}"),
+        severity=AlertSeverity.MEDIUM, module="billing", entity_type="invoice", entity_id=inv.id,
+        detail={"item_id": item.id, "description": item.description, "original_amount": old_amount,
+                "corrected_amount": data.new_amount, "reason": data.correction_reason, "corrected_by": current_user.full_name},
+    )
+    return {"id": item.id, "description": item.description, "amount": float(item.unit_price), "total_amount": float(inv.total_amount)}
+
+
+@router.put("/invoices/{invoice_id}/last-debit-balance")
+async def set_last_debit_balance(invoice_id: int, data: LastDebitBalanceUpdate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    if not check_permission(current_user, "billing", "edit"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if inv.bill_made_at is not None:
+        raise HTTPException(status_code=400, detail="This bill has been made - the carried-over balance can no longer be changed here")
+    before = serialize_model(inv)
+    inv.last_debit_balance = data.last_debit_balance
+    db.commit()
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "invoices", inv.id, before_state=before, after_state=serialize_model(inv), ip_address=request.client.host)
+    return {"last_debit_balance": float(inv.last_debit_balance)}
+
+
+@router.post("/invoices/{invoice_id}/make-bill")
+async def make_bill(invoice_id: int, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Locks the Interactive Invoice Table (no more line additions or last
+    debit balance edits) and enables Print. Idempotent - re-clicking on an
+    already-made bill just returns its existing lock time."""
+    if not check_permission(current_user, "billing", "edit"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if inv.bill_made_at is None:
+        inv.bill_made_at = datetime.utcnow()
+        db.commit()
+        log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "invoices", inv.id, after_state={"bill_made_at": inv.bill_made_at.isoformat()}, ip_address=request.client.host)
+    return {"bill_made_at": inv.bill_made_at}
+
+
 @router.get("/invoices/{invoice_id}/payments")
 async def list_payments(invoice_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     if not check_permission(current_user, "billing", "view"):
@@ -1073,7 +1508,7 @@ async def list_payments(invoice_id: int, db: Session = Depends(get_db), current_
         raise HTTPException(status_code=404, detail="Invoice not found")
     payments = db.query(InvoicePayment).filter(InvoicePayment.invoice_id == invoice_id).order_by(InvoicePayment.created_at.desc()).all()
     return [{"id": p.id, "invoice_id": p.invoice_id, "amount": float(p.amount), "method": p.method,
-             "notes": p.notes, "received_by": p.received_by, "created_at": p.created_at} for p in payments]
+             "voucher_number": p.voucher_number, "notes": p.notes, "received_by": p.received_by, "created_at": p.created_at} for p in payments]
 
 
 @router.post("/invoices/{invoice_id}/payments")
@@ -1086,22 +1521,19 @@ async def record_payment(invoice_id: int, data: PaymentCreate, request: Request,
     if inv.status == InvoiceStatus.VOID:
         raise HTTPException(status_code=400, detail="Cannot record a payment against a void invoice")
 
-    balance_due = float(inv.total_amount) - float(inv.amount_paid)
+    balance_due = _invoice_net_owed(inv) - float(inv.amount_paid or 0)
     if data.amount > balance_due + 0.01:  # small epsilon for float rounding
         raise HTTPException(status_code=400, detail=f"Payment of {data.amount:.2f} exceeds balance due of {balance_due:.2f}")
 
     before = serialize_model(inv)
     payment = InvoicePayment(
         invoice_id=invoice_id, amount=data.amount, method=data.method,
-        notes=data.notes, received_by=current_user.id,
+        voucher_number=data.voucher_number, notes=data.notes, received_by=current_user.id,
     )
     db.add(payment)
 
-    inv.amount_paid = float(inv.amount_paid) + data.amount
-    if float(inv.amount_paid) >= float(inv.total_amount) - 0.01:
-        inv.status = InvoiceStatus.PAID
-    elif inv.status == InvoiceStatus.DRAFT:
-        inv.status = InvoiceStatus.ISSUED
+    inv.amount_paid = float(inv.amount_paid or 0) + data.amount
+    _apply_invoice_payment_status(inv)
 
     db.commit()
     db.refresh(inv)
@@ -1109,8 +1541,8 @@ async def record_payment(invoice_id: int, data: PaymentCreate, request: Request,
 
     log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "invoices", inv.id,
               before_state=before, after_state=serialize_model(inv),
-              reason=f"Payment of {data.amount:.2f} recorded", ip_address=request.client.host)
-    return {"id": payment.id, "amount_paid": float(inv.amount_paid), "balance_due": float(inv.total_amount) - float(inv.amount_paid), "status": inv.status.value}
+              reason=f"Payment of {data.amount:.2f} recorded ({data.method or 'unspecified method'})", ip_address=request.client.host)
+    return {"id": payment.id, "amount_paid": float(inv.amount_paid), "balance_due": _invoice_net_owed(inv) - float(inv.amount_paid), "status": inv.status.value}
 
 
 @router.get("/payments/{payment_id}/receipt-data")
@@ -1438,3 +1870,139 @@ async def export_payments(start: Optional[str] = Query(None), end: Optional[str]
     buf.seek(0)
     return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                               headers={"Content-Disposition": f"attachment; filename=payments_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.xlsx"})
+
+
+def _ag_branch_query(db: Session, voucher_number: str, date_from: Optional[str], date_to: Optional[str]):
+    q = db.query(InvoicePayment).options(
+        joinedload(InvoicePayment.invoice).joinedload(Invoice.booking),
+    ).filter(InvoicePayment.ag_branch_fee.isnot(None))
+    if voucher_number:
+        q = q.filter(InvoicePayment.voucher_number.contains(voucher_number))
+    if date_from:
+        q = q.filter(InvoicePayment.created_at >= datetime.strptime(date_from, "%Y-%m-%d"))
+    if date_to:
+        q = q.filter(InvoicePayment.created_at < datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1))
+    return q.order_by(InvoicePayment.created_at.desc())
+
+
+@router.get("/ag-branch-advances")
+async def list_ag_branch_advances(
+    voucher_number: str = "", date_from: str = "", date_to: str = "",
+    page: int = Query(1, ge=1), page_size: int = Query(25, ge=1, le=100),
+    db: Session = Depends(get_db), current_user=Depends(get_current_user),
+):
+    """Online-booking advance payments with their AG Branch 10% deduction
+    broken out - voucher search + the four figures the spec requires
+    (gross/fee/net/customer). Every row here is strictly an online-advance
+    payment (ag_branch_fee is only ever set on those, see instant_checkout)."""
+    if not check_permission(current_user, "billing", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    q = _ag_branch_query(db, voucher_number, date_from, date_to)
+    total = q.count()
+    payments = q.offset((page - 1) * page_size).limit(page_size).all()
+
+    items = []
+    for p in payments:
+        inv = p.invoice
+        b = inv.booking if inv else None
+        gross = float(p.amount)
+        fee = float(p.ag_branch_fee or 0)
+        items.append({
+            "payment_id": p.id, "voucher_number": p.voucher_number,
+            "customer_name": _guest_display_name(b) if b else None,
+            "booking_reference": b.booking_reference if b else None,
+            "invoice_number": inv.invoice_number if inv else None,
+            "gross_advance": gross, "ag_branch_fee": fee, "net_amount": gross - fee,
+            "date": p.created_at,
+        })
+    return {"items": items, "total": total}
+
+
+@router.get("/export/ag-branch-advances")
+async def export_ag_branch_advances(
+    voucher_number: str = "", date_from: str = "", date_to: str = "",
+    db: Session = Depends(get_db), current_user=Depends(get_current_user),
+):
+    if not check_permission(current_user, "billing", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    payments = _ag_branch_query(db, voucher_number, date_from, date_to).limit(5000).all()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "AG Branch Advances"
+    ws.append(["Voucher Number", "Customer Name & Rank", "Gross Advance Received", "10% AG Branch Fee Deducted", "Net Amount Received by Mess", "Date", "Booking Ref"])
+    for p in payments:
+        inv = p.invoice
+        b = inv.booking if inv else None
+        gross = float(p.amount)
+        fee = float(p.ag_branch_fee or 0)
+        ws.append([
+            p.voucher_number or "", _guest_display_name(b) if b else "",
+            gross, fee, gross - fee,
+            p.created_at.isoformat() if p.created_at else "", b.booking_reference if b else "",
+        ])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                              headers={"Content-Disposition": f"attachment; filename=ag_branch_advances_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.xlsx"})
+
+
+@router.get("/export/ag-branch-advances/pdf")
+async def export_ag_branch_advances_pdf(
+    voucher_number: str = "", date_from: str = "", date_to: str = "",
+    db: Session = Depends(get_db), current_user=Depends(get_current_user),
+):
+    if not check_permission(current_user, "billing", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    payments = _ag_branch_query(db, voucher_number, date_from, date_to).limit(5000).all()
+
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import landscape, A4
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+
+    rows = [["Voucher Number", "Customer Name & Rank", "Gross Advance\nReceived", "10% AG Branch\nFee Deducted", "Net Amount\nReceived by Mess", "Date", "Booking Ref"]]
+    gross_total = fee_total = net_total = 0.0
+    for p in payments:
+        inv = p.invoice
+        b = inv.booking if inv else None
+        gross = float(p.amount)
+        fee = float(p.ag_branch_fee or 0)
+        net = gross - fee
+        gross_total += gross
+        fee_total += fee
+        net_total += net
+        rows.append([
+            p.voucher_number or "-", _guest_display_name(b) if b else "-",
+            f"{gross:,.2f}", f"{fee:,.2f}", f"{net:,.2f}",
+            p.created_at.strftime("%d-%m-%Y") if p.created_at else "-", b.booking_reference if b else "-",
+        ])
+    rows.append(["", "Total", f"{gross_total:,.2f}", f"{fee_total:,.2f}", f"{net_total:,.2f}", "", ""])
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), topMargin=15 * mm, bottomMargin=15 * mm)
+    styles = getSampleStyleSheet()
+    elements = [
+        Paragraph(get_setting_str(db, "mess_name", "EME Officers Mess"), styles["Title"]),
+        Paragraph("AG Branch Advance Report", styles["Heading2"]),
+        Spacer(1, 8),
+    ]
+    table = Table(rows, repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#4f46e5")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("ALIGN", (2, 0), (4, -1), "RIGHT"),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#f3f4f6")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    elements.append(table)
+    doc.build(elements)
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/pdf",
+                              headers={"Content-Disposition": f"attachment; filename=ag_branch_advances_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.pdf"})

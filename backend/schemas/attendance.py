@@ -72,3 +72,35 @@ class ServeAttendanceRequest(BaseModel):
 class NoShowSweepResult(BaseModel):
     count: int
     items: List[AttendanceLookupResult] = []
+
+
+class AttendanceMatrixRow(BaseModel):
+    kind: str  # "member" | "booking"
+    id: int
+    name: str
+    sub_label: Optional[str] = None
+    present: bool  # current or default state
+    status: Optional[str] = None  # existing MealAttendance status, if a row exists yet
+    on_leave: bool = False
+    attendance_id: Optional[int] = None
+
+class AttendanceMatrixOut(BaseModel):
+    date: date
+    meal_type: str
+    locked: bool
+    has_saved_records: bool  # false = every row below is a computed default, nothing persisted yet
+    dining: List[AttendanceMatrixRow]
+    non_dining: List[AttendanceMatrixRow]
+    guests: List[AttendanceMatrixRow]
+
+class AttendanceMatrixEntry(BaseModel):
+    kind: str  # "member" | "booking"
+    id: int
+    present: bool
+
+class AttendanceMatrixSave(BaseModel):
+    date: date
+    meal_type: str
+    entries: List[AttendanceMatrixEntry]
+
+    _check_meal_type = field_validator("meal_type")(_ensure_meal_type)

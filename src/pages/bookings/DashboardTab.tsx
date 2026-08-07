@@ -4,7 +4,7 @@ import api, { getErrorMessage } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { LogIn, LogOut, Sparkles, MessageSquare, Copy, Check, RefreshCw, TimerOff, ChevronLeft, ChevronRight } from 'lucide-react';
+import { LogIn, LogOut, Sparkles, MessageSquare, Copy, Check, RefreshCw, TimerOff, ChevronLeft, ChevronRight, ClipboardCheck, ChefHat } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { formatCurrency } from '@/lib/currency';
 import { ConfirmDialog, type ConfirmRequest } from '@/components/ConfirmDialog';
@@ -128,6 +128,10 @@ export default function DashboardTab({ onOpenRoom, onChanged }: DashboardTabProp
       setTimeout(() => setCopiedSmsId(null), 2000);
     } catch { toast.error('Copy failed - select the text manually'); }
   };
+  const handleFinalizeBooking = async (bookingId: number) => {
+    try { await api.post(`/bookings/${bookingId}/finalize`); toast.success('Marked room/attendant side final'); refresh(); }
+    catch (err) { toast.error(getErrorMessage(err, 'Failed to finalize')); }
+  };
   const handleMarkSmsSent = async (id: number) => {
     try { await api.post(`/bookings/sms/${id}/mark-sent`); toast.success('Marked sent'); fetchSmsOutbox(); }
     catch (err) { toast.error(getErrorMessage(err, 'Failed')); }
@@ -194,19 +198,32 @@ export default function DashboardTab({ onOpenRoom, onChanged }: DashboardTabProp
             </div>
             {(occupancy?.departures.length ?? 0) === 0 && <p className="text-base text-muted-foreground">No departures expected today</p>}
             {occupancy?.departures.map(d => (
-              <div key={d.booking_id} className="flex items-center justify-between text-base py-1.5 border-b last:border-0">
-                <button type="button" className="text-left hover:underline" onClick={() => onOpenRoom(d.room_id)}>
-                  {d.guest_name} <span className="text-muted-foreground text-sm">Room {d.room_number}</span>
-                  {d.overdue && (
-                    <span className="block text-sm text-red-600 font-medium">
-                      Overdue — should have left {d.days_overdue === 1 ? 'yesterday' : `${d.days_overdue} days ago`}
-                    </span>
-                  )}
-                </button>
-                <Button size="sm" variant="ghost" title="Send to Clerk Desk to bill"
-                  onClick={() => navigate('/clerk-desk')}>
-                  <LogOut size={17} className={d.overdue ? 'text-red-600' : 'text-blue-600'} />
-                </Button>
+              <div key={d.booking_id} className="py-1.5 border-b last:border-0">
+                <div className="flex items-center justify-between text-base">
+                  <button type="button" className="text-left hover:underline" onClick={() => onOpenRoom(d.room_id)}>
+                    {d.guest_name} <span className="text-muted-foreground text-sm">Room {d.room_number}</span>
+                    {d.overdue && (
+                      <span className="block text-sm text-red-600 font-medium">
+                        Overdue — should have left {d.days_overdue === 1 ? 'yesterday' : `${d.days_overdue} days ago`}
+                      </span>
+                    )}
+                  </button>
+                  <span className="flex items-center shrink-0">
+                    <Button size="sm" variant="ghost"
+                      title={d.booking_finalized_by_name ? `Finalized by ${d.booking_finalized_by_name}` : 'Mark room/attendant side final'}
+                      disabled={!!d.booking_finalized_by_name} onClick={() => handleFinalizeBooking(d.booking_id)}>
+                      <ClipboardCheck size={17} className={d.booking_finalized_by_name ? 'text-emerald-600' : 'text-muted-foreground'} />
+                    </Button>
+                    <Button size="sm" variant="ghost" title="Send to Clerk Desk to bill"
+                      onClick={() => navigate('/clerk-desk')}>
+                      <LogOut size={17} className={d.overdue ? 'text-red-600' : 'text-blue-600'} />
+                    </Button>
+                  </span>
+                </div>
+                <p className="text-sm text-muted-foreground flex items-center gap-1">
+                  <ChefHat size={12} className={d.kitchen_finalized_by_name ? 'text-emerald-600' : ''} />
+                  {d.kitchen_finalized_by_name ? `Kitchen finalized by ${d.kitchen_finalized_by_name}` : 'Kitchen not finalized yet'}
+                </p>
               </div>
             ))}
           </CardContent>

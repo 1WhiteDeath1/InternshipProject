@@ -166,10 +166,73 @@ def _migrate_edit_requests_item_id_nullable(engine):
         raw.close()
 
 
+def _migrate_invoices_bill_serial_number(engine):
+    # Manually-entered physical bill-book serial, distinct from the
+    # system-generated invoice_number. Additive/nullable.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(invoices)")).fetchall()
+        if not cols:
+            return
+        if "bill_serial_number" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN bill_serial_number VARCHAR(50)"))
+            conn.commit()
+            logger.info("migration: added invoices.bill_serial_number")
+
+
+def _migrate_invoice_payments_ag_branch(engine):
+    # AG Branch 10% advance-deduction tracking on the online-advance payment
+    # row (services/master_bill.py's sibling concern, tracked here since it
+    # lives on InvoicePayment). Additive/nullable.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(invoice_payments)")).fetchall()
+        if not cols:
+            return
+        col_names = {c[1] for c in cols}
+        if "voucher_number" not in col_names:
+            conn.execute(text("ALTER TABLE invoice_payments ADD COLUMN voucher_number VARCHAR(50)"))
+            logger.info("migration: added invoice_payments.voucher_number")
+        if "ag_branch_fee" not in col_names:
+            conn.execute(text("ALTER TABLE invoice_payments ADD COLUMN ag_branch_fee NUMERIC(10, 2)"))
+            logger.info("migration: added invoice_payments.ag_branch_fee")
+        conn.commit()
+
+
+def _migrate_invoice_items_reason(engine):
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(invoice_items)")).fetchall()
+        if not cols:
+            return
+        if "reason" not in {c[1] for c in cols}:
+            conn.execute(text("ALTER TABLE invoice_items ADD COLUMN reason VARCHAR(255)"))
+            conn.commit()
+            logger.info("migration: added invoice_items.reason")
+
+
+def _migrate_invoices_master_bill_fields(engine):
+    # Universal master bill (services/master_bill.py): Clerk-entered
+    # carry-forward balance and the "Make Bill" locked/draft state.
+    with engine.connect() as conn:
+        cols = conn.execute(text("PRAGMA table_info(invoices)")).fetchall()
+        if not cols:
+            return
+        col_names = {c[1] for c in cols}
+        if "last_debit_balance" not in col_names:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN last_debit_balance NUMERIC(10, 2) DEFAULT 0"))
+            logger.info("migration: added invoices.last_debit_balance")
+        if "bill_made_at" not in col_names:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN bill_made_at DATETIME"))
+            logger.info("migration: added invoices.bill_made_at")
+        conn.commit()
+
+
 MIGRATIONS = [
     _migrate_invoices_bill_type,
     _migrate_invoices_complimentary,
     _migrate_invoices_guest_walkin,
     _migrate_invoices_event_id,
     _migrate_edit_requests_item_id_nullable,
+    _migrate_invoices_bill_serial_number,
+    _migrate_invoice_payments_ag_branch,
+    _migrate_invoice_items_reason,
+    _migrate_invoices_master_bill_fields,
 ]
