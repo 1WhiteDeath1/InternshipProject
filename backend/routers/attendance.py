@@ -13,6 +13,7 @@ from backend.schemas import (
     MealAttendanceCreate, MealAttendanceOut, AttendanceMarkRequest, BulkAttendanceCreate, MemberLeaveCreate,
     AttendanceLookupResult, ServeAttendanceRequest, NoShowSweepResult,
     AttendanceMatrixOut, AttendanceMatrixRow, AttendanceMatrixSave,
+    AttendanceItemAssign,
 )
 from backend.auth import get_current_user, check_permission, PermissionChecker
 from backend.audit import log_audit, serialize_model, AuditAction
@@ -239,7 +240,11 @@ def _matrix_row(kind: str, id_: int, name: str, sub_label: str | None, group_def
         return AttendanceMatrixRow(kind=kind, id=id_, name=name, sub_label=sub_label, present=False, status=None, on_leave=True, attendance_id=None)
     if record is not None:
         present = record.status in (AttendanceStatus.BOOKED, AttendanceStatus.ATTENDED)
-        return AttendanceMatrixRow(kind=kind, id=id_, name=name, sub_label=sub_label, present=present, status=record.status.value, on_leave=(record.status == AttendanceStatus.EXCLUDED), attendance_id=record.id)
+        return AttendanceMatrixRow(
+            kind=kind, id=id_, name=name, sub_label=sub_label, present=present, status=record.status.value,
+            on_leave=(record.status == AttendanceStatus.EXCLUDED), attendance_id=record.id,
+            menu_item_id=record.menu_item_id, menu_item_name=record.menu_item.name if record.menu_item else None,
+        )
     return AttendanceMatrixRow(kind=kind, id=id_, name=name, sub_label=sub_label, present=group_default, status=None, on_leave=False, attendance_id=None)
 
 
@@ -338,10 +343,82 @@ async def save_attendance_matrix(data: AttendanceMatrixSave, request: Request, d
                 db.commit()
                 log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "meal_attendance", record.id, before_state=before, after_state=serialize_model(record), ip_address=request.client.host)
                 updated += 1
+            elif record is None:
+                # No row yet means this is a Dining member showing present
+                # purely from group_default (see _matrix_row) - switching them
+                # off must persist an explicit exclusion, or the very next
+                # fetch recomputes group_default=True and the switch snaps
+                # back on. Non-dining members/guests never reach this branch
+                # off their own default (they default to absent), only after
+                # having been explicitly toggled on first, which already
+                # leaves a BOOKED record for the branch above to cancel.
+                new_record = MealAttendance(
+                    member_id=entry.id if entry.kind == "member" else None,
+                    booking_id=entry.id if entry.kind == "booking" else None,
+                    date=data.date, meal_type=data.meal_type, method="manual",
+                    status=AttendanceStatus.CANCELLED,
+                )
+                db.add(new_record)
+                db.commit()
+                db.refresh(new_record)
+                log_audit(db, current_user.id, current_user.full_name, AuditAction.CREATE, "meal_attendance", new_record.id, after_state=serialize_model(new_record), ip_address=request.client.host)
+                updated += 1
             else:
-                skipped += 1  # no row (never asked) or already ATTENDED/EXCLUDED - leave alone
+                skipped += 1  # already ATTENDED/EXCLUDED - leave alone
 
     return {"created": created, "updated": updated, "skipped": skipped}
+
+
+@router.post("/matrix/assign-item")
+async def assign_menu_item(data: AttendanceItemAssign, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Set which people are eating one menu item for a date/meal - the step
+    that actually links Attendance to Kitchen's order generation, which only
+    aggregates attendance rows that carry a menu_item_id (see
+    kitchen.py's _aggregate_suggestions). Only ever touches this
+    menu_item_id's assignment; a person's overall presence (BOOKED/CANCELLED)
+    from the roster switches is left alone - unchecking someone here just
+    clears their dish, it doesn't mark them absent."""
+    if not check_permission(current_user, "attendance", "create"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    cutoff = _get_meal_cutoff_time(db, data.meal_type)
+    if _is_locked(data.date, cutoff):
+        raise HTTPException(status_code=400, detail=f"Attendance for {data.meal_type} on {data.date} is final - booking closed at {cutoff.strftime('%H:%M')}")
+
+    desired = {(e.kind, e.id) for e in data.entries if e.kind in ("member", "booking")}
+
+    currently_assigned = db.query(MealAttendance).filter(
+        MealAttendance.date == data.date, MealAttendance.meal_type == data.meal_type,
+        MealAttendance.menu_item_id == data.menu_item_id,
+    ).all()
+    cleared = 0
+    for record in currently_assigned:
+        key = ("member", record.member_id) if record.member_id else ("booking", record.booking_id)
+        if key not in desired:
+            before = serialize_model(record)
+            record.menu_item_id = None
+            db.commit()
+            log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "meal_attendance", record.id, before_state=before, after_state=serialize_model(record), ip_address=request.client.host)
+            cleared += 1
+
+    assigned, created = 0, 0
+    for kind, id_ in desired:
+        query = db.query(MealAttendance).filter(MealAttendance.date == data.date, MealAttendance.meal_type == data.meal_type)
+        query = query.filter(MealAttendance.member_id == id_) if kind == "member" else query.filter(MealAttendance.booking_id == id_)
+        record = query.first()
+        if record is None:
+            _create_attendance(db, id_ if kind == "member" else None, id_ if kind == "booking" else None,
+                                data.date, data.meal_type, "manual", menu_item_id=data.menu_item_id)
+            created += 1
+        else:
+            before = serialize_model(record)
+            record.menu_item_id = data.menu_item_id
+            if record.status == AttendanceStatus.CANCELLED:
+                record.status = AttendanceStatus.BOOKED
+            db.commit()
+            log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "meal_attendance", record.id, before_state=before, after_state=serialize_model(record), ip_address=request.client.host)
+        assigned += 1
+
+    return {"assigned": assigned, "created": created, "cleared": cleared}
 
 
 # --- Meal Service (omnibar search, per-person serve, no-show sweep) ---

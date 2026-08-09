@@ -46,17 +46,27 @@ PAYMENT_METHOD_CASH = "Cash Deposit"
 PAYMENT_METHODS = (PAYMENT_METHOD_ONLINE, PAYMENT_METHOD_BANK, PAYMENT_METHOD_CASH)
 
 
-def _prior_outstanding_for_guest(db: Session, guest_identity_id: int) -> float:
+def _prior_outstanding_for_guest(db: Session, guest_identity_id: int, *, exclude_booking_id: Optional[int] = None) -> float:
     """Sum of everything still owed across every PRIOR bill tied to this
     persistent Guest identity (matched by CNIC/phone at check-in - see
     models/guests.py) - covers both a past room stay (via Booking.guest_id)
     and a past standalone walk-in mess visit (Invoice.guest_id directly).
     Used to auto-fill a brand-new bill's Last Debit Balance; the Clerk can
-    still edit it afterward via set_last_debit_balance."""
+    still edit it afterward via set_last_debit_balance.
+
+    exclude_booking_id excludes the booking currently being invoiced -
+    instant_checkout builds a room invoice and a mess invoice back-to-back
+    for the SAME stay (see its bill_types loop), and without this the second
+    invoice's auto-fill saw the first one (already committed, still unpaid)
+    and wrongly counted its own sibling as "prior debt" - a same-stay room
+    bill is never a prior debt relative to that same stay's mess bill."""
     prior = db.query(Invoice).outerjoin(Booking, Invoice.booking_id == Booking.id).filter(
         Invoice.status != InvoiceStatus.VOID,
         or_(Invoice.guest_id == guest_identity_id, Booking.guest_id == guest_identity_id),
-    ).all()
+    )
+    if exclude_booking_id is not None:
+        prior = prior.filter(or_(Invoice.booking_id.is_(None), Invoice.booking_id != exclude_booking_id))
+    prior = prior.all()
     total = 0.0
     for inv in prior:
         owed = _invoice_net_owed(inv) - float(inv.amount_paid or 0)
@@ -128,7 +138,10 @@ def _build_invoice(db: Session, booking: Booking, items: list, current_user, iss
     # identity is actually known (guest_id set at check-in/registration);
     # the Clerk can still override it afterward via set_last_debit_balance.
     guest_identity_id = booking.guest_id if booking is not None else guest.id
-    auto_last_debit_balance = _prior_outstanding_for_guest(db, guest_identity_id) if guest_identity_id else 0.0
+    auto_last_debit_balance = (
+        _prior_outstanding_for_guest(db, guest_identity_id, exclude_booking_id=booking.id if booking is not None else None)
+        if guest_identity_id else 0.0
+    )
 
     invoice = Invoice(
         invoice_number=f"TMP-{uuid.uuid4().hex}", **owner,
@@ -631,7 +644,8 @@ async def mess_only_desk(db: Session = Depends(get_db), current_user=Depends(get
     # mess bill - they'd otherwise show up here mislabeled as "mess". They're
     # settled from the Events page or the general Billing page instead.
     open_invoices = db.query(Invoice).filter(
-        Invoice.guest_id.isnot(None), Invoice.status.in_((InvoiceStatus.DRAFT, InvoiceStatus.ISSUED)),
+        Invoice.guest_id.isnot(None),
+        Invoice.status.in_((InvoiceStatus.DRAFT, InvoiceStatus.ISSUED, InvoiceStatus.PARTIALLY_PAID)),
         Invoice.bill_type != "event",
     ).order_by(Invoice.created_at.desc()).all()
     unsettled = []
@@ -677,11 +691,16 @@ async def clerk_desk(db: Session = Depends(get_db), current_user=Depends(get_cur
     ).order_by(Booking.created_at.desc()).all()
 
     # Unsettled bills: anything live with money still owing. Legacy invoices
-    # predate the created-as-issued rule, so 'draft' is included too. Guest-only
-    # walk-in mess invoices are excluded here - they live on the Mess-Only page.
+    # predate the created-as-issued rule, so 'draft' is included too.
+    # partially_paid covers an online booking whose advance didn't fully
+    # cover the room bill - instant_checkout applies that advance as a real
+    # payment the moment the invoice is created (see its docstring), so the
+    # invoice can start life already partially_paid with money still owed.
+    # Guest-only walk-in mess invoices are excluded here - they live on the
+    # Mess-Only page.
     today = date.today()
     open_invoices = db.query(Invoice).options(joinedload(Invoice.booking).joinedload(Booking.room)).filter(
-        Invoice.status.in_((InvoiceStatus.DRAFT, InvoiceStatus.ISSUED)),
+        Invoice.status.in_((InvoiceStatus.DRAFT, InvoiceStatus.ISSUED, InvoiceStatus.PARTIALLY_PAID)),
         Invoice.guest_id.is_(None),
     ).order_by(Invoice.created_at.desc()).all()
     unsettled = []

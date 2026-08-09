@@ -8,9 +8,10 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Printer, FileEdit } from 'lucide-react';
+import { Printer, FileEdit, ClipboardEdit } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatCurrency } from '@/lib/currency';
+import { MasterBillView } from '@/components/MasterBillView';
 
 /* Printable documents in the mess's own paper formats:
    - BillPrintView: the "DRAFT BILL (For Office Use Only)" layout (Ser /
@@ -397,6 +398,19 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
   const [pendingCorrectionItemIds, setPendingCorrectionItemIds] = useState<Set<number>>(new Set());
   const [correctionOpen, setCorrectionOpen] = useState(false);
   const [serialInput, setSerialInput] = useState('');
+  // Same Interactive Table members already get on Mess Billing/Clerk Desk
+  // Members (MasterBillView, source="invoice" here) - freely editable line
+  // items + ad-hoc heads + payment recording while bill_made_at is unset,
+  // locking only once "Make Bill" is clicked. Request Correction (below)
+  // stays for AFTER that lock - the backend already drew this line the same
+  // way for both invoices and mess bills, this view just never opened the
+  // pre-lock table for guest invoices before.
+  const [masterBillOpen, setMasterBillOpen] = useState(false);
+  // One cash receipt per settled invoice (Room and Mess are separate ledger
+  // entries even when "Pay Together" settles both in one click) - shown one
+  // at a time, same pattern as Billing.tsx offering the receipt right after
+  // recording a payment there.
+  const [receiptQueue, setReceiptQueue] = useState<number[]>([]);
 
   const fetchBills = (ids: number[]) =>
     Promise.all(ids.map(id => api.get(`/billing/invoices/${id}/print-data`).then(r => r.data as PrintData)))
@@ -476,12 +490,15 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
     if (method === 'Online/AG Branch' && !voucherNumber.trim()) { toast.error('Voucher Number is required for Online/AG Branch payments'); return; }
     setPaying(true);
     try {
+      const paymentIds: number[] = [];
       for (const b of targets) {
-        await api.post(`/billing/invoices/${b.invoice.id}/payments`, { amount: b.invoice.balance_due, method, voucher_number: voucherNumber.trim() || undefined });
+        const res = await api.post(`/billing/invoices/${b.invoice.id}/payments`, { amount: b.invoice.balance_due, method, voucher_number: voucherNumber.trim() || undefined });
+        paymentIds.push(res.data.id);
       }
       toast.success(targets.length > 1
         ? `Both bills settled together — ${formatCurrency(targets.reduce((s, b) => s + b.invoice.balance_due, 0))} by ${method}`
         : `${BILL_LABELS[targets[0].invoice.bill_type] || 'Bill'} settled — ${formatCurrency(targets[0].invoice.balance_due)} by ${method}`);
+      setReceiptQueue(paymentIds);
       if (invoiceIds) await refresh(invoiceIds);
       onPaymentsChanged?.();
     } catch (err) { toast.error(getErrorMessage(err, 'Payment failed')); }
@@ -541,13 +558,21 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
         {allowPayments && activeBill && activeBill.invoice.id > 0 && activeBill.invoice.status !== 'void' && (
           <div className="rounded-lg border p-3 space-y-2">
             <p className="text-sm font-medium">Line Item Correction</p>
-            {activeBillHasPendingCorrection ? (
-              <p className="text-xs text-amber-600">A correction on this bill is pending Manager approval</p>
-            ) : (
-              <Button size="sm" variant="outline" onClick={() => setCorrectionOpen(true)}>
-                <FileEdit size={14} className="mr-1" /> Request Correction
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => setMasterBillOpen(true)}>
+                <ClipboardEdit size={14} className="mr-1" /> Master Bill / Interactive Table
               </Button>
-            )}
+              {activeBillHasPendingCorrection ? (
+                <p className="text-xs text-amber-600 self-center">A correction on this bill is pending Manager approval</p>
+              ) : (
+                <Button size="sm" variant="outline" onClick={() => setCorrectionOpen(true)}>
+                  <FileEdit size={14} className="mr-1" /> Request Correction
+                </Button>
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Freely edit line items, add charges, or record payment in the Interactive Table until "Make Bill" locks it - Request Correction is for after that lock.
+            </p>
           </div>
         )}
 
@@ -595,6 +620,11 @@ export function BillPrintView({ invoiceIds, onClose, allowPayments = false, onPa
         open={correctionOpen} onClose={() => setCorrectionOpen(false)}
         onSubmitted={() => { if (invoiceIds) refresh(invoiceIds); }} />
     )}
+    {masterBillOpen && activeBill && activeBill.invoice.id > 0 && (
+      <MasterBillView source="invoice" sourceId={activeBill.invoice.id}
+        onClose={() => { setMasterBillOpen(false); if (invoiceIds) refresh(invoiceIds); }} />
+    )}
+    <PaymentReceiptView paymentId={receiptQueue[0] ?? null} onClose={() => setReceiptQueue(q => q.slice(1))} />
     </Fragment>
   );
 }

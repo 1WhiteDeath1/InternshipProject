@@ -180,14 +180,19 @@ export default function MessBilling() {
   };
 
   const statusBadge = (status: string) => {
-    const colors: Record<string, string> = { draft: 'bg-muted text-muted-foreground', issued: 'bg-blue-100 text-blue-800', paid: 'bg-green-100 text-green-800' };
+    const colors: Record<string, string> = {
+      draft: 'bg-muted text-muted-foreground', issued: 'bg-blue-100 text-blue-800',
+      partially_paid: 'bg-amber-100 text-amber-800', paid: 'bg-green-100 text-green-800',
+    };
     return <Badge className={colors[status] || ''}>{status}</Badge>;
   };
 
   const draftCount = bills.filter(b => b.status === 'draft').length;
   const totalBilled = bills.filter(b => b.status !== 'draft').reduce((s, b) => s + b.total_amount, 0);
-  const collected = bills.filter(b => b.status === 'paid').reduce((s, b) => s + b.total_amount, 0);
-  const outstanding = bills.filter(b => b.status === 'issued').reduce((s, b) => s + b.total_amount, 0);
+  const collected = bills.filter(b => b.status === 'paid').reduce((s, b) => s + b.total_amount, 0)
+    + bills.filter(b => b.status === 'partially_paid').reduce((s, b) => s + (b.amount_paid || 0), 0);
+  const outstanding = bills.filter(b => b.status === 'issued' || b.status === 'partially_paid')
+    .reduce((s, b) => s + (b.total_amount - (b.amount_paid || 0)), 0);
 
   return (
     <div className="space-y-6">
@@ -242,7 +247,7 @@ export default function MessBilling() {
                       <TableCell>
                         <div className="flex gap-1">
                           {b.status === 'draft' && <Button size="sm" variant="ghost" onClick={() => handleIssue(b.id)}><CheckCircle size={16} className="text-blue-600" /></Button>}
-                          {b.status === 'issued' && (
+                          {(b.status === 'issued' || b.status === 'partially_paid') && (
                             <Button size="sm" variant="ghost" title="Record Payment" onClick={() => { setPaymentBill(b); setPaymentAmount(0); }}>
                               <DollarSign size={16} className="text-green-600" />
                             </Button>

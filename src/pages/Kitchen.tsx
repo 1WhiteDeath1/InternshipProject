@@ -136,7 +136,11 @@ export default function Kitchen() {
   };
 
   const fetchBookings = async () => {
-    try { const res = await api.get('/bookings?status=checked_in'); setBookings(res.data.items); }
+    // Kitchen NCO has no bookings/rooms_overview permission at all (see
+    // migrations/access.py), so GET /bookings always 403s for them - this
+    // kitchen:view-gated slice is what actually populates the a la carte
+    // dialog's Guest picker for the role that uses it.
+    try { const res = await api.get('/kitchen/checked-in-guests'); setBookings(res.data); }
     catch { /* consumer picker is secondary to the core order flow */ }
   };
 

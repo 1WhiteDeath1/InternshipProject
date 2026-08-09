@@ -44,6 +44,7 @@ const emptyForm = (checkIn: string, checkOut: string, checkInNow: boolean, atten
   advance_payment_amount: '', advance_paid_at: todayISO(),
   check_in: checkIn, check_out: checkOut, check_in_now: checkInNow,
   attendant_id: attendantId, stay_type: '', is_indefinite: false,
+  hra_expected_checkout: '',
 });
 
 export type BookingFormState = ReturnType<typeof emptyForm>;
@@ -281,11 +282,6 @@ export default function RoomSection({ roomId, open, onClose, onChanged, members,
     if (form.source === 'online' && !form.advance_paid_at) { toast.error('Enter the date the advance was actually received'); return; }
     if (form.client_category === 'civilian' && !form.reference_person.trim()) { toast.error('Civilian guests require a reference person (C/O)'); return; }
     if (effectiveCheckInNow && !form.attendant_id) { toast.error('Select a room attendant before checking in'); return; }
-    const guestTotal = Math.max(1, Number(form.adults) || 1) + Math.max(0, Number(form.children) || 0);
-    if (room?.capacity && guestTotal > room.capacity) {
-      toast.error(`Room ${room.room_number} accommodates at most ${room.capacity} guest(s) — this booking has ${guestTotal}`);
-      return;
-    }
     setSaving(true);
     try {
       const res = await api.post('/bookings', {
@@ -306,6 +302,7 @@ export default function RoomSection({ roomId, open, onClose, onChanged, members,
         attendant_id: form.attendant_id ? Number(form.attendant_id) : null,
         stay_type: form.stay_type || null,
         is_indefinite: form.is_indefinite,
+        hra_expected_checkout: form.nature_of_duty === 'hra' && form.hra_expected_checkout ? form.hra_expected_checkout : null,
       });
       const p = res.data.pricing;
       const amountText = p.pricing_mode === 'hra_monthly' ? `${formatCurrency(res.data.total_amount)}/month (HRA)` : formatCurrency(res.data.total_amount);

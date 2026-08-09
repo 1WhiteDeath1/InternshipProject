@@ -50,6 +50,7 @@ export interface MemberBill {
   discount_amount: number;
   discount_reason: string | null;
   total_amount: number;
+  amount_paid: number;
   status: string;
 }
 

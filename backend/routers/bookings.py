@@ -280,6 +280,32 @@ async def update_room(room_id: int, data: dict, request: Request, db: Session = 
     return room
 
 
+@router.put("/rooms/{room_id}/capacity")
+async def set_room_capacity(room_id: int, data: dict, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Narrow slice of update_room, gated by settings:edit instead of
+    bookings:edit - Manager/Deputy Manager own room-capacity policy (fixing a
+    stale/wrong number from Settings) but don't otherwise operate Bookings
+    (see the Manager comment block in migrations/access.py), the same pattern
+    as set_housekeeping/set_room_attendant scoping down a single field."""
+    if not check_permission(current_user, "settings", "edit"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    room = db.query(Room).filter(Room.id == room_id).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    capacity = data.get("capacity")
+    if not isinstance(capacity, int) or isinstance(capacity, bool) or capacity < 1:
+        raise HTTPException(status_code=400, detail="capacity must be a positive integer")
+
+    before = room.capacity
+    room.capacity = capacity
+    db.commit()
+    log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "rooms", room.id,
+              before_state={"capacity": before}, after_state={"capacity": capacity},
+              reason="Room capacity updated from Settings", ip_address=request.client.host)
+    return {"message": f"Room {room.room_number} capacity set to {capacity}", "capacity": capacity}
+
+
 @router.get("/rooms/{room_id}/calendar")
 async def room_calendar(
     room_id: int, year: int = 0, month: int = 0,
@@ -867,7 +893,11 @@ async def create_booking(data: BookingCreate, request: Request, db: Session = De
     # single night instead - real checkout always re-prices to actual nights
     # via reprice_for_departure regardless of what total_amount started as.
     if data.nature_of_duty == "hra":
-        check_out = data.check_in + timedelta(days=365)
+        # A known future departure (hra_expected_checkout) overrides the
+        # rolling placeholder - the renewal job (_hra_charge_and_renew) only
+        # pushes check_out forward when it's within 60 days of the current
+        # billing period, so a real date further out is left alone until then.
+        check_out = data.hra_expected_checkout or (data.check_in + timedelta(days=365))
         pricing_check_out = check_out
     elif data.is_indefinite:
         check_out = data.check_in + timedelta(days=3650)
@@ -897,10 +927,13 @@ async def create_booking(data: BookingCreate, request: Request, db: Session = De
     if not room or room.status == "maintenance":
         raise HTTPException(status_code=400, detail="Room is not available")
 
+    # Over-capacity no longer blocks the booking (room capacities are
+    # sometimes wrong/stale, and the desk shouldn't be stuck unable to house
+    # someone over a data-entry issue) - it goes through and Manager gets
+    # alerted instead, who can fix the room's capacity from Settings if it's
+    # actually wrong (see set_room_capacity below).
     guest_count = (data.adults or 0) + (data.children or 0)
-    if room.capacity and guest_count > room.capacity:
-        raise HTTPException(status_code=400,
-                            detail=f"Room {room.room_number} accommodates at most {room.capacity} guest(s); this booking has {guest_count} (adults + children)")
+    over_capacity = bool(room.capacity and guest_count > room.capacity)
 
     pricing = compute_booking_price(
         db, room, check_in=data.check_in, check_out=pricing_check_out,
@@ -956,19 +989,29 @@ async def create_booking(data: BookingCreate, request: Request, db: Session = De
     # must not fail the request (that loses nothing server-side but strands the
     # form client-side, and a retry hits a baffling self-overlap 409). Succeed
     # with a warning instead; the desk checks the guest in once the room is clean.
-    warning = None
+    warnings = []
+    if over_capacity:
+        warnings.append(f"Room {room.room_number} accommodates {room.capacity} guest(s); this booking has "
+                         f"{guest_count} (adults + children) - Manager has been alerted.")
+        create_alert(
+            db, f"Room over capacity: {booking.guest_name}",
+            f"{current_user.full_name} booked {booking.guest_name} into Room {room.room_number} "
+            f"(capacity {room.capacity}) with {guest_count} guest(s).",
+            AlertSeverity.MEDIUM, "bookings", "booking", booking.id,
+        )
     if data.check_in_now:
         effective_attendant_id = data.attendant_id if data.attendant_id is not None else room.attendant_id
         if (room.housekeeping_status or "clean") != "clean":
-            warning = (f"Room {room.room_number} is not ready ({room.housekeeping_status}) - "
-                       f"booking saved without check-in. Mark the room clean, then check in from the Dashboard.")
+            warnings.append(f"Room {room.room_number} is not ready ({room.housekeeping_status}) - "
+                             f"booking saved without check-in. Mark the room clean, then check in from the Dashboard.")
         elif effective_attendant_id is None:
-            warning = (f"No attendant assigned to room {room.room_number} - "
-                       f"booking saved without check-in. Assign an attendant, then check in from the Dashboard.")
+            warnings.append(f"No attendant assigned to room {room.room_number} - "
+                             f"booking saved without check-in. Assign an attendant, then check in from the Dashboard.")
         else:
             if data.attendant_id is not None and data.attendant_id != room.attendant_id:
                 room.attendant_id = data.attendant_id
             _do_check_in(db, booking, current_user, attendant_id=effective_attendant_id)
+    warning = " ".join(warnings) if warnings else None
 
     sms = sms_service.queue_booking_sms(db, booking)
 
@@ -998,14 +1041,15 @@ async def update_booking(booking_id: int, data: BookingUpdate, request: Request,
         if clash:
             raise HTTPException(status_code=409, detail=f"New dates overlap with booking {clash.booking_reference}")
 
+    over_capacity_room = None
     if "room_id" in changes and new_room_id != booking.room_id:
         new_room = db.query(Room).filter(Room.id == new_room_id).first()
         if not new_room:
             raise HTTPException(status_code=404, detail="Room not found")
         guest_count = (booking.adults or 0) + (booking.children or 0)
+        # Doesn't block (see create_booking) - Manager gets alerted below instead.
         if new_room.capacity and guest_count > new_room.capacity:
-            raise HTTPException(status_code=400,
-                                detail=f"Room {new_room.room_number} accommodates at most {new_room.capacity} guest(s); this booking has {guest_count} (adults + children)")
+            over_capacity_room = new_room
 
     for field, value in changes.items():
         if value is not None:
@@ -1014,6 +1058,14 @@ async def update_booking(booking_id: int, data: BookingUpdate, request: Request,
     db.refresh(booking)
 
     log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "bookings", booking.id, before_state=before, after_state=serialize_model(booking), ip_address=request.client.host)
+    if over_capacity_room:
+        guest_count = (booking.adults or 0) + (booking.children or 0)
+        create_alert(
+            db, f"Room over capacity: {booking.guest_name}",
+            f"{current_user.full_name} moved {booking.guest_name} into Room {over_capacity_room.room_number} "
+            f"(capacity {over_capacity_room.capacity}) with {guest_count} guest(s).",
+            AlertSeverity.MEDIUM, "bookings", "booking", booking.id,
+        )
     return booking
 
 

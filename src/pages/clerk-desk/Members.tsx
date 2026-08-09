@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/currency';
 import { RoomLeaseDispatchView, DietInvoiceView } from '@/components/MessBillPrint';
+import { PaymentReceiptView } from '@/components/BillPrint';
 import { OrderHistoryDialog } from '@/components/OrderHistoryDialog';
 import { useClerkDesk, type MemberBill } from './context';
 
@@ -81,6 +82,10 @@ export default function Members() {
   const [dietInvoiceBillId, setDietInvoiceBillId] = useState<number | null>(null);
   const [historyMember, setHistoryMember] = useState<{ id: number; name: string } | null>(null);
 
+  const [paymentBill, setPaymentBill] = useState<MemberBill | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState(0);
+  const [receiptPaymentId, setReceiptPaymentId] = useState<number | null>(null);
+
   const canApprove = hasPermission(user, 'mess_billing', 'approve');
   const canEdit = hasPermission(user, 'mess_billing', 'edit');
 
@@ -107,12 +112,16 @@ export default function Members() {
   );
 
   const draftBills = bills.filter(b => b.status === 'draft');
-  const issuedBills = bills.filter(b => b.status === 'issued');
+  // partially_paid still needs the same "collect the rest" treatment as
+  // issued - it was previously excluded from every bucket here, so a bill
+  // with any payment recorded against it simply vanished from this page
+  // entirely with no way to see it or collect the remaining balance.
+  const issuedBills = bills.filter(b => b.status === 'issued' || b.status === 'partially_paid');
   const paidBills = bills.filter(b => b.status === 'paid');
 
   const totalBilled = issuedBills.reduce((s, b) => s + b.total_amount, 0) + paidBills.reduce((s, b) => s + b.total_amount, 0);
-  const collected = paidBills.reduce((s, b) => s + b.total_amount, 0);
-  const outstanding = issuedBills.reduce((s, b) => s + b.total_amount, 0);
+  const collected = paidBills.reduce((s, b) => s + b.total_amount, 0) + issuedBills.reduce((s, b) => s + (b.amount_paid || 0), 0);
+  const outstanding = issuedBills.reduce((s, b) => s + (b.total_amount - (b.amount_paid || 0)), 0);
 
   const afterAction = async () => { await fetchBills(); refreshDesk(); };
 
@@ -123,10 +132,22 @@ export default function Members() {
     finally { setBusyId(null); }
   };
 
-  const handleMarkPaid = async (id: number) => {
-    setBusyId(id);
-    try { await api.post(`/mess-billing/bills/${id}/mark-paid`); toast.success('Marked as paid'); await afterAction(); }
-    catch (err) { toast.error(getErrorMessage(err, 'Failed to mark paid')); }
+  // Real payment record (amount + printable receipt) - same
+  // /mess-billing/bills/{id}/payments endpoint and Record Payment flow as
+  // the Mess Billing page, not the old status-only "Mark as Paid" shortcut,
+  // which never created a MessBillPayment and so had nothing for a receipt
+  // to point at. Supports partial payments too.
+  const handleRecordPayment = async () => {
+    if (!paymentBill || paymentAmount <= 0) { toast.error('Enter a valid payment amount'); return; }
+    setBusyId(paymentBill.id);
+    try {
+      const res = await api.post(`/mess-billing/bills/${paymentBill.id}/payments`, { amount: paymentAmount });
+      toast.success('Payment recorded');
+      setPaymentBill(null);
+      setPaymentAmount(0);
+      setReceiptPaymentId(res.data.id);
+      await afterAction();
+    } catch (err) { toast.error(getErrorMessage(err, 'Failed to record payment')); }
     finally { setBusyId(null); }
   };
 
@@ -181,6 +202,12 @@ export default function Members() {
                 <span className="font-mono">− {formatCurrency(bill.discount_amount)}</span>
               </div>
             )}
+            {bill.status === 'partially_paid' && (
+              <div className="flex justify-between text-xs text-blue-600 dark:text-blue-400 pt-0.5 border-t border-border mt-1">
+                <span>Paid so far</span>
+                <span className="font-mono">{formatCurrency(bill.amount_paid)} of {formatCurrency(bill.total_amount)}</span>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-wrap gap-1.5">
@@ -189,9 +216,9 @@ export default function Members() {
                 <CheckCircle2 size={14} className="mr-1" /> Issue Bill
               </Button>
             )}
-            {bill.status === 'issued' && canEdit && (
-              <Button size="sm" disabled={busy} onClick={() => handleMarkPaid(bill.id)}>
-                <DollarSign size={14} className="mr-1" /> Mark as Paid
+            {(bill.status === 'issued' || bill.status === 'partially_paid') && canEdit && (
+              <Button size="sm" disabled={busy} onClick={() => { setPaymentBill(bill); setPaymentAmount(0); }}>
+                <DollarSign size={14} className="mr-1" /> Record Payment
               </Button>
             )}
             {bill.status !== 'paid' && canApprove && (
@@ -335,6 +362,22 @@ export default function Members() {
           </DialogContent>
         </Dialog>
       )}
+
+      <Dialog open={!!paymentBill} onOpenChange={(open) => { if (!open) { setPaymentBill(null); setPaymentAmount(0); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Record Payment — {paymentBill?.member_name}</DialogTitle></DialogHeader>
+          {paymentBill && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Total: {formatCurrency(paymentBill.total_amount)} &middot; Paid: {formatCurrency(paymentBill.amount_paid || 0)}
+              </p>
+              <div><Label>Payment Amount</Label><Input type="number" min={0} value={paymentAmount || ''} onChange={e => setPaymentAmount(Number(e.target.value))} /></div>
+              <Button onClick={handleRecordPayment} className="w-full" disabled={busyId === paymentBill.id}>Record Payment</Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+      <PaymentReceiptView paymentId={receiptPaymentId} kind="mess_bill" onClose={() => setReceiptPaymentId(null)} />
 
       {dispatchOpen && <RoomLeaseDispatchView month={month} year={year} onClose={() => setDispatchOpen(false)} />}
       <DietInvoiceView billId={dietInvoiceBillId} onClose={() => setDietInvoiceBillId(null)} />

@@ -118,10 +118,23 @@ export function RoomBookingForm({
 
       <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Stay Dates</p>
       {form.nature_of_duty === 'hra' ? (
-        <div>
-          <Label className="text-xs">Move-in date</Label>
-          <Input type="date" value={form.check_in} min={today} onChange={e => setForm({ ...form, check_in: e.target.value, check_out: addDays(e.target.value, 1) })} />
-          <p className="text-xs text-muted-foreground mt-1">Ongoing residency — renews automatically each time a mess bill is generated for this member, no fixed checkout needed.</p>
+        <div className="space-y-1.5">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label className="text-xs">Move-in date</Label>
+              <Input type="date" value={form.check_in} min={today} onChange={e => setForm({ ...form, check_in: e.target.value, check_out: addDays(e.target.value, 1) })} />
+            </div>
+            <div>
+              <Label className="text-xs">Expected checkout (optional)</Label>
+              <Input type="date" value={form.hra_expected_checkout} min={addDays(form.check_in, 1)}
+                onChange={e => setForm({ ...form, hra_expected_checkout: e.target.value })} />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {form.hra_expected_checkout
+              ? 'Room stays reserved until this date; leave the actual checkout to end residency earlier or extend it.'
+              : 'Ongoing residency — renews automatically each time a mess bill is generated for this member, no fixed checkout needed.'}
+          </p>
         </div>
       ) : (
         <div className="space-y-1.5">
@@ -271,7 +284,16 @@ export function RoomBookingForm({
                 {allMembers.map(m => <option key={m.id} value={m.id}>{m.full_name} ({m.service_number})</option>)}
               </select>
               <Button type="button" size="sm" variant="outline" className="shrink-0"
-                onClick={() => setNewMemberOpen(o => !o)}>
+                onClick={() => {
+                  if (!newMemberOpen) {
+                    setNewMember({
+                      ...emptyNewMember,
+                      service_number: form.pa_number, full_name: form.guest_name,
+                      rank: form.rank, unit: form.unit_address,
+                    });
+                  }
+                  setNewMemberOpen(o => !o);
+                }}>
                 {newMemberOpen ? 'Cancel' : '+ Register new'}
               </Button>
             </div>

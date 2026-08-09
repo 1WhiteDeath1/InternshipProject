@@ -7,13 +7,21 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
-import { Settings as SettingsIcon, Save, Database, Shield, ToggleLeft, Archive } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Database, Shield, ToggleLeft, Archive, BedDouble } from 'lucide-react';
 
 interface SystemSetting {
   id: number;
   key: string;
   value: string;
   description: string;
+}
+
+interface RoomCapacityRow {
+  id: number;
+  room_number: string;
+  room_type: string;
+  floor: number;
+  capacity: number;
 }
 
 interface FeatureFlag {
@@ -36,9 +44,15 @@ export default function Settings() {
   const [features, setFeatures] = useState<FeatureFlag[]>([]);
   const [editing, setEditing] = useState<Record<string, string>>({});
   const [backups, setBackups] = useState<Backup[]>([]);
+  const [rooms, setRooms] = useState<RoomCapacityRow[]>([]);
+  const [capacityEditing, setCapacityEditing] = useState<Record<number, string>>({});
 
   const fetchSettings = async () => {
     try { const res = await api.get('/settings'); setSettings(res.data); } catch { /* keep last known settings */ }
+  };
+
+  const fetchRooms = async () => {
+    try { const res = await api.get('/bookings/rooms', { params: { page_size: 100 } }); setRooms(res.data.items); } catch { /* keep last known rooms */ }
   };
 
   const fetchFeatures = async () => {
@@ -55,6 +69,7 @@ export default function Settings() {
         fetchSettings();
         fetchFeatures();
         fetchBackups();
+        fetchRooms();
       }
     });
   }, [user]);
@@ -73,6 +88,18 @@ export default function Settings() {
       toast.success('Feature updated');
       fetchFeatures();
     } catch { toast.error('Failed'); }
+  };
+
+  const handleSaveCapacity = async (roomId: number) => {
+    const raw = capacityEditing[roomId];
+    const capacity = Number(raw);
+    if (!raw || !Number.isInteger(capacity) || capacity < 1) { toast.error('Capacity must be a whole number of 1 or more'); return; }
+    try {
+      await api.put(`/bookings/rooms/${roomId}/capacity`, { capacity });
+      toast.success('Room capacity updated');
+      setCapacityEditing(e => { const next = { ...e }; delete next[roomId]; return next; });
+      fetchRooms();
+    } catch { toast.error('Failed to update capacity'); }
   };
 
   const handleBackup = async () => {
@@ -116,6 +143,33 @@ export default function Settings() {
               <Button size="sm" onClick={() => handleSaveSetting(s.key)}><Save size={14} /></Button>
             </div>
           ))}
+        </CardContent>
+      </Card>
+
+      {/* Room Capacity */}
+      <Card>
+        <CardHeader><CardTitle className="text-base flex items-center gap-2"><BedDouble size={18} /> Room Capacity</CardTitle></CardHeader>
+        <CardContent className="space-y-2">
+          <p className="text-xs text-muted-foreground mb-2">
+            Max guests per room. Booking NCO can still book a room over this number when needed — it won't be blocked,
+            but you'll get an alert so a wrong number here can be corrected.
+          </p>
+          {rooms.map(r => (
+            <div key={r.id} className="flex items-center gap-4 py-1 border-b border-gray-100 last:border-0">
+              <div className="flex-1">
+                <p className="text-sm font-medium">{r.room_number}</p>
+                <p className="text-xs text-muted-foreground">{r.room_type} · Floor {r.floor}</p>
+              </div>
+              <Input
+                type="number" min={1}
+                value={capacityEditing[r.id] ?? String(r.capacity)}
+                onChange={e => setCapacityEditing({ ...capacityEditing, [r.id]: e.target.value })}
+                className="w-20"
+              />
+              <Button size="sm" disabled={!hasPermission(user, 'settings', 'edit')} onClick={() => handleSaveCapacity(r.id)}><Save size={14} /></Button>
+            </div>
+          ))}
+          {rooms.length === 0 && <p className="text-sm text-muted-foreground">No rooms found</p>}
         </CardContent>
       </Card>
 

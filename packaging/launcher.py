@@ -88,11 +88,19 @@ def main() -> None:
 
     threading.Thread(target=_open_browser_when_ready, daemon=True).start()
 
-    _seed_database_if_missing()
-
-    from backend.main import app
-
+    # Everything below - seeding, and importing backend.main (which runs
+    # Base.metadata.create_all() + every domain's migrations at import time,
+    # not inside a FastAPI startup event) - used to run outside this
+    # try/except. Any exception there crashed the process before uvicorn.run
+    # was ever reached, and since a double-clicked console app's window
+    # closes the instant the process exits, the traceback vanished with it -
+    # "the window just closes" with no way to see why. Wrapping the whole
+    # thing guarantees _pause() always runs first.
     try:
+        _seed_database_if_missing()
+
+        from backend.main import app
+
         uvicorn.run(app, host=BIND_HOST, port=PORT, log_level="info")
     except Exception:
         import traceback

@@ -66,6 +66,7 @@ from backend.schemas.attendance import (
     AttendanceMarkRequest, BulkAttendanceCreate, AttendanceLookupResult,
     ServeAttendanceRequest, NoShowSweepResult,
     AttendanceMatrixRow, AttendanceMatrixOut, AttendanceMatrixEntry, AttendanceMatrixSave,
+    AttendanceItemAssignEntry, AttendanceItemAssign,
 )
 from backend.schemas.mess_billing import (
     MessBillOut, GuestMealChargeCreate, GuestMealChargeOut,
@@ -119,6 +120,7 @@ __all__ = [
     "AttendanceMarkRequest", "BulkAttendanceCreate", "AttendanceLookupResult",
     "ServeAttendanceRequest", "NoShowSweepResult",
     "AttendanceMatrixRow", "AttendanceMatrixOut", "AttendanceMatrixEntry", "AttendanceMatrixSave",
+    "AttendanceItemAssignEntry", "AttendanceItemAssign",
     "MessBillOut", "GuestMealChargeCreate", "GuestMealChargeOut",
     "DiscountApplyRequest",
     "MessBillChargeCreate", "MessBillChargeOut", "MessBillChargeCorrection", "MessBillFieldCorrection",

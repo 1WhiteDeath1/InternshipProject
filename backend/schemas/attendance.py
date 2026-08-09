@@ -83,6 +83,8 @@ class AttendanceMatrixRow(BaseModel):
     status: Optional[str] = None  # existing MealAttendance status, if a row exists yet
     on_leave: bool = False
     attendance_id: Optional[int] = None
+    menu_item_id: Optional[int] = None
+    menu_item_name: Optional[str] = None
 
 class AttendanceMatrixOut(BaseModel):
     date: date
@@ -102,5 +104,21 @@ class AttendanceMatrixSave(BaseModel):
     date: date
     meal_type: str
     entries: List[AttendanceMatrixEntry]
+
+    _check_meal_type = field_validator("meal_type")(_ensure_meal_type)
+
+class AttendanceItemAssignEntry(BaseModel):
+    kind: str  # "member" | "booking"
+    id: int
+
+class AttendanceItemAssign(BaseModel):
+    """The full set of people eating menu_item_id for this date/meal - a diff
+    against whoever's currently assigned to it is computed server-side, so
+    unchecking someone in the UI and saving clears just their assignment
+    without disturbing anyone else's."""
+    date: date
+    meal_type: str
+    menu_item_id: int
+    entries: List[AttendanceItemAssignEntry]
 
     _check_meal_type = field_validator("meal_type")(_ensure_meal_type)

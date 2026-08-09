@@ -53,11 +53,17 @@ class BookingBase(BaseModel):
     # check_out is ignored server-side and replaced with a far-future
     # placeholder (see create_booking); real checkout re-prices to actual nights.
     is_indefinite: bool = False
+    # HRA is normally an indefinite residency (see create_booking) with no
+    # fixed departure date - this lets the Booking NCO record a known future
+    # departure instead, without disturbing the open-ended default when omitted.
+    hra_expected_checkout: Optional[date] = None
 
     @model_validator(mode="after")
     def _check_dates(self):
         if self.check_out <= self.check_in:
             raise ValueError("check_out must be after check_in")
+        if self.hra_expected_checkout is not None and self.hra_expected_checkout <= self.check_in:
+            raise ValueError("hra_expected_checkout must be after check_in")
         # Civilians must name a reference ("C/O ..." in the paper register);
         # officers / institutional guests are identifiable by rank & service, so
         # the reference stays optional for them.

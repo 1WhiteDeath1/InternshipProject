@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { UtensilsCrossed, Lock } from 'lucide-react';
 import { MealAttendanceOmnibar } from '@/components/MealAttendanceOmnibar';
 import { ConfirmDialog, type ConfirmRequest } from '@/components/ConfirmDialog';
+import { AssignMenuItemDialog } from '@/components/AssignMenuItemDialog';
 import { defaultMealForNow } from '@/lib/mealDefaults';
 
 interface MatrixRow {
@@ -22,6 +23,8 @@ interface MatrixRow {
   status: string | null;
   on_leave: boolean;
   attendance_id: number | null;
+  menu_item_id: number | null;
+  menu_item_name: string | null;
 }
 interface Matrix {
   date: string; meal_type: string; locked: boolean; has_saved_records: boolean;
@@ -63,7 +66,12 @@ function AttendanceGroup({ title, rows, isRowDisabled, onToggle, onSpecialOrder 
           <div key={rowKey(r)} className="flex items-center justify-between gap-3 py-1.5 border-b last:border-0">
             <div className="min-w-0">
               <p className="text-sm font-medium truncate">{r.name}</p>
-              <p className="text-xs text-muted-foreground truncate">{r.sub_label || '-'}</p>
+              <p className="text-xs text-muted-foreground truncate">
+                {r.sub_label || '-'}
+                {r.present && (r.menu_item_name
+                  ? <span className="ml-1.5 text-emerald-700 dark:text-emerald-400">· {r.menu_item_name}</span>
+                  : <span className="ml-1.5 text-amber-600">· dish not assigned</span>)}
+              </p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {r.on_leave && <Badge variant="outline" className="text-xs">On Leave</Badge>}
@@ -91,6 +99,7 @@ export default function Attendance() {
   const [menuItems, setMenuItems] = useState<MenuItemOption[]>([]);
   const [selectedMenuItemId, setSelectedMenuItemId] = useState(0);
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
+  const [assignItem, setAssignItem] = useState<MenuItemOption | null>(null);
 
   const isPast = new Date(date) < new Date(new Date().toDateString());
 
@@ -274,6 +283,54 @@ export default function Attendance() {
           <AttendanceGroup title="Non-Dining Members" rows={currentMatrix.non_dining} isRowDisabled={isRowDisabled} onToggle={handleToggle} onSpecialOrder={handleSpecialOrder} />
           <AttendanceGroup title="Active Room Guests" rows={currentMatrix.guests} isRowDisabled={isRowDisabled} onToggle={handleToggle} onSpecialOrder={handleSpecialOrder} />
         </div>
+      )}
+
+      {/* Step 2 of the workflow: attendance above says who's eating at all;
+          this says who's eating what. Kitchen's Production tab only ever
+          suggests production quantities from attendance rows that carry a
+          menu_item_id (see backend's _aggregate_suggestions), so this is
+          what actually feeds it - the roster switches alone don't. */}
+      {!loading && currentMatrix && (() => {
+        const presentAll = [...currentMatrix.dining, ...currentMatrix.non_dining, ...currentMatrix.guests].filter(r => r.present);
+        return (
+          <Card>
+            <CardContent className="p-4 space-y-3">
+              <h3 className="text-sm font-semibold text-muted-foreground">Assign Menu Items ({MEAL_LABELS[meal]})</h3>
+              {presentAll.length === 0 && <p className="text-xs text-muted-foreground">Nobody is marked attending yet - toggle attendance above first.</p>}
+              {presentAll.length > 0 && menuItems.length === 0 && <p className="text-xs text-muted-foreground">No menu items configured for {MEAL_LABELS[meal]}.</p>}
+              {presentAll.length > 0 && menuItems.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {menuItems.map(item => {
+                    const count = presentAll.filter(r => r.menu_item_id === item.id).length;
+                    return (
+                      <button key={item.id} type="button" onClick={() => setAssignItem(item)}
+                        className="flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm hover:border-primary hover:bg-accent transition-colors">
+                        <span>{item.name}</span>
+                        <Badge className={count > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-600'}>{count}</Badge>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {presentAll.length > 0 && presentAll.some(r => !r.menu_item_id) && (
+                <p className="text-xs text-amber-600">{presentAll.filter(r => !r.menu_item_id).length} attending {MEAL_LABELS[meal]} with no dish assigned yet.</p>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
+
+      {assignItem && currentMatrix && (
+        <AssignMenuItemDialog
+          open={!!assignItem} onOpenChange={(o) => { if (!o) setAssignItem(null); }}
+          date={date} mealType={meal} menuItemId={assignItem.id} menuItemName={assignItem.name}
+          groups={[
+            { title: 'Dining Members', rows: currentMatrix.dining.filter(r => r.present) },
+            { title: 'Non-Dining Members', rows: currentMatrix.non_dining.filter(r => r.present) },
+            { title: 'Active Room Guests', rows: currentMatrix.guests.filter(r => r.present) },
+          ]}
+          onSaved={() => refreshMeal(meal)}
+        />
       )}
 
       <ConfirmDialog request={confirmRequest} onClose={() => setConfirmRequest(null)} />

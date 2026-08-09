@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { toast } from 'sonner';
 import { CalendarDays, Receipt, Trash2 } from 'lucide-react';
 import { formatCurrency } from '@/lib/currency';
-import { BillPrintView } from '@/components/BillPrint';
+import { BillPrintView, PaymentReceiptView } from '@/components/BillPrint';
 
 interface MenuItem { id: number; dish_name: string; estimated_price: number; quantity: number; }
 interface EventItem {
@@ -49,6 +49,7 @@ export default function ClerkEvents() {
   const [payVoucher, setPayVoucher] = useState('');
   const [paying, setPaying] = useState(false);
   const [printInvoiceId, setPrintInvoiceId] = useState<number | null>(null);
+  const [receiptPaymentId, setReceiptPaymentId] = useState<number | null>(null);
 
   const fetchEvents = async () => {
     try {
@@ -124,6 +125,7 @@ export default function ClerkEvents() {
       setSettleInvoice({ ...settleInvoice, amount_paid: res.data.amount_paid, balance_due: res.data.balance_due });
       setPayAmount(String(res.data.balance_due > 0 ? res.data.balance_due : ''));
       toast.success(`${formatCurrency(amt)} recorded (${payMethod})`);
+      setReceiptPaymentId(res.data.id);
     } catch (err) { toast.error(getErrorMessage(err, 'Failed to record payment')); }
     finally { setPaying(false); }
   };
@@ -249,6 +251,7 @@ export default function ClerkEvents() {
       </Dialog>
 
       <BillPrintView invoiceIds={printInvoiceId ? [printInvoiceId] : null} onClose={() => setPrintInvoiceId(null)} />
+      <PaymentReceiptView paymentId={receiptPaymentId} onClose={() => setReceiptPaymentId(null)} />
     </div>
   );
 }

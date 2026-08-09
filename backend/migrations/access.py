@@ -140,6 +140,10 @@ _ROLE_PERMISSIONS = {
         # list_members) - Booking NCO only ever sees HRA members here, non-
         # HRA roster management stays Kitchen NCO's/Manager's.
         "members": "VCE", "tariffs": "V", "womens_bloc_rates": "V", "directives": "V",
+        # View-only - lets Booking NCO check a member's mess bills (Member
+        # Ledger's Dining & Mess Account tab) when asked, without granting any
+        # generate/correct/approve capability over billing itself.
+        "mess_billing": "V",
     },
     # Gate only - no guest/member/attendant lookup, no directives. Everything
     # this role needs (check-in/out log, incident reports) lives inside the

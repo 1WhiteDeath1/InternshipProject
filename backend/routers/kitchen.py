@@ -122,6 +122,20 @@ async def list_kitchen_orders(
          } for o in orders], "total": total}
 
 
+@router.get("/checked-in-guests")
+async def checked_in_guests(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Minimal checked-in-guest list (id/name/room) for the a la carte order
+    dialog's "Guest" picker. Kitchen NCO has no bookings/rooms_overview
+    permission at all (see the Kitchen NCO block in migrations/access.py) -
+    GET /bookings would 403 for them - so this is a kitchen:view-gated slice
+    of the same Booking data mess_charges_overview/_departure_bookings
+    already read directly in this file, just shaped for a dropdown."""
+    if not check_permission(current_user, "kitchen", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    bookings = db.query(Booking).filter(Booking.status == "checked_in").order_by(Booking.guest_name).all()
+    return [{"id": b.id, "guest_name": b.guest_name, "room_number": b.room.room_number if b.room else None} for b in bookings]
+
+
 def _consumer_name(order: KitchenOrder) -> str | None:
     if order.member_id and order.member:
         return order.member.full_name

@@ -7,9 +7,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { toast } from 'sonner';
-import { Printer, Lock, Pencil, X } from 'lucide-react';
+import { Printer, Lock, Pencil, X, Receipt } from 'lucide-react';
 import { formatCurrency } from '@/lib/currency';
-import { PRINT_STYLE, PrintArea, DottedField, rupeesInWords } from '@/components/BillPrint';
+import { PRINT_STYLE, PrintArea, DottedField, rupeesInWords, PaymentReceiptView } from '@/components/BillPrint';
 
 type Source = 'invoice' | 'mess_bill';
 
@@ -67,6 +67,11 @@ export function MasterBillView({ source, sourceId, onClose }: { source: Source |
   const [adding, setAdding] = useState(false);
   const [making, setMaking] = useState(false);
   const [showPrint, setShowPrint] = useState(false);
+  // Re-opens the cash receipt for a payment already recorded - the receipt
+  // otherwise only ever appears once, automatically, right when a payment
+  // is made (see BillPrintView/MessBilling's payment flows), with no way to
+  // get back to it afterward for a reprint or a guest asking again later.
+  const [receiptPaymentId, setReceiptPaymentId] = useState<number | null>(null);
 
   // Pre-lock inline correction of an existing line - keyed by the
   // line_items entry being edited (label is unique enough within one bill).
@@ -170,10 +175,11 @@ export function MasterBillView({ source, sourceId, onClose }: { source: Source |
     if (payMethod === 'Online/AG Branch' && !payVoucher.trim()) { toast.error('Voucher Number is required for Online/AG Branch payments'); return; }
     setPayingRecording(true);
     try {
-      await api.post(`${basePath(source)}/${sourceId}/payments`, {
+      const res = await api.post(`${basePath(source)}/${sourceId}/payments`, {
         amount: amt, method: payMethod, voucher_number: payVoucher.trim() || undefined, notes: payNotes.trim() || undefined,
       });
       toast.success(`${formatCurrency(amt)} payment recorded (${payMethod})`);
+      setReceiptPaymentId(res.data.id);
       setPayAmount(''); setPayVoucher(''); setPayNotes('');
       fetchData();
     } catch (err) { toast.error(getErrorMessage(err, 'Failed to record payment')); }
@@ -287,6 +293,26 @@ export function MasterBillView({ source, sourceId, onClose }: { source: Source |
                 {data.payment_breakdown.total_paid === 0 && <p className="text-xs text-muted-foreground">No payments recorded yet</p>}
                 <div className="flex justify-between border-t pt-1"><span>Total Paid to Date</span><span className="font-mono">{formatCurrency(data.payment_breakdown.total_paid)}</span></div>
                 <div className="flex justify-between font-bold"><span>Remaining Balance Due</span><span className="font-mono">{formatCurrency(Math.max(data.payment_breakdown.balance_due, 0))}</span></div>
+                {data.payment_breakdown.payments.length > 0 && (
+                  <div className="pt-2 mt-1 border-t space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">Payment History</p>
+                    {data.payment_breakdown.payments.map(p => (
+                      <div key={p.id} className="flex items-center justify-between text-xs py-0.5">
+                        <span className="text-muted-foreground">
+                          {new Date(p.created_at).toLocaleDateString('en-GB')} · {p.method || 'Cash'}
+                          {p.voucher_number && ` (V/No ${p.voucher_number})`}
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <span className="font-mono">{formatCurrency(p.amount)}</span>
+                          <button type="button" className="text-muted-foreground hover:text-foreground" title="View / Print Receipt"
+                            onClick={() => setReceiptPaymentId(p.id)}>
+                            <Receipt size={13} />
+                          </button>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {data.payment_breakdown.balance_due > 0.01 && (
@@ -339,6 +365,7 @@ export function MasterBillView({ source, sourceId, onClose }: { source: Source |
           )}
         </DialogContent>
       </Dialog>
+      <PaymentReceiptView paymentId={receiptPaymentId} kind={source === 'mess_bill' ? 'mess_bill' : 'invoice'} onClose={() => setReceiptPaymentId(null)} />
 
       {showPrint && data && <MasterBillPrint data={data} onClose={() => setShowPrint(false)} />}
     </>

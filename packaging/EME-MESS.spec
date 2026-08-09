@@ -25,9 +25,14 @@ hiddenimports = [
 ]
 hiddenimports += collect_submodules("backend")
 
-# These three ship data files (ONNX models, native DLLs) and lazy-loaded
-# submodules that PyInstaller's static import scan won't find on its own.
-for pkg in ("rapidocr_onnxruntime", "onnxruntime", "cv2"):
+# These ship data files (ONNX models, native DLLs, font/encoding tables) and
+# lazy-loaded submodules that PyInstaller's static import scan won't find on
+# its own. reportlab in particular loads its font/encoding modules (used by
+# the invoice QR code, backend/routers/billing.py's _invoice_qr_svg) via
+# dynamic imports at runtime, not plain `import` statements - without this,
+# every invoice-printing action 500s in the packaged exe despite working
+# fine from a normal venv in dev.
+for pkg in ("rapidocr_onnxruntime", "onnxruntime", "cv2", "reportlab"):
     pkg_datas, pkg_binaries, pkg_hidden = collect_all(pkg)
     datas += pkg_datas
     binaries += pkg_binaries
