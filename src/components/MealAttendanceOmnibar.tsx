@@ -37,7 +37,7 @@ const KIND_LABEL: Record<LookupResult['kind'], string> = { member: 'Member', boo
  * meal that hasn't happened yet.
  */
 export function MealAttendanceOmnibar({
-  date, mealType, menuItemId, onAdded, mealTypes, mealLabels, lockedMeals,
+  date, mealType, menuItemId, onAdded, mealTypes, mealLabels, lockedMeals, hideMealPicker = false,
 }: {
   date: string;
   mealType: string;
@@ -46,6 +46,11 @@ export function MealAttendanceOmnibar({
   mealTypes: string[];
   mealLabels: Record<string, string>;
   lockedMeals: Record<string, boolean>;
+  /** Hide the multi-meal "Add to:" chips when the surrounding screen already
+      has a meal selector - two meal pickers on one screen is the single most
+      confusing thing about the old Attendance page. Adds to the current meal
+      only; use the board's own tabs to switch. */
+  hideMealPicker?: boolean;
 }) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState<LookupResult[]>([]);
@@ -172,7 +177,7 @@ export function MealAttendanceOmnibar({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className={`items-center gap-2 flex-wrap ${hideMealPicker ? 'hidden' : 'flex'}`}>
         <span className="text-xs text-muted-foreground">Add to:</span>
         {mealTypes.map(mt => {
           const locked = lockedMeals[mt];

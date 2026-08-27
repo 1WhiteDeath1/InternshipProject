@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { Flame, Fuel, LogOut, CheckCircle2, Circle, Search } from 'lucide-react';
 import { formatCurrency } from '@/lib/currency';
 import { DishBreakdownDialog } from '@/components/DishBreakdownDialog';
+import { OrderHistoryDialog } from '@/components/OrderHistoryDialog';
 import { SpecialOrderDialog, type SpecialOrderPreset } from '@/components/SpecialOrderDialog';
 
 /* Charges = what used to be two tabs, "Mess Charges Overview" and
@@ -27,6 +28,9 @@ interface OverviewRow {
   consumer_type: 'member' | 'guest'; consumer_id: number; name: string;
   sub_label: string | null; unbilled_mess_total: number; unbilled_gas_total: number;
   is_departing: boolean; kitchen_finalized_by_name: string | null; booking_finalized_by_name: string | null;
+  // Set only on a guest row that is actually an HRA member in a room - their
+  // meals are keyed to member_id, not the booking.
+  member_id?: number | null;
 }
 interface Departure {
   booking_id: number; guest_name: string; room_number: string | null;
@@ -53,6 +57,7 @@ export function ChargesTab() {
   const [breakdownTarget, setBreakdownTarget] = useState<OverviewRow | null>(null);
   const [specialPreset, setSpecialPreset] = useState<SpecialOrderPreset | null>(null);
   const [specialOpen, setSpecialOpen] = useState(false);
+  const [historyPerson, setHistoryPerson] = useState<{ memberId?: number; bookingId?: number; name: string } | null>(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -180,7 +185,16 @@ export function ChargesTab() {
                   <TableRow key={`${r.consumer_type}-${r.consumer_id}`}>
                     <TableCell>
                       <p className="font-medium flex items-center gap-1.5">
-                        {r.name}
+                        {/* Every name leads to that person's full order
+                            history - members included, who have no Breakdown
+                            button because their dining bills monthly. */}
+                        <button type="button" className="hover:underline text-left"
+                          onClick={() => setHistoryPerson(
+                            r.consumer_type === 'member' || r.member_id
+                              ? { memberId: r.consumer_type === 'member' ? r.consumer_id : (r.member_id as number), name: r.name }
+                              : { bookingId: r.consumer_id, name: r.name })}>
+                          {r.name}
+                        </button>
                         {r.is_departing && <Badge className="bg-blue-100 text-blue-800 text-[10px]">Departing</Badge>}
                         {dep?.overdue && (
                           <Badge className="bg-red-100 text-red-800 text-[10px]">
@@ -208,7 +222,10 @@ export function ChargesTab() {
                         {/* Guests only - a member's dining is billed monthly in
                             aggregate, so there's no per-dish breakdown to
                             correct; theirs lives in Member Ledger. */}
-                        {r.consumer_type === 'guest' && (
+                        {/* Real guests only. An HRA member shows up as a guest
+                            row but bills monthly in aggregate, so there is no
+                            per-dish breakdown to correct for them either. */}
+                        {r.consumer_type === 'guest' && !r.member_id && (
                           <Button size="sm" variant="ghost" onClick={() => setBreakdownTarget(r)}>Breakdown</Button>
                         )}
                         {r.is_departing && (
@@ -266,6 +283,14 @@ export function ChargesTab() {
           onFinalized={() => { fetchAll(); setBreakdownTarget(null); }}
         />
       )}
+
+      <OrderHistoryDialog
+        open={historyPerson !== null}
+        onOpenChange={open => { if (!open) setHistoryPerson(null); }}
+        memberId={historyPerson?.memberId}
+        bookingId={historyPerson?.bookingId}
+        personName={historyPerson?.name}
+      />
 
       <SpecialOrderDialog open={specialOpen} onOpenChange={setSpecialOpen} preset={specialPreset} onCreated={fetchAll} />
     </div>

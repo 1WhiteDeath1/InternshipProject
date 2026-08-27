@@ -962,6 +962,11 @@ async def mess_charges_overview(consumer_type: str = "all", db: Session = Depend
             rows.append({
                 "consumer_type": "guest", "consumer_id": b.id, "name": b.guest_name,
                 "sub_label": b.room.room_number if b.room else None,
+                # An HRA member occupying a room appears ONLY as a guest row
+                # (see hra_member_ids above), but their meals are recorded
+                # against member_id - without this the UI has no way to look
+                # up their history and silently shows an empty one.
+                "member_id": b.member_id,
                 "unbilled_mess_total": total, "unbilled_gas_total": gas_total,
                 # Checking-out context (see Booking.kitchen_finalized_at's model
                 # docstring) so the breakdown dialog can surface a "checking
