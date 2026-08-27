@@ -444,7 +444,7 @@ function IntakeTab({ prefillItemId, onPrefillConsumed, autoScan, onAutoScanConsu
     try {
       // Server-side search (not a fixed page_size fetch) so a vendor list
       // that grows past one page is still fully reachable - see the
-      // page_size=100 truncation class of bug documented in CLAUDE.md.
+      // page_size=100 truncation class of bug documented in ARCHITECTURE.md.
       const res = await api.get('/procurement/vendors', { params: { search, page_size: 50 } });
       setVendors(res.data.items || []);
     } catch { /* silent */ } finally {

@@ -14,7 +14,7 @@ shadcn/ui is fully installed (60 components in `src/components/ui/`, `components
 
 5. **Empty and loading states are components, not ad-hoc markup.** Use `Empty` (`src/components/ui/empty.tsx`) for "nothing here yet" states instead of a bare `<p>`. Use `Skeleton` for loading placeholders instead of a hand-rolled pulsing div (see `StatValue` in `Dashboard.tsx` for the pattern this replaces).
 
-6. **Lists that can exceed one page use `Pagination`**, not a fixed `page_size` fetch treated as "everything." See `CLAUDE.md`'s note on the `page_size=100` truncation class of bug — a list screen with no pagination control is how that bug hides.
+6. **Lists that can exceed one page use `Pagination`**, not a fixed `page_size` fetch treated as "everything." See `ARCHITECTURE.md`'s note on the `page_size=100` truncation class of bug — a list screen with no pagination control is how that bug hides.
 
 7. **The sidebar is `Sidebar`/`SidebarMenu`, not hand-rolled state.** `src/components/ui/sidebar.tsx` + `use-sidebar.ts` provide collapse (cookie-persisted), a mobile drawer with focus-trapping, and `SidebarMenuBadge`. Don't reimplement any of this in `Layout.tsx`.
 

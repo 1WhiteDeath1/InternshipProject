@@ -1,6 +1,6 @@
 # Module Structure & Contribution Convention
 
-How this codebase is split so multiple contributors — human or AI agent, any number of them, working at the same time — can extend it without merge conflicts. For general architecture see `CLAUDE.md`; for the guest/member/booking/billing domain's implementation detail see `docs/MODULES.md`. This doc is about *where new code goes* and *why*, not what any specific feature does.
+How this codebase is split so multiple contributors, any number of them working at the same time, can extend it without merge conflicts. For general architecture see `ARCHITECTURE.md`; for the guest/member/booking/billing domain's implementation detail see `docs/MODULES.md`. This doc is about *where new code goes* and *why*, not what any specific feature does.
 
 ## What a "module" is here
 
@@ -70,7 +70,7 @@ Allowed, but must be one-directional. Today's real example: `schemas/guests.py` 
 
 ## Dividing work across any number of contributors
 
-Because every module is a self-contained set of files, ownership is "how many modules does each contributor take," not a fixed headcount split — it works the same whether it's 2 people, 5, or a mix of humans and AI agents:
+Because every module is a self-contained set of files, ownership is "how many modules does each contributor take," not a fixed headcount split — it works the same whether it's 2 contributors or 5:
 
 - **One module = one unit of ownership.** Never split a single module's files between two people working at the same time.
 - Whoever's coordinating (a lead, or an agent asked to plan a sprint) divides the module list above into however many buckets the team actually has that week — there's no fixed assignment to preserve.
@@ -86,7 +86,7 @@ The file split removes the *mechanical* cause of merge conflicts, but it only ho
 - **Respect the append-only lists** (see above) even under time pressure — add your line at the end, don't "clean up" or reorder while you're in there.
 - **Reconcile your role/permission or migration additions the same way** — append to your own domain's list, run the app once locally to confirm it boots clean, then commit.
 
-## Guidance for an AI agent picking up a task here
+## Guidance for a contributor picking up a task here
 
 1. Identify which module(s) the task touches before writing any code — check the table above.
 2. If the task spans multiple modules, edit each module's own files. Don't reach into another module's file, and don't create a shared helper file to avoid touching two files.

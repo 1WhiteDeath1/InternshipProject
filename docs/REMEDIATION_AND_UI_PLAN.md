@@ -13,7 +13,7 @@ Two tracks. **Track A** fixes what's wrong. **Track B** standardizes the UI on s
 1. **There is no automated test suite.** Not for the backend, not for the frontend. Every phase below therefore ends with an explicit manual verification step through the dev preview harness (`backend/dev_server.py` + Vite autoPort). This is the single biggest risk to Track B, which touches ~40 files.
 2. **Ship in role-sized slices.** Each phase should leave the app fully working for all six roles. Never land a half-migrated screen.
 3. **One commit per phase**, so anything can be reverted cleanly without unpicking unrelated work.
-4. **`docs/MODULES.md` and `CLAUDE.md` get updated in the same commit** as the change that invalidates them — not later.
+4. **`docs/MODULES.md` and `ARCHITECTURE.md` get updated in the same commit** as the change that invalidates them — not later.
 
 ---
 
@@ -26,7 +26,7 @@ Clears the ground so later phases don't trip over stale information.
 | Task | Detail |
 |---|---|
 | Delete `src/pages/Home.tsx` | Unrouted dead file. Same class of leftover that caused the old `/inventory` dead links. |
-| Refresh `CLAUDE.md` | Remove `recipes`, `menu_prices`, `kitchen_deduction.py`, `recipe_costing.py`, `unit_conversion.py` — none exist. Add `directives`, `rate_card`, `mess_charge_calc.py`. |
+| Refresh `ARCHITECTURE.md` | Remove `recipes`, `menu_prices`, `kitchen_deduction.py`, `recipe_costing.py`, `unit_conversion.py` — none exist. Add `directives`, `rate_card`, `mess_charge_calc.py`. |
 | Fix `components.json` | `"tailwind": { "config": "postcss.config.js" }` is **wrong** — this is Tailwind v3.4 with a real `tailwind.config.js`. Point it there. **Track B depends on this**: `npx shadcn add` reads this field, and with it wrong, newly added components won't wire into the theme correctly. |
 
 **Verify:** `npm run build` succeeds; `npx shadcn@latest add progress --dry-run` resolves the right config.
@@ -67,7 +67,7 @@ In `src/pages/Dashboard.tsx`, the Kitchen NCO block currently makes 9 calls. Rep
 | `StockManagement.tsx:439` → `/procurement/vendors?page_size=100` | Make the vendor picker a searchable `Combobox` that queries the server (**merges with Track B, Phase B4**) |
 | `OccupancyWidget.tsx` → `/bookings/rooms?page_size=200` | Bounded by physical room count — acceptable, but add a code comment saying so, so the next reader doesn't "fix" it |
 
-**Guard against regression:** add a short note to `CLAUDE.md` — *"list endpoints cap `page_size` at 100; never treat a single page as the full set. Aggregate server-side instead."*
+**Guard against regression:** add a short note to `ARCHITECTURE.md` — *"list endpoints cap `page_size` at 100; never treat a single page as the full set. Aggregate server-side instead."*
 
 **Verify:** seed >100 attendance rows for one day, confirm the tile matches a direct DB count. Confirm the Kitchen dashboard now issues 1 attendance request, not 9 (browser network panel).
 

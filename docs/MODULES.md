@@ -1,6 +1,6 @@
 # Module Reference: Guests, Attendants, Members, Bookings, Billing, Clerk Desk, Attendance, Kitchen, Mess Billing
 
-Technical reference for these 9 modules — what each contains, its workflow, and how it connects to the others. For general architecture (stack, auth, RBAC, audit logging) see `CLAUDE.md` at the repo root. This doc is implementation-level (models, endpoints, FKs), not product-level — for the pitch/problem-statement framing see `docs/PROJECT_DOCUMENT.md`.
+Technical reference for these 9 modules — what each contains, its workflow, and how it connects to the others. For general architecture (stack, auth, RBAC, audit logging) see `ARCHITECTURE.md` at the repo root. This doc is implementation-level (models, endpoints, FKs), not product-level — for the pitch/problem-statement framing see `docs/PROJECT_DOCUMENT.md`.
 
 ## Guests
 **Models**: `Guest` (id, full_name, phone, id_type, id_number, unit_address) — pure identity dedup, no billing fields.

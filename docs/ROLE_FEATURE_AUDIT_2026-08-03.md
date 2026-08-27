@@ -58,7 +58,7 @@ Any authenticated user — including a Security Guard, whose entire grant is `se
 
 ### 🔴 1.3 Wider pattern: financial and PII reads are login-only across five routers
 
-The project's own standard (CLAUDE.md) is that reads carrying PII or financial data must be permission-gated. These aren't:
+The project's own standard (ARCHITECTURE.md) is that reads carrying PII or financial data must be permission-gated. These aren't:
 
 | Router | Endpoints | Data |
 |---|---|---|
@@ -122,9 +122,9 @@ No built-in role reaches this board today (Booking NCO is bounced to `/bookings`
 
 Not imported anywhere. Same class of leftover that produced the `/inventory` dead links in the last audit.
 
-### 🟡 1.12 CLAUDE.md is stale and will mislead contributors
+### 🟡 1.12 ARCHITECTURE.md is stale and will mislead contributors
 
-It documents routers `recipes` and `menu_prices` and services `kitchen_deduction.py`, `recipe_costing.py`, `unit_conversion.py` — **none of which exist**. It omits `directives`, `rate_card`, and `mess_charge_calc.py`. Since CLAUDE.md is the file agents and new contributors read first, this actively misdirects.
+It documents routers `recipes` and `menu_prices` and services `kitchen_deduction.py`, `recipe_costing.py`, `unit_conversion.py` — **none of which exist**. It omits `directives`, `rate_card`, and `mess_charge_calc.py`. Since ARCHITECTURE.md is the file agents and new contributors read first, this actively misdirects.
 
 ---
 
@@ -241,7 +241,7 @@ Where SAM should **not** copy hotel software — worth stating so it isn't "fixe
 | 1.5 | Grant `procurement:edit` or delete the endpoint | Trivial |
 | 1.8 | Route permission wrapper + 403 page | Medium |
 | 1.9 | Replace 4 × `prompt()` with `ConfirmDialog` | Small |
-| 1.11, 1.12 | Delete `Home.tsx`; refresh CLAUDE.md | Trivial |
+| 1.11, 1.12 | Delete `Home.tsx`; refresh ARCHITECTURE.md | Trivial |
 
 **Then (role gaps, ordered by value/effort):**
 

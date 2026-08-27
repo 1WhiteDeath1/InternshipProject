@@ -37,12 +37,15 @@ backend/uploads
 .env
 packaging/prod.env
 
-# Claude Code local (machine-specific) settings
-.claude/settings.local.json
+# Local editor/tooling settings (machine-specific)
+.claude/
 
 # Windows installer build output (rebuild via packaging/build.ps1)
 packaging/_build
 packaging/output
 
-# graphify knowledge-graph output (dev tool, regenerate via /graphify)
+# Local knowledge-graph output (dev tool)
 graphify-out
+
+# Local tooling entrypoint (contents live in ARCHITECTURE.md)
+CLAUDE.md
