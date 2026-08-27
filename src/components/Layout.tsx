@@ -44,7 +44,7 @@ const quickActionDefs: {
   { key: 'attendant', label: 'Add Attendant', icon: UserCircle2, match: p => p.startsWith('/attendants'), permission: { module: 'attendants', action: 'create' } },
   { key: 'member', label: 'Add Member', icon: IdCard, match: p => p.startsWith('/members') },
   { key: 'incident', label: 'Report Incident', icon: ShieldAlert, match: p => p.startsWith('/security') },
-  { key: 'alacarte', label: 'New À La Carte', icon: OrderIcon, match: p => p.startsWith('/kitchen') },
+  { key: 'alacarte', label: 'Special Order', icon: OrderIcon, match: p => p.startsWith('/kitchen') },
   { key: 'generate', label: 'Generate Bills', icon: RefreshCw, match: p => p.startsWith('/mess-billing') },
 ];
 
@@ -215,7 +215,7 @@ export default function Layout() {
     attendant: () => setQuickAttendantOpen(true),
     member: () => setQuickMemberOpen(true),
     incident: () => setQuickIncidentOpen(true),
-    alacarte: () => navigate('/kitchen', { state: { openAlaCarte: true } }),
+    alacarte: () => navigate('/kitchen', { state: { openSpecialOrder: true } }),
     generate: () => navigate('/mess-billing', { state: { autoGenerate: true } }),
   };
   const activeQuickActions = quickActionDefs.filter(a =>

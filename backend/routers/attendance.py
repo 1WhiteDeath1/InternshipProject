@@ -19,50 +19,17 @@ from backend.auth import get_current_user, check_permission, PermissionChecker
 from backend.audit import log_audit, serialize_model, AuditAction
 from backend.logging_config import get_logger
 from backend.services.mess_billing_calc import get_man_days, get_setting_float, get_setting_str
+from backend.services.meal_cutoff import MEAL_TIMES, get_meal_cutoff_time, is_locked
 
 logger = get_logger("app")
 router = APIRouter(dependencies=[Depends(PermissionChecker("attendance", "view"))])
 
-# Fixed meal times for Tier 1 - not per-mess-configurable, just used as a
-# fallback reference. The actual booking cutoff is the settable
-# meal_cutoff_<type> SystemSetting (see _get_meal_cutoff_time) - an absolute
-# clock time per meal, editable on the Settings page, after which that
-# meal's attendance for the day is final.
-MEAL_TIMES = {
-    "breakfast": time(7, 0),
-    "lunch": time(13, 0),
-    "hitea": time(16, 30),
-    "dinner": time(20, 0),
-}
-
-_DEFAULT_CUTOFFS = {
-    "breakfast": time(9, 0),
-    "lunch": time(14, 30),
-    "hitea": time(17, 30),
-    "dinner": time(21, 30),
-}
-
-
-def _get_meal_cutoff_time(db: Session, meal_type: str) -> time:
-    default = _DEFAULT_CUTOFFS.get(meal_type, time(23, 59))
-    raw = get_setting_str(db, f"meal_cutoff_{meal_type}", default.strftime("%H:%M"))
-    try:
-        hh, mm = raw.split(":")
-        return time(int(hh), int(mm))
-    except (ValueError, TypeError):
-        return default
-
-
-def _is_locked(meal_date: date, cutoff_time: time) -> bool:
-    """A meal is final (locked) for any date that's already fully elapsed,
-    or for today once the clock passes its settable cutoff time. A future
-    date is never locked - its cutoff simply hasn't arrived yet."""
-    today = date.today()
-    if meal_date < today:
-        return True
-    if meal_date > today:
-        return False
-    return datetime.utcnow() > datetime.combine(meal_date, cutoff_time)
+# Cutoff/lock rules moved to services/meal_cutoff.py so Kitchen's merged Meals
+# board can show the same lock state this router enforces, without a
+# router-to-router import. Aliased to the original private names here so the
+# call sites throughout this file stay unchanged.
+_get_meal_cutoff_time = get_meal_cutoff_time
+_is_locked = is_locked
 
 
 def _has_active_leave(db: Session, member_id: int, on_date: date) -> bool:
@@ -384,7 +351,11 @@ async def assign_menu_item(data: AttendanceItemAssign, request: Request, db: Ses
     if _is_locked(data.date, cutoff):
         raise HTTPException(status_code=400, detail=f"Attendance for {data.meal_type} on {data.date} is final - booking closed at {cutoff.strftime('%H:%M')}")
 
-    desired = {(e.kind, e.id) for e in data.entries if e.kind in ("member", "booking")}
+    # Standalone walk-in guests (guest_id) count here too, not just members and
+    # checked-in bookings: they can be added to a meal by the omnibar and so
+    # can be assigned a dish. Leaving them out silently CLEARED them below,
+    # since their key never appeared in `desired`.
+    desired = {(e.kind, e.id) for e in data.entries if e.kind in ("member", "booking", "guest")}
 
     currently_assigned = db.query(MealAttendance).filter(
         MealAttendance.date == data.date, MealAttendance.meal_type == data.meal_type,
@@ -392,7 +363,9 @@ async def assign_menu_item(data: AttendanceItemAssign, request: Request, db: Ses
     ).all()
     cleared = 0
     for record in currently_assigned:
-        key = ("member", record.member_id) if record.member_id else ("booking", record.booking_id)
+        key = (("member", record.member_id) if record.member_id
+               else ("booking", record.booking_id) if record.booking_id
+               else ("guest", record.guest_id))
         if key not in desired:
             before = serialize_model(record)
             record.menu_item_id = None
@@ -403,11 +376,17 @@ async def assign_menu_item(data: AttendanceItemAssign, request: Request, db: Ses
     assigned, created = 0, 0
     for kind, id_ in desired:
         query = db.query(MealAttendance).filter(MealAttendance.date == data.date, MealAttendance.meal_type == data.meal_type)
-        query = query.filter(MealAttendance.member_id == id_) if kind == "member" else query.filter(MealAttendance.booking_id == id_)
+        if kind == "member":
+            query = query.filter(MealAttendance.member_id == id_)
+        elif kind == "booking":
+            query = query.filter(MealAttendance.booking_id == id_)
+        else:
+            query = query.filter(MealAttendance.guest_id == id_)
         record = query.first()
         if record is None:
             _create_attendance(db, id_ if kind == "member" else None, id_ if kind == "booking" else None,
-                                data.date, data.meal_type, "manual", menu_item_id=data.menu_item_id)
+                                data.date, data.meal_type, "manual", menu_item_id=data.menu_item_id,
+                                guest_id=id_ if kind == "guest" else None)
             created += 1
         else:
             before = serialize_model(record)

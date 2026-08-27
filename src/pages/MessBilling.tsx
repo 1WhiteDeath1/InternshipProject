@@ -82,7 +82,11 @@ export default function MessBilling() {
 
   const fetchBills = async () => {
     try {
-      const res = await api.get(`/mess-billing/bills?month=${month}&year=${year}`);
+      // page_size matters here: the Total Billed / Collected / Outstanding
+      // figures below are summed from this array client-side, so the backend's
+      // default of 25 silently reported wrong money totals for any period with
+      // more than 25 members. 100 is the server-side cap.
+      const res = await api.get(`/mess-billing/bills?month=${month}&year=${year}&page_size=100`);
       setBills(res.data.items);
     } catch { toast.error('Failed to load mess bills'); }
   };

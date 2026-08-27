@@ -108,7 +108,7 @@ class AttendanceMatrixSave(BaseModel):
     _check_meal_type = field_validator("meal_type")(_ensure_meal_type)
 
 class AttendanceItemAssignEntry(BaseModel):
-    kind: str  # "member" | "booking"
+    kind: str  # "member" | "booking" | "guest"
     id: int
 
 class AttendanceItemAssign(BaseModel):

@@ -124,20 +124,30 @@ async def list_bills(
 
 @router.get("/bills/outstanding-summary")
 async def outstanding_bills_summary(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    """Draft/issued mess-bill counts and the issued total, computed
+    """Draft/unsettled mess-bill counts and the amount still owed, computed
     server-side via GROUP BY - the Clerk dashboard's Outstanding figure
     previously summed a page_size=100 fetch of list_bills() client-side and
-    silently under-reported once bills-not-yet-paid crossed 100 rows."""
+    silently under-reported once bills-not-yet-paid crossed 100 rows.
+
+    PARTIALLY_PAID counts as unsettled alongside ISSUED: a bill with a part
+    payment against it still has money to collect, but matched neither branch
+    before and so disappeared from both the Outstanding total and the
+    pending-action count entirely.
+
+    The total is what's actually still owed - total + carried-forward balance
+    - already paid - matching how record_mess_bill_payment computes payable,
+    rather than the gross bill amount."""
+    owed = MessBill.total_amount + func.coalesce(MessBill.last_debit_balance, 0) - func.coalesce(MessBill.amount_paid, 0)
     rows = db.query(
-        MessBill.status, func.count(MessBill.id), func.coalesce(func.sum(MessBill.total_amount), 0),
+        MessBill.status, func.count(MessBill.id), func.coalesce(func.sum(owed), 0),
     ).group_by(MessBill.status).all()
     out = {"draft_count": 0, "issued_count": 0, "issued_total": 0.0}
     for status_, count, total in rows:
         if status_ == MessBillStatus.DRAFT:
             out["draft_count"] = count
-        elif status_ == MessBillStatus.ISSUED:
-            out["issued_count"] = count
-            out["issued_total"] = float(total)
+        elif status_ in (MessBillStatus.ISSUED, MessBillStatus.PARTIALLY_PAID):
+            out["issued_count"] += count
+            out["issued_total"] += float(total)
     return out
 
 

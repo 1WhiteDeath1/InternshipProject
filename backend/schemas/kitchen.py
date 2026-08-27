@@ -2,7 +2,7 @@
 kitchen production orders, the gas charge rate, and the mess-charges
 overview/order-history views."""
 from datetime import datetime, date
-from typing import Optional
+from typing import List, Optional
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 
@@ -109,6 +109,21 @@ class DishPricingSet(BaseModel):
     menu_item_id: int
     price_override: Optional[float] = Field(None, ge=0)
     gas_amount: Optional[float] = Field(None, ge=0)
+
+
+class MealBoardPerson(BaseModel):
+    kind: str  # "member" | "booking" | "guest"
+    id: int
+
+
+class CopyLastMealRequest(BaseModel):
+    """Body for POST /kitchen/meal-board/copy-last. `entries` is who's present
+    for this meal, sent by the board rather than re-derived server-side - a
+    dining member is present by default with no stored attendance row, so the
+    caller's roster is the only complete picture (see the endpoint docstring)."""
+    date: date
+    meal_type: str
+    entries: List[MealBoardPerson]
 
 
 class GasChargeRateOut(BaseModel):

@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Package, BedDouble, Receipt,
   Shield, Users, UserCog, ClipboardList, Bell, BarChart3,
-  Settings, FileUp, IdCard, UtensilsCrossed, Wallet, ChefHat, LayoutGrid, Contact, UserCircle2,
+  Settings, FileUp, IdCard, Wallet, ChefHat, LayoutGrid, Contact, UserCircle2,
   TrendingUp, CalendarDays, MessageSquare, Scale, Banknote, Landmark,
 } from 'lucide-react';
 
@@ -70,7 +70,9 @@ export const navItems: NavItem[] = [
   // --- Kitchen & stock operations (Kitchen NCO) ---
   { path: '/kitchen', label: 'Kitchen', icon: ChefHat, feature: 'kitchen_module', requiredPermission: { module: 'kitchen', action: 'view' }, group: 'Kitchen & Stock' },
   { path: '/stock', label: 'Inventory & Procurement', icon: Package, feature: null, requiredPermission: { module: 'inventory', action: 'view' }, group: 'Kitchen & Stock' },
-  { path: '/attendance', label: 'Attendance', icon: UtensilsCrossed, feature: 'mess_attendance', requiredPermission: { module: 'attendance', action: 'view' }, group: 'Kitchen & Stock' },
+  // No separate Attendance entry: marking who's eating and cooking for them
+  // is one task, so it lives on Kitchen's Meals board. /attendance redirects
+  // there (see App.tsx).
 
   // --- Front desk & roster (Booking NCO, then shared roster modules) ---
   { path: '/bookings', label: 'Bookings', icon: BedDouble, feature: null, requiredPermission: { module: 'bookings', action: 'view' }, group: 'Bookings & Roster' },

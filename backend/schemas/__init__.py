@@ -26,6 +26,7 @@ from backend.schemas.inventory import (
 from backend.schemas.kitchen import (
     MenuItemOut, MenuItemProposal, MenuItemEditRequestOut, EditRequestReject,
     KitchenOrderCreate, KitchenOrderOut, KitchenOrderPrepareRequest, DishPricingSet,
+    MealBoardPerson, CopyLastMealRequest,
     GasChargeRateOut, GasChargeRateUpdate, GasChargeRateHistoryOut, MessChargeOverviewRow, OrderHistoryRow,
 )
 from backend.schemas.procurement import (
@@ -98,6 +99,7 @@ __all__ = [
     "StockIntakeCreate", "ReceiptConfirmLine", "ReceiptConfirmRequest",
     "MenuItemOut", "MenuItemProposal", "MenuItemEditRequestOut", "EditRequestReject",
     "KitchenOrderCreate", "KitchenOrderOut", "KitchenOrderPrepareRequest", "DishPricingSet",
+    "MealBoardPerson", "CopyLastMealRequest",
     "GasChargeRateOut", "GasChargeRateUpdate", "GasChargeRateHistoryOut", "MessChargeOverviewRow", "OrderHistoryRow",
     "VendorBase", "VendorCreate", "VendorUpdate", "VendorOut",
     "AttendantBase", "AttendantCreate", "AttendantUpdate", "AttendantOut", "AttendantDuty",

@@ -26,7 +26,6 @@ import Attendants from '@/pages/Attendants';
 import Tariffs from '@/pages/Tariffs';
 import Members from '@/pages/Members';
 import MemberLedger from '@/pages/MemberLedger';
-import Attendance from '@/pages/Attendance';
 import MessBilling from '@/pages/MessBilling';
 import Kitchen from '@/pages/Kitchen';
 import Security from '@/pages/Security';
@@ -71,7 +70,10 @@ function App() {
                 <Route path="/tariffs" element={<RequirePermission item={navItemByPath('/tariffs')}><Tariffs /></RequirePermission>} />
                 <Route path="/members" element={<RequirePermission item={navItemByPath('/members')}><Members /></RequirePermission>} />
                 <Route path="/members/:id" element={<RequirePermission item={navItemByPath('/members')}><MemberLedger /></RequirePermission>} />
-                <Route path="/attendance" element={<RequirePermission item={navItemByPath('/attendance')}><Attendance /></RequirePermission>} />
+                {/* Attendance merged into Kitchen's Meals board - kept as a
+                    redirect so old links, bookmarks and the Dashboard tile
+                    still land somewhere useful. */}
+                <Route path="/attendance" element={<Navigate to="/kitchen" replace />} />
                 <Route path="/mess-billing" element={<RequirePermission item={navItemByPath('/mess-billing')}><MessBilling /></RequirePermission>} />
                 <Route path="/kitchen" element={<RequirePermission item={navItemByPath('/kitchen')}><Kitchen /></RequirePermission>} />
                 <Route path="/security" element={<RequirePermission item={navItemByPath('/security')}><Security /></RequirePermission>} />

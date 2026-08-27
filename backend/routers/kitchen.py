@@ -15,15 +15,16 @@ from backend.models import (
     KitchenOrder, MenuItem, MenuItemEditRequest, GasChargeRate, GasChargeRateHistory,
     MealAttendance, Member, MemberStatus, Booking, AlertSeverity, EditRequestStatus, FeatureFlag,
 )
-from backend.models.enums import MealType
+from backend.models.enums import MealType, AttendanceStatus
 from backend.schemas import (
-    KitchenOrderCreate, KitchenOrderPrepareRequest, DishPricingSet,
+    KitchenOrderCreate, KitchenOrderPrepareRequest, DishPricingSet, CopyLastMealRequest,
     MenuItemProposal, EditRequestReject, GasChargeRateUpdate,
 )
 from backend.auth import get_current_user, check_permission, PermissionChecker
 from backend.audit import log_audit, serialize_model, AuditAction
 from backend.logging_config import get_logger
 from backend.services.mess_billing_calc import get_setting_float
+from backend.services.meal_cutoff import get_meal_cutoff_time, is_locked
 from backend.services.mess_charge_calc import (
     compute_unbilled_mess_total, compute_unbilled_gas_total, get_order_history, meal_multiplier_for_booking,
     get_member_gas_total,
@@ -83,6 +84,263 @@ def _aggregate_suggestions(db: Session, order_date: str, meal_type: str):
         MealAttendance.status.in_(["booked", "attended"]),
         MealAttendance.menu_item_id.isnot(None),
     ).group_by(MealAttendance.menu_item_id).all()
+
+
+def _attendance_person(row: MealAttendance) -> dict | None:
+    """Who this attendance row belongs to, shaped for the Meals board's
+    'who's eating this' list. Exactly one of member/booking/guest is set (see
+    MealAttendance's model docstring)."""
+    if row.member_id:
+        return {"kind": "member", "id": row.member_id,
+                "name": row.member.full_name if row.member else f"Member #{row.member_id}"}
+    if row.booking_id:
+        return {"kind": "booking", "id": row.booking_id,
+                "name": row.booking.guest_name if row.booking else f"Booking #{row.booking_id}"}
+    if row.guest_id:
+        return {"kind": "guest", "id": row.guest_id,
+                "name": row.guest.full_name if row.guest else f"Guest #{row.guest_id}"}
+    return None
+
+
+def _find_or_create_batch_order(db: Session, meal_date: date, meal_type: str, menu_item_id: int, current_user):
+    """The routine (non-ala-carte) batch order for one date+meal+dish, created
+    on demand if the Kitchen NCO never ran "Generate from bookings" for it -
+    the Meals board lets them cook or price a dish directly, so the order has
+    to be able to come into existence from either action. Returns
+    (order, before_state) where before_state is None for a fresh one, so the
+    caller can log the right audit action."""
+    order = db.query(KitchenOrder).filter(
+        KitchenOrder.is_ala_carte == False, KitchenOrder.meal_date == meal_date,
+        KitchenOrder.meal_type == meal_type, KitchenOrder.menu_item_id == menu_item_id,
+        KitchenOrder.status != "cancelled",
+    ).order_by(KitchenOrder.created_at.desc()).first()
+    if order is not None:
+        return order, serialize_model(order)
+
+    headcount = db.query(MealAttendance).filter(
+        MealAttendance.date == meal_date, MealAttendance.meal_type == meal_type,
+        MealAttendance.menu_item_id == menu_item_id, MealAttendance.status.in_(["booked", "attended"]),
+    ).count()
+    order = KitchenOrder(
+        menu_item_id=menu_item_id, quantity_ordered=max(headcount, 1), status="pending",
+        meal_date=meal_date, meal_type=meal_type, source="manual", ordered_by=current_user.id,
+    )
+    db.add(order)
+    return order, None
+
+
+@router.post("/meal-board/dish-cooked")
+async def mark_dish_cooked(data: DishPricingSet, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """One-tap "this dish is done" from the Meals board. Routine batch dishes
+    are a two-state flow (pending -> served; the 'prepared' state only exists
+    for the older cook/serve pair), so this is the single bump a dish needs.
+
+    Reuses DishPricingSet purely for its date+meal_type+menu_item_id shape -
+    the price/gas fields are ignored here. Creates the batch order first if
+    the NCO never generated one, so a dish can be cooked straight off the
+    board without a separate "Generate from bookings" step."""
+    if not check_permission(current_user, "kitchen", "edit"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    try:
+        MealType(data.meal_type)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid meal_type '{data.meal_type}'")
+    if not db.query(MenuItem).filter(MenuItem.id == data.menu_item_id).first():
+        raise HTTPException(status_code=404, detail="Menu item not found")
+
+    order, before = _find_or_create_batch_order(db, data.date, data.meal_type, data.menu_item_id, current_user)
+    order.status = "served"
+    db.commit()
+    db.refresh(order)
+    log_audit(db, current_user.id, current_user.full_name,
+              AuditAction.UPDATE if before else AuditAction.CREATE, "kitchen_orders", order.id,
+              before_state=before, after_state=serialize_model(order),
+              reason="Marked cooked from the Meals board", ip_address=request.client.host)
+    return {"id": order.id, "status": order.status}
+
+
+@router.get("/meal-board")
+async def meal_board(
+    order_date: str = Query(..., alias="date"), meal_type: str = Query(...),
+    db: Session = Depends(get_db), current_user=Depends(get_current_user),
+):
+    """Everything the merged Meals board needs for one date+meal in one call:
+    each dish with who's eating it and its production/pricing state, the
+    special (off-menu) orders running alongside, that day's actual menu, and
+    whether the booking cutoff has passed.
+
+    Deliberately does NOT re-derive the attendance roster - who's *present*
+    (including dining members present by default with no stored row) stays
+    attendance.py's /matrix, which the board fetches alongside this. This
+    endpoint only answers "what is being cooked, for whom"."""
+    if not check_permission(current_user, "kitchen", "view"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    try:
+        meal_date = date.fromisoformat(order_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be an ISO date (YYYY-MM-DD)")
+    try:
+        MealType(meal_type)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid meal_type '{meal_type}'")
+
+    # Everyone with a dish assigned for this meal, grouped by dish.
+    assigned_rows = db.query(MealAttendance).filter(
+        MealAttendance.date == meal_date, MealAttendance.meal_type == meal_type,
+        MealAttendance.status.in_(["booked", "attended"]),
+        MealAttendance.menu_item_id.isnot(None),
+    ).all()
+    eaters_by_dish: dict[int, list] = {}
+    for row in assigned_rows:
+        person = _attendance_person(row)
+        if person:
+            eaters_by_dish.setdefault(row.menu_item_id, []).append(person)
+
+    # Routine batch orders already raised for this meal, keyed by dish - this
+    # is where a dish's cook status and its price/gas override live.
+    orders = db.query(KitchenOrder).filter(
+        KitchenOrder.is_ala_carte == False, KitchenOrder.meal_date == meal_date,
+        KitchenOrder.meal_type == meal_type, KitchenOrder.status != "cancelled",
+    ).order_by(KitchenOrder.created_at.desc()).all()
+    order_by_dish = {}
+    for o in orders:
+        order_by_dish.setdefault(o.menu_item_id, o)
+
+    item_ids = set(eaters_by_dish) | set(order_by_dish)
+    items_by_id = {i.id: i for i in db.query(MenuItem).filter(MenuItem.id.in_(item_ids)).all()} if item_ids else {}
+
+    dishes = []
+    for item_id in item_ids:
+        item = items_by_id.get(item_id)
+        o = order_by_dish.get(item_id)
+        eaters = eaters_by_dish.get(item_id, [])
+        dishes.append({
+            "menu_item_id": item_id,
+            "name": item.name if item else f"Item #{item_id}",
+            "menu_price": float(item.price) if item else 0.0,
+            "headcount": len(eaters),
+            "eaters": sorted(eaters, key=lambda p: p["name"]),
+            "order_id": o.id if o else None,
+            "status": o.status if o else None,
+            "quantity_ordered": o.quantity_ordered if o else None,
+            "price_override": float(o.price_override) if o and o.price_override is not None else None,
+            "gas_amount": float(o.gas_amount) if o and o.gas_amount is not None else None,
+        })
+    dishes.sort(key=lambda d: (-d["headcount"], d["name"]))
+
+    # Special (off-menu) orders - the same KitchenOrder.is_ala_carte records,
+    # surfaced on this board instead of a separate queue.
+    special = db.query(KitchenOrder).filter(
+        KitchenOrder.is_ala_carte == True, KitchenOrder.status != "cancelled",
+    ).order_by(KitchenOrder.created_at.desc()).all()
+    for o in special:
+        _recompute_ala_carte_status(db, o)
+    special_out = [{
+        "id": o.id, "menu_item_id": o.menu_item_id,
+        "name": o.menu_item.name if o.menu_item else f"Item #{o.menu_item_id}",
+        "consumer_name": _consumer_name(o), "quantity_ordered": o.quantity_ordered,
+        "status": o.status, "due_at": o.due_at, "cooking_started_at": o.cooking_started_at,
+    } for o in special]
+
+    weekday = meal_date.strftime("%A").lower()
+    menu_options = db.query(MenuItem).filter(
+        MenuItem.is_active == True, MenuItem.meal_type == _parse_meal_type(meal_type),
+        or_(MenuItem.day_of_week.is_(None), MenuItem.day_of_week == weekday),
+    ).order_by(MenuItem.name).all()
+
+    cutoff = get_meal_cutoff_time(db, meal_type)
+    return {
+        "date": meal_date, "meal_type": meal_type,
+        "locked": is_locked(meal_date, cutoff), "cutoff": cutoff.strftime("%H:%M"),
+        "dishes": dishes,
+        "special_orders": special_out,
+        "menu_options": [{"id": m.id, "name": m.name, "price": float(m.price)} for m in menu_options],
+    }
+
+
+@router.post("/meal-board/copy-last")
+async def copy_last_meal(data: CopyLastMealRequest, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    """Roll the previous occurrence of this meal forward: everyone present
+    today who has no dish yet gets whatever they ate the last time this meal
+    ran. The institutional-catering default - the roster carries over and
+    staff only touch the exceptions - instead of rebuilding the same
+    assignment from scratch every service.
+
+    `entries` is who's present, supplied by the caller rather than re-derived
+    here: a dining member is present by DEFAULT with no stored row at all
+    (see attendance.py's _matrix_row), so a server-side "rows with no dish"
+    query would skip exactly the common case. The board already holds that
+    roster from /attendance/matrix, so it says who to fill.
+
+    Only ever fills blanks - a dish already chosen for today is never
+    overwritten, and nobody is marked present who wasn't already."""
+    if not check_permission(current_user, "attendance", "create"):
+        raise HTTPException(status_code=403, detail="Permission denied")
+    cutoff = get_meal_cutoff_time(db, data.meal_type)
+    if is_locked(data.date, cutoff):
+        raise HTTPException(status_code=400, detail=f"{data.meal_type} on {data.date} is final - booking closed at {cutoff.strftime('%H:%M')}")
+
+    # The most recent earlier day this meal actually had dishes assigned.
+    source_date = db.query(MealAttendance.date).filter(
+        MealAttendance.meal_type == data.meal_type, MealAttendance.date < data.date,
+        MealAttendance.menu_item_id.isnot(None),
+        MealAttendance.status.in_(["booked", "attended"]),
+    ).order_by(MealAttendance.date.desc()).limit(1).scalar()
+    if source_date is None:
+        return {"filled": 0, "source_date": None}
+
+    def key_of(member_id, booking_id, guest_id):
+        if member_id:
+            return ("member", member_id)
+        if booking_id:
+            return ("booking", booking_id)
+        return ("guest", guest_id)
+
+    dish_for = {
+        key_of(r.member_id, r.booking_id, r.guest_id): r.menu_item_id
+        for r in db.query(MealAttendance).filter(
+            MealAttendance.date == source_date, MealAttendance.meal_type == data.meal_type,
+            MealAttendance.menu_item_id.isnot(None),
+        ).all()
+    }
+
+    existing = {
+        key_of(r.member_id, r.booking_id, r.guest_id): r
+        for r in db.query(MealAttendance).filter(
+            MealAttendance.date == data.date, MealAttendance.meal_type == data.meal_type,
+        ).all()
+    }
+
+    filled = 0
+    for entry in data.entries:
+        if entry.kind not in ("member", "booking", "guest"):
+            continue
+        key = (entry.kind, entry.id)
+        dish = dish_for.get(key)
+        if dish is None:
+            continue
+        row = existing.get(key)
+        if row is None:
+            row = MealAttendance(
+                member_id=entry.id if entry.kind == "member" else None,
+                booking_id=entry.id if entry.kind == "booking" else None,
+                guest_id=entry.id if entry.kind == "guest" else None,
+                date=data.date, meal_type=data.meal_type, method="manual",
+                menu_item_id=dish,
+            )
+            db.add(row)
+            filled += 1
+        elif row.menu_item_id is None and row.status in (AttendanceStatus.BOOKED, AttendanceStatus.ATTENDED):
+            row.menu_item_id = dish
+            filled += 1
+
+    if filled:
+        db.commit()
+        log_audit(db, current_user.id, current_user.full_name, AuditAction.UPDATE, "meal_attendance", None,
+                  after_state={"date": str(data.date), "meal_type": data.meal_type, "copied_from": str(source_date), "filled": filled},
+                  reason="Copied dish assignments from the previous meal",
+                  ip_address=request.client.host)
+    return {"filled": filled, "source_date": source_date}
 
 
 @router.get("/orders")
@@ -406,23 +664,7 @@ async def set_dish_pricing(data: DishPricingSet, request: Request, db: Session =
     if not db.query(MenuItem).filter(MenuItem.id == data.menu_item_id).first():
         raise HTTPException(status_code=404, detail="Menu item not found")
 
-    order = db.query(KitchenOrder).filter(
-        KitchenOrder.is_ala_carte == False, KitchenOrder.meal_date == data.date,
-        KitchenOrder.meal_type == data.meal_type, KitchenOrder.menu_item_id == data.menu_item_id,
-        KitchenOrder.status != "cancelled",
-    ).order_by(KitchenOrder.created_at.desc()).first()
-
-    before = serialize_model(order) if order else None
-    if order is None:
-        headcount = db.query(MealAttendance).filter(
-            MealAttendance.date == data.date, MealAttendance.meal_type == data.meal_type,
-            MealAttendance.menu_item_id == data.menu_item_id, MealAttendance.status.in_(["booked", "attended"]),
-        ).count()
-        order = KitchenOrder(
-            menu_item_id=data.menu_item_id, quantity_ordered=max(headcount, 1), status="pending",
-            meal_date=data.date, meal_type=data.meal_type, source="manual", ordered_by=current_user.id,
-        )
-        db.add(order)
+    order, before = _find_or_create_batch_order(db, data.date, data.meal_type, data.menu_item_id, current_user)
 
     order.price_override = data.price_override
     order.gas_amount = data.gas_amount
@@ -467,13 +709,25 @@ def _parse_meal_type(value: str) -> MealType:
 
 
 @router.get("/menu")
-async def list_menu_items(meal_type: str = "", db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+async def list_menu_items(meal_type: str = "", for_date: str = Query("", alias="date"),
+                          db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """Open to any authenticated user - Billing/Attendance need to read
     prices/items without operating the Kitchen module (same as the old
-    menu_prices GET)."""
+    menu_prices GET).
+
+    `date` narrows to what's actually on the menu that day: items pinned to
+    that weekday plus everyday (day_of_week NULL) items. Without it a single
+    meal slot returns the whole week's items at once (~27 for Lunch), which
+    is unusable as a dish picker."""
     query = db.query(MenuItem).filter(MenuItem.is_active == True)
     if meal_type:
         query = query.filter(MenuItem.meal_type == _parse_meal_type(meal_type))
+    if for_date:
+        try:
+            weekday = date.fromisoformat(for_date).strftime("%A").lower()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="date must be an ISO date (YYYY-MM-DD)")
+        query = query.filter(or_(MenuItem.day_of_week.is_(None), MenuItem.day_of_week == weekday))
     items = query.order_by(MenuItem.day_of_week, MenuItem.name).all()
     return [{"id": i.id, "name": i.name, "meal_type": i.meal_type.value, "day_of_week": i.day_of_week,
              "price": float(i.price), "is_active": i.is_active} for i in items]

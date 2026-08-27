@@ -57,7 +57,9 @@ export default function Billing() {
 
   const fetchInvoices = async () => {
     try {
-      const res = await api.get(`/billing/invoices?search=${encodeURIComponent(search)}&bill_type=${billTypeFilter}`);
+      // Without page_size this took the backend default of 25, so older
+      // invoices were simply invisible with no pagination control to reach them.
+      const res = await api.get(`/billing/invoices?search=${encodeURIComponent(search)}&bill_type=${billTypeFilter}&page_size=100`);
       setInvoices(res.data.items);
     } catch { toast.error('Failed to load invoices'); }
   };
